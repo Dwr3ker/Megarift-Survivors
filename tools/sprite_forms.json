@@ -1,0 +1,374 @@
+[
+ {
+  "dex": 6,
+  "spriteCollab": "0001",
+  "name": "Mega Charizard X",
+  "kind": "mega"
+ },
+ {
+  "dex": 65,
+  "spriteCollab": "0001",
+  "name": "Mega Alakazam",
+  "kind": "mega"
+ },
+ {
+  "dex": 80,
+  "spriteCollab": "0002",
+  "name": "Mega Slowbro",
+  "kind": "mega"
+ },
+ {
+  "dex": 94,
+  "spriteCollab": "0001",
+  "name": "Mega Gengar",
+  "kind": "mega"
+ },
+ {
+  "dex": 115,
+  "spriteCollab": "0001",
+  "name": "Mega Kangaskhan",
+  "kind": "mega"
+ },
+ {
+  "dex": 142,
+  "spriteCollab": "0001",
+  "name": "Mega Aerodactyl",
+  "kind": "mega"
+ },
+ {
+  "dex": 150,
+  "spriteCollab": "0002",
+  "name": "Mega Mewtwo Y",
+  "kind": "mega"
+ },
+ {
+  "dex": 208,
+  "spriteCollab": "0001",
+  "name": "Mega Steelix",
+  "kind": "mega"
+ },
+ {
+  "dex": 227,
+  "spriteCollab": "0001",
+  "name": "Mega Skarmory",
+  "kind": "mega"
+ },
+ {
+  "dex": 229,
+  "spriteCollab": "0001",
+  "name": "Mega Houndoom",
+  "kind": "mega"
+ },
+ {
+  "dex": 248,
+  "spriteCollab": "0001",
+  "name": "Mega Tyranitar",
+  "kind": "mega"
+ },
+ {
+  "dex": 282,
+  "spriteCollab": "0001",
+  "name": "Mega Gardevoir",
+  "kind": "mega"
+ },
+ {
+  "dex": 302,
+  "spriteCollab": "0001",
+  "name": "Mega Sableye",
+  "kind": "mega"
+ },
+ {
+  "dex": 303,
+  "spriteCollab": "0001",
+  "name": "Mega Mawile",
+  "kind": "mega"
+ },
+ {
+  "dex": 308,
+  "spriteCollab": "0001",
+  "name": "Mega Medicham",
+  "kind": "mega"
+ },
+ {
+  "dex": 310,
+  "spriteCollab": "0001",
+  "name": "Mega Manectric",
+  "kind": "mega"
+ },
+ {
+  "dex": 323,
+  "spriteCollab": "0001",
+  "name": "Mega Camerupt",
+  "kind": "mega"
+ },
+ {
+  "dex": 334,
+  "spriteCollab": "0001",
+  "name": "Mega Altaria",
+  "kind": "mega"
+ },
+ {
+  "dex": 354,
+  "spriteCollab": "0001",
+  "name": "Mega Banette",
+  "kind": "mega"
+ },
+ {
+  "dex": 359,
+  "spriteCollab": "0001",
+  "name": "Mega Absol",
+  "kind": "mega"
+ },
+ {
+  "dex": 362,
+  "spriteCollab": "0001",
+  "name": "Mega Glalie",
+  "kind": "mega"
+ },
+ {
+  "dex": 380,
+  "spriteCollab": "0001",
+  "name": "Mega Latias",
+  "kind": "mega"
+ },
+ {
+  "dex": 381,
+  "spriteCollab": "0001",
+  "name": "Mega Latios",
+  "kind": "mega"
+ },
+ {
+  "dex": 382,
+  "spriteCollab": "0001",
+  "name": "Primal Kyogre",
+  "kind": "primal"
+ },
+ {
+  "dex": 383,
+  "spriteCollab": "0001",
+  "name": "Primal Groudon",
+  "kind": "primal"
+ },
+ {
+  "dex": 384,
+  "spriteCollab": "0001",
+  "name": "Mega Rayquaza",
+  "kind": "mega"
+ },
+ {
+  "dex": 428,
+  "spriteCollab": "0001",
+  "name": "Mega Lopunny",
+  "kind": "mega"
+ },
+ {
+  "dex": 448,
+  "spriteCollab": "0001",
+  "name": "Mega Lucario",
+  "kind": "mega"
+ },
+ {
+  "dex": 475,
+  "spriteCollab": "0001",
+  "name": "Mega Gallade",
+  "kind": "mega"
+ },
+ {
+  "dex": 491,
+  "spriteCollab": "0002",
+  "name": "Mega Darkrai",
+  "kind": "mega"
+ },
+ {
+  "dex": 530,
+  "spriteCollab": "0001",
+  "name": "Mega Excadrill",
+  "kind": "mega"
+ },
+ {
+  "dex": 604,
+  "spriteCollab": "0001",
+  "name": "Mega Eelektross",
+  "kind": "mega"
+ },
+ {
+  "dex": 670,
+  "spriteCollab": "0006",
+  "name": "Mega Floette",
+  "kind": "mega"
+ },
+ {
+  "dex": 691,
+  "spriteCollab": "0001",
+  "name": "Mega Dragalge",
+  "kind": "mega"
+ },
+ {
+  "dex": 718,
+  "spriteCollab": "0005",
+  "name": "Mega Zygarde",
+  "kind": "mega"
+ },
+ {
+  "dex": 719,
+  "spriteCollab": "0001",
+  "name": "Mega Diancie",
+  "kind": "mega"
+ },
+ {
+  "dex": 780,
+  "spriteCollab": "0001",
+  "name": "Mega Drampa",
+  "kind": "mega"
+ },
+ {
+  "dex": 807,
+  "spriteCollab": "0001",
+  "name": "Mega Zeraora",
+  "kind": "mega"
+ },
+ {
+  "dex": 888,
+  "spriteCollab": "0001",
+  "name": "Crowned Sword Zacian",
+  "kind": "crowned"
+ },
+ {
+  "dex": 889,
+  "spriteCollab": "0001",
+  "name": "Crowned Shield Zamazenta",
+  "kind": "crowned"
+ },
+ {
+  "dex": 978,
+  "spriteCollab": "0003",
+  "name": "Mega Tatsugiri",
+  "kind": "mega"
+ },
+ {
+  "dex": 386,
+  "spriteCollab": "0001",
+  "name": "Deoxys (Attack Forme)",
+  "kind": "forme"
+ },
+ {
+  "dex": 386,
+  "spriteCollab": "0002",
+  "name": "Deoxys (Defense Forme)",
+  "kind": "forme"
+ },
+ {
+  "dex": 386,
+  "spriteCollab": "0003",
+  "name": "Deoxys (Speed Forme)",
+  "kind": "forme"
+ },
+ {
+  "dex": 890,
+  "spriteCollab": "0001",
+  "name": "Eternamax Eternatus",
+  "kind": "eternamax"
+ },
+ {
+  "dex": 493,
+  "spriteCollab": "0006",
+  "name": "Arceus (fire)",
+  "kind": "plate"
+ },
+ {
+  "dex": 493,
+  "spriteCollab": "0016",
+  "name": "Arceus (water)",
+  "kind": "plate"
+ },
+ {
+  "dex": 493,
+  "spriteCollab": "0009",
+  "name": "Arceus (grass)",
+  "kind": "plate"
+ },
+ {
+  "dex": 493,
+  "spriteCollab": "0004",
+  "name": "Arceus (electric)",
+  "kind": "plate"
+ },
+ {
+  "dex": 493,
+  "spriteCollab": "0011",
+  "name": "Arceus (ice)",
+  "kind": "plate"
+ },
+ {
+  "dex": 493,
+  "spriteCollab": "0005",
+  "name": "Arceus (fighting)",
+  "kind": "plate"
+ },
+ {
+  "dex": 493,
+  "spriteCollab": "0012",
+  "name": "Arceus (poison)",
+  "kind": "plate"
+ },
+ {
+  "dex": 493,
+  "spriteCollab": "0010",
+  "name": "Arceus (ground)",
+  "kind": "plate"
+ },
+ {
+  "dex": 493,
+  "spriteCollab": "0007",
+  "name": "Arceus (flying)",
+  "kind": "plate"
+ },
+ {
+  "dex": 493,
+  "spriteCollab": "0013",
+  "name": "Arceus (psychic)",
+  "kind": "plate"
+ },
+ {
+  "dex": 493,
+  "spriteCollab": "0001",
+  "name": "Arceus (bug)",
+  "kind": "plate"
+ },
+ {
+  "dex": 493,
+  "spriteCollab": "0014",
+  "name": "Arceus (rock)",
+  "kind": "plate"
+ },
+ {
+  "dex": 493,
+  "spriteCollab": "0008",
+  "name": "Arceus (ghost)",
+  "kind": "plate"
+ },
+ {
+  "dex": 493,
+  "spriteCollab": "0003",
+  "name": "Arceus (dragon)",
+  "kind": "plate"
+ },
+ {
+  "dex": 493,
+  "spriteCollab": "0002",
+  "name": "Arceus (dark)",
+  "kind": "plate"
+ },
+ {
+  "dex": 493,
+  "spriteCollab": "0015",
+  "name": "Arceus (steel)",
+  "kind": "plate"
+ },
+ {
+  "dex": 493,
+  "spriteCollab": "0017",
+  "name": "Arceus (fairy)",
+  "kind": "plate"
+ }
+]

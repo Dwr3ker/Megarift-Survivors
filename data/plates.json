@@ -1,0 +1,110 @@
+[
+ {
+  "id": "blank-plate",
+  "name": "Blank Plate",
+  "type": "normal",
+  "form": 493
+ },
+ {
+  "id": "flame-plate",
+  "name": "Flame Plate",
+  "type": "fire",
+  "form": 149306
+ },
+ {
+  "id": "splash-plate",
+  "name": "Splash Plate",
+  "type": "water",
+  "form": 149316
+ },
+ {
+  "id": "meadow-plate",
+  "name": "Meadow Plate",
+  "type": "grass",
+  "form": 149309
+ },
+ {
+  "id": "zap-plate",
+  "name": "Zap Plate",
+  "type": "electric",
+  "form": 149304
+ },
+ {
+  "id": "icicle-plate",
+  "name": "Icicle Plate",
+  "type": "ice",
+  "form": 149311
+ },
+ {
+  "id": "fist-plate",
+  "name": "Fist Plate",
+  "type": "fighting",
+  "form": 149305
+ },
+ {
+  "id": "toxic-plate",
+  "name": "Toxic Plate",
+  "type": "poison",
+  "form": 149312
+ },
+ {
+  "id": "earth-plate",
+  "name": "Earth Plate",
+  "type": "ground",
+  "form": 149310
+ },
+ {
+  "id": "sky-plate",
+  "name": "Sky Plate",
+  "type": "flying",
+  "form": 149307
+ },
+ {
+  "id": "mind-plate",
+  "name": "Mind Plate",
+  "type": "psychic",
+  "form": 149313
+ },
+ {
+  "id": "insect-plate",
+  "name": "Insect Plate",
+  "type": "bug",
+  "form": 149301
+ },
+ {
+  "id": "stone-plate",
+  "name": "Stone Plate",
+  "type": "rock",
+  "form": 149314
+ },
+ {
+  "id": "spooky-plate",
+  "name": "Spooky Plate",
+  "type": "ghost",
+  "form": 149308
+ },
+ {
+  "id": "draco-plate",
+  "name": "Draco Plate",
+  "type": "dragon",
+  "form": 149303
+ },
+ {
+  "id": "dread-plate",
+  "name": "Dread Plate",
+  "type": "dark",
+  "form": 149302
+ },
+ {
+  "id": "iron-plate",
+  "name": "Iron Plate",
+  "type": "steel",
+  "form": 149315
+ },
+ {
+  "id": "pixie-plate",
+  "name": "Pixie Plate",
+  "type": "fairy",
+  "form": 149317
+ }
+]

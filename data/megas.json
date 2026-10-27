@@ -1,0 +1,313 @@
+[
+ {
+  "dex": 6,
+  "kind": "mega",
+  "name": "Mega Charizard X",
+  "item": "Charizardite X",
+  "form": 100601,
+  "types": [
+   "fire",
+   "dragon"
+  ]
+ },
+ {
+  "dex": 65,
+  "kind": "mega",
+  "name": "Mega Alakazam",
+  "item": "Alakazite",
+  "form": 106501
+ },
+ {
+  "dex": 80,
+  "kind": "mega",
+  "name": "Mega Slowbro",
+  "item": "Slowbronite",
+  "form": 108002
+ },
+ {
+  "dex": 94,
+  "kind": "mega",
+  "name": "Mega Gengar",
+  "item": "Gengarite",
+  "form": 109401
+ },
+ {
+  "dex": 115,
+  "kind": "mega",
+  "name": "Mega Kangaskhan",
+  "item": "Kangaskhanite",
+  "form": 111501
+ },
+ {
+  "dex": 142,
+  "kind": "mega",
+  "name": "Mega Aerodactyl",
+  "item": "Aerodactylite",
+  "form": 114201
+ },
+ {
+  "dex": 150,
+  "kind": "mega",
+  "name": "Mega Mewtwo Y",
+  "item": "Mewtwonite Y",
+  "form": 115002
+ },
+ {
+  "dex": 208,
+  "kind": "mega",
+  "name": "Mega Steelix",
+  "item": "Steelixite",
+  "form": 120801
+ },
+ {
+  "dex": 227,
+  "kind": "mega",
+  "name": "Mega Skarmory",
+  "item": "Skarmorite",
+  "form": 122701
+ },
+ {
+  "dex": 229,
+  "kind": "mega",
+  "name": "Mega Houndoom",
+  "item": "Houndoominite",
+  "form": 122901
+ },
+ {
+  "dex": 248,
+  "kind": "mega",
+  "name": "Mega Tyranitar",
+  "item": "Tyranitarite",
+  "form": 124801
+ },
+ {
+  "dex": 282,
+  "kind": "mega",
+  "name": "Mega Gardevoir",
+  "item": "Gardevoirite",
+  "form": 128201
+ },
+ {
+  "dex": 302,
+  "kind": "mega",
+  "name": "Mega Sableye",
+  "item": "Sablenite",
+  "form": 130201
+ },
+ {
+  "dex": 303,
+  "kind": "mega",
+  "name": "Mega Mawile",
+  "item": "Mawilite",
+  "form": 130301
+ },
+ {
+  "dex": 308,
+  "kind": "mega",
+  "name": "Mega Medicham",
+  "item": "Medichamite",
+  "form": 130801
+ },
+ {
+  "dex": 310,
+  "kind": "mega",
+  "name": "Mega Manectric",
+  "item": "Manectite",
+  "form": 131001
+ },
+ {
+  "dex": 323,
+  "kind": "mega",
+  "name": "Mega Camerupt",
+  "item": "Cameruptite",
+  "form": 132301
+ },
+ {
+  "dex": 334,
+  "kind": "mega",
+  "name": "Mega Altaria",
+  "item": "Altarianite",
+  "form": 133401,
+  "types": [
+   "dragon",
+   "fairy"
+  ]
+ },
+ {
+  "dex": 354,
+  "kind": "mega",
+  "name": "Mega Banette",
+  "item": "Banettite",
+  "form": 135401
+ },
+ {
+  "dex": 359,
+  "kind": "mega",
+  "name": "Mega Absol",
+  "item": "Absolite",
+  "form": 135901
+ },
+ {
+  "dex": 362,
+  "kind": "mega",
+  "name": "Mega Glalie",
+  "item": "Glalitite",
+  "form": 136201
+ },
+ {
+  "dex": 380,
+  "kind": "mega",
+  "name": "Mega Latias",
+  "item": "Latiasite",
+  "form": 138001
+ },
+ {
+  "dex": 381,
+  "kind": "mega",
+  "name": "Mega Latios",
+  "item": "Latiosite",
+  "form": 138101
+ },
+ {
+  "dex": 382,
+  "kind": "primal",
+  "name": "Primal Kyogre",
+  "item": "Blue Orb",
+  "form": 138201
+ },
+ {
+  "dex": 383,
+  "kind": "primal",
+  "name": "Primal Groudon",
+  "item": "Red Orb",
+  "form": 138301,
+  "types": [
+   "ground",
+   "fire"
+  ]
+ },
+ {
+  "dex": 384,
+  "kind": "mega",
+  "name": "Mega Rayquaza",
+  "item": "Mega Shard",
+  "form": 138401
+ },
+ {
+  "dex": 428,
+  "kind": "mega",
+  "name": "Mega Lopunny",
+  "item": "Lopunnite",
+  "form": 142801,
+  "types": [
+   "normal",
+   "fighting"
+  ]
+ },
+ {
+  "dex": 448,
+  "kind": "mega",
+  "name": "Mega Lucario",
+  "item": "Lucarionite",
+  "form": 144801
+ },
+ {
+  "dex": 475,
+  "kind": "mega",
+  "name": "Mega Gallade",
+  "item": "Galladite",
+  "form": 147501
+ },
+ {
+  "dex": 491,
+  "kind": "mega",
+  "name": "Mega Darkrai",
+  "item": "Darkranite",
+  "form": 149102
+ },
+ {
+  "dex": 530,
+  "kind": "mega",
+  "name": "Mega Excadrill",
+  "item": "Excadrite",
+  "form": 153001
+ },
+ {
+  "dex": 604,
+  "kind": "mega",
+  "name": "Mega Eelektross",
+  "item": "Eelektrossite",
+  "form": 160401
+ },
+ {
+  "dex": 670,
+  "kind": "mega",
+  "name": "Mega Floette",
+  "item": "Floettite",
+  "form": 167006
+ },
+ {
+  "dex": 691,
+  "kind": "mega",
+  "name": "Mega Dragalge",
+  "item": "Dragalgite",
+  "form": 169101
+ },
+ {
+  "dex": 718,
+  "kind": "mega",
+  "name": "Mega Zygarde",
+  "item": "Zygardite",
+  "form": 171805
+ },
+ {
+  "dex": 719,
+  "kind": "mega",
+  "name": "Mega Diancie",
+  "item": "Diancite",
+  "form": 171901
+ },
+ {
+  "dex": 780,
+  "kind": "mega",
+  "name": "Mega Drampa",
+  "item": "Drampanite",
+  "form": 178001
+ },
+ {
+  "dex": 807,
+  "kind": "mega",
+  "name": "Mega Zeraora",
+  "item": "Zeraorite",
+  "form": 180701
+ },
+ {
+  "dex": 888,
+  "kind": "crowned",
+  "name": "Crowned Sword Zacian",
+  "item": "Rusted Sword",
+  "form": 188801,
+  "types": [
+   "fairy",
+   "steel"
+  ]
+ },
+ {
+  "dex": 889,
+  "kind": "crowned",
+  "name": "Crowned Shield Zamazenta",
+  "item": "Rusted Shield",
+  "form": 188901,
+  "types": [
+   "fighting",
+   "steel"
+  ]
+ },
+ {
+  "dex": 978,
+  "kind": "mega",
+  "name": "Mega Tatsugiri",
+  "item": "Tatsugirinite",
+  "form": 197803
+ }
+]

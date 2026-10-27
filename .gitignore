@@ -1,0 +1,19 @@
+# Godot 4+ specific ignores
+.godot/
+/android/
+
+# Never commit signing material or build output
+*.keystore
+*.jks
+keystore-credentials*
+*.apk
+*.idsig
+*.aab
+
+# Local build and tooling output
+build/*
+!build/.gdignore
+tools/godot/
+tools/sc_cache/
+tools/form_credits.generated.md
+*.log
