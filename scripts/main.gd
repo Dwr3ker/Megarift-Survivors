@@ -11199,6 +11199,8 @@ class Cards extends Node2D:
 				_move(1)
 			elif bi == PAD.btn("confirm"):
 				_pick(sel)
+			elif bi == PAD.btn("cancel"):
+				_do_skip()   # level-up screen only (needs can_skip): +25% XP instead of a card
 			elif bi == PAD.btn("reroll"):
 				_do_reroll()
 				_do_block()
@@ -11332,7 +11334,7 @@ class Cards extends Node2D:
 		var font := ThemeDB.fallback_font
 		var pad: bool = Input.get_connected_joypads().size() > 0
 		var by2: float = r.size.y * 0.5 + 7.0
-		if not pad or action == "skip":
+		if not pad:
 			draw_string(font, r.position + Vector2(0.0, by2), txt, HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 20, Color.WHITE)
 			return
 		var rx := RegEx.new()
@@ -11342,7 +11344,7 @@ class Cards extends Node2D:
 		var isz := 30.0
 		var x0: float = r.position.x + (r.size.x - (tw + 8.0 + isz)) * 0.5
 		draw_string(font, Vector2(x0, r.position.y + by2), clean, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 20, Color.WHITE)
-		draw_texture_rect(PADI.tex(PAD.btn(action)), Rect2(Vector2(x0 + tw + 8.0, r.position.y + (r.size.y - isz) * 0.5), Vector2(isz, isz)), false)
+		draw_texture_rect(PADI.tex(PAD.btn("cancel" if action == "skip" else action)), Rect2(Vector2(x0 + tw + 8.0, r.position.y + (r.size.y - isz) * 0.5), Vector2(isz, isz)), false)
 
 
 	# Pie: "Toca una carta | Mando: [cruceta] [aceptar] | Teclado: 1 2 3" con los iconos del mando elegido.

@@ -1,5 +1,8 @@
 # Megarift Survivors v0.1.0 — pre-release (test build)
 
+## Changes in 0.1.0-alpha.4
+- **Controller:** the Cancel button (B / Circle) skips a level-up upgrade for +25% XP, and the on-screen Skip prompt now shows the button.
+
 ## Changes in 0.1.0-alpha.3
 - The main menu credit now reads "Made by Dwr3ker" (the original authors stay credited in Settings > About and in `CREDITS.md`).
 

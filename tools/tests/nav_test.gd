@@ -97,6 +97,42 @@ func _init() -> void:
 	menu3.queue_free()
 	await process_frame
 	Engine.remove_meta("force_compact")
+	# ---------- level-up: skip with the controller ----------
+	var PAD = load("res://scripts/pad.gd")
+	SV.run_dex = 6
+	SV.run_mode = "normal"
+	SV.run_hyper = false
+	var m = (load("res://scenes/main.tscn") as PackedScene).instantiate()
+	root.add_child(m)
+	for i in range(10):
+		await process_frame
+	m.player.level += 1
+	m.pending_levels = 1
+	m._open_cards()
+	m.cards.age = 5.0
+	await process_frame
+	check("the level-up screen offers Skip", m.cards.open and m.cards.can_skip and m.cards._has_skip())
+	var xp0: float = m.player.xp
+	var jb := InputEventJoypadButton.new()
+	jb.button_index = PAD.btn("cancel")
+	jb.pressed = true
+	Input.parse_input_event(jb)
+	await process_frame
+	await process_frame
+	check("the controller's Cancel button skips the upgrade (+25% XP, screen closes)", not m.cards.open and not m.choosing and m.pending_levels == 0 and m.player.xp > xp0, "xp %.1f -> %.1f" % [xp0, m.player.xp])
+	# Cancel does nothing on a screen without Skip (e.g. the Eternatus choice)
+	m.choosing = true
+	m.cards.show_cards([{"cat": "eter", "id": "go", "key": "k", "w": 1.0, "title": "a", "desc": "b", "icon": "star", "tag": "t", "color": Color.WHITE}, {"cat": "eter", "id": "end", "key": "k2", "w": 1.0, "title": "c", "desc": "d", "icon": "star", "tag": "t", "color": Color.WHITE}], "x", "y", false)
+	m.cards.age = 5.0
+	var jb2 := InputEventJoypadButton.new()
+	jb2.button_index = PAD.btn("cancel")
+	jb2.pressed = true
+	Input.parse_input_event(jb2)
+	await process_frame
+	await process_frame
+	check("Cancel does not dismiss a screen that has no Skip", m.cards.open and m.choosing)
+	m.queue_free()
+	await process_frame
 	# ---------- crash report ----------
 	var dir_ok := DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path("user://logs")) == OK
 	var fake := "user://logs/godot2099-01-01T00.00.00.log"

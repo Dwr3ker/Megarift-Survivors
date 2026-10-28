@@ -33,6 +33,7 @@ const ENTRIES := [
 			"Rifts: the first check is at 90 s and then every 30 s, with a 20% chance that grows 5% with every miss (max 50%). There is no longer a time limit: they keep appearing until Eternatus.",
 		],
 		"fixes": [
+			"Controller: the Cancel button (B / Circle) now skips a level-up upgrade for +25% XP, and the Skip prompt shows the button.",
 			"Controller: Up and Down now stay in their own column, so the Gacha tabs no longer bounce left and right, and the right panel of the mode list no longer jumps into the Challenges section.",
 			"Handhelds and squarer screens: the Pokémon collection uses bigger cards (6 per row) and the main menu uses the extra height.",
 			"Crash report: if a run ends unexpectedly, the next launch shows the end of the game log so it can be photographed and sent. The vibration permission was added.",
