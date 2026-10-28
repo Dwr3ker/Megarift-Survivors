@@ -16,6 +16,7 @@ static var run_dex := 25
 static var run_mode := "normal"    # normal | daily | rush | party | type | team
 static var run_hyper := false      # Modo Hyper elegido para la partida normal que se va a jugar (no se guarda)
 static var run_mods: Array = []
+static var resume_snap: Dictionary = {}   # a saved run waiting to be put back (run_save.gd); set by the menu, read by the run
 static var run_chal: Dictionary = {}   # instancia del reto en juego (modo "chal")
 static var run_seed := 0
 static var party_dex := 25
@@ -89,7 +90,7 @@ static func default_data() -> Dictionary:
 		"v": 1, "created": int(Time.get_unix_time_from_system()), "title": "", "nick": "", "favs": [0, 0, 0], "coins": 600, "tickets": 10, "tickets10": 3, "pity": {}, "legends": {}, "arenas": {}, "lshiny": {}, "owned": {}, "selected": 25, "shiny_on": false,
 		"fusions": [], "upgrades": {}, "pup": {}, "claimed": {}, "pban": {}, "pbind": {}, "ptm": {}, "pz": {},
 		"stats": {"runs": 0, "kills": 0, "best_time": 0, "best_level": 1, "bosses": 0, "chests": 0, "pulls": 0, "shinies": 0, "total_time": 0, "coins_total": 0, "defeated_runs": 0, "rifts": 0},
-		"settings": {"master": 80, "music": 70, "sfx": 80, "dmg_numbers": true, "vibration": true, "shake": true, "stick": 1, "stick_fixed": false, "manual_aim": false, "lang": "en", "view": 100, "fov": 165, "pad": 0, "padmap": {}, "mute": false, "quality": 0, "fps": false, "stats_box": true, "stats_mode": 0, "mirror": false, "hud_scale": 100, "colorblind": false, "adaptive": true, "mono_bonus": false, "fx_op": 1, "act_side": 0, "text_sz": 0},
+		"settings": {"master": 80, "music": 70, "sfx": 80, "dmg_numbers": true, "vibration": true, "shake": true, "stick": 1, "stick_fixed": false, "manual_aim": false, "lang": "en", "view": 100, "fov": 165, "pad": 0, "padmap": {}, "mute": false, "quality": 0, "fps": false, "stats_box": true, "stats_mode": 0, "mirror": false, "hud_scale": 100, "colorblind": false, "adaptive": true, "mono_bonus": false, "fx_op": 1, "act_side": 0, "text_sz": 0, "show_map": true},
 	}
 
 
@@ -137,10 +138,69 @@ static func ensure() -> void:
 		d["settings"]["fov_v2"] = true
 		if int(d["settings"].get("fov", 165)) == 140:
 			d["settings"]["fov"] = 165
+	if not d["settings"].has("show_map"):   # radar on by default (HUD layout)
+		d["settings"]["show_map"] = true
 	# Panel de estadisticas del HUD: activado por defecto (una sola vez); luego se puede apagar en Ajustes.
 	if not bool(d["settings"].get("stats_panel_v1", false)):
 		d["settings"]["stats_panel_v1"] = true
 		d["settings"]["stats_box"] = true
+
+
+# ---- save codes ----
+# A code is "MRS1:<size>:<base64 of the deflated JSON>" (short enough to paste). decode_code also accepts the older plain
+# base64 of the JSON, raw JSON, URL-safe base64, and text with line breaks, spaces or quotes added by a chat app or a notes app.
+const CODE_PREFIX := "MRS1:"
+const CODE_SKIP := [32, 9, 10, 13, 34, 39, 160, 8203, 65279]   # space, tab, line breaks, quotes, non-breaking and zero-width spaces
+
+
+static func encode_code(data: Dictionary) -> String:
+	var raw: PackedByteArray = JSON.stringify(data).to_utf8_buffer()
+	var packed: PackedByteArray = raw.compress(FileAccess.COMPRESSION_DEFLATE)
+	return "%s%d:%s" % [CODE_PREFIX, raw.size(), Marshalls.raw_to_base64(packed)]
+
+
+# Returns {"ok": bool, "data": Dictionary, "error": String, "n": int}. `error` is an English reason a person can act on (pass it through
+# L.t; when "n" is present the text has a %d for the number of characters read).
+static func decode_code(text: String) -> Dictionary:
+	var s: String = text.strip_edges()
+	if s == "":
+		return {"ok": false, "data": {}, "error": "The clipboard is empty. Copy the whole code first."}
+	var json_text := ""
+	var clean := ""
+	for ch in s:   # drop whitespace, quotes and zero-width characters that copying adds
+		if CODE_SKIP.has(ch.unicode_at(0)):
+			continue
+		clean += ch
+	if s.begins_with("{"):
+		json_text = s
+	elif clean.begins_with(CODE_PREFIX):
+		var parts: PackedStringArray = clean.substr(CODE_PREFIX.length()).split(":", true, 1)
+		if parts.size() != 2 or not parts[0].is_valid_int():
+			return {"ok": false, "data": {}, "error": "The code is damaged (bad header)."}
+		var packed: PackedByteArray = Marshalls.base64_to_raw(_b64_fix(parts[1]))
+		if packed.is_empty():
+			return {"ok": false, "data": {}, "error": "The code is damaged or cut short (%d characters read).", "n": clean.length()}
+		var raw: PackedByteArray = packed.decompress(int(parts[0]), FileAccess.COMPRESSION_DEFLATE)
+		if raw.size() != int(parts[0]):
+			return {"ok": false, "data": {}, "error": "The code is cut short: copy all of it (%d characters read).", "n": clean.length()}
+		json_text = raw.get_string_from_utf8()
+	else:
+		json_text = Marshalls.base64_to_utf8(_b64_fix(clean))
+	if json_text == "":
+		return {"ok": false, "data": {}, "error": "This is not a save code (%d characters read).", "n": clean.length()}
+	var parsed = JSON.parse_string(json_text)
+	if not (parsed is Dictionary):
+		return {"ok": false, "data": {}, "error": "The code is damaged or cut short (%d characters read).", "n": clean.length()}
+	if not (parsed.has("owned") and parsed.has("coins")):
+		return {"ok": false, "data": {}, "error": "This code is not a Megarift save."}
+	return {"ok": true, "data": parsed, "error": ""}
+
+
+static func _b64_fix(t: String) -> String:
+	var b: String = t.replace("-", "+").replace("_", "/")
+	while b.length() % 4 != 0:
+		b += "="
+	return b
 
 
 static func _read_json(path: String):
@@ -166,6 +226,8 @@ static func _migrate_upgrades() -> void:
 
 # Guardado a prueba de cierres: escribe en un temporal, guarda la copia anterior y renombra.
 static func save() -> void:
+	if Engine.has_meta("no_save"):   # tools and tests that load other data must never write it over the real save
+		return
 	var f := FileAccess.open(TMP, FileAccess.WRITE)
 	if f == null:
 		return

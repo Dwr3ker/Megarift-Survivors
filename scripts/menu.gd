@@ -45,6 +45,9 @@ const DEFAULT_THEME := 0
 const GP := preload("res://scripts/gachapon.gd")
 const C_GOLD := Color("#ffd65c")
 const CR = preload("res://scripts/crash_report.gd")
+const CODES = preload("res://scripts/codes.gd")
+const LayoutEditor = preload("res://scripts/layout_editor.gd")
+const RS = preload("res://scripts/run_save.gd")
 const PER_PAGE := 32   # 8 columns x 4 rows per page: the grid fits the screen without a half-clipped row
 const PER_PAGE_COMPACT := 24   # 6 columns x 4 rows with bigger cards on squarer / handheld screens
 
@@ -1003,6 +1006,7 @@ func _ready() -> void:
 	_build_settings()
 	_build_news()
 	_build_support()
+	_build_layout()
 	# El gui elige el control por orden en el arbol (no por z_index): el panel de resultados/tarjetas
 	# debe ser el ultimo hijo o los toques lo atraviesan y pulsan los botones de la pantalla de debajo.
 	move_child(gacha_result, get_child_count() - 1)
@@ -2084,6 +2088,12 @@ func _build_main() -> void:
 	right.alignment = BoxContainer.ALIGNMENT_CENTER
 	right.add_theme_constant_override("separation", 10)
 	row.add_child(right)
+	resume_btn = _btn("", func(): _resume_run(), Vector2(0, 84 if _compact() else 70))
+	resume_btn.visible = false
+	resume_btn.add_theme_font_size_override("font_size", 22)
+	_gold_btn(resume_btn, false)
+	right.add_child(resume_btn)
+	main_btns["resume"] = resume_btn
 	cont_btn = _btn("", func(): _start_mode(_last_mode_id()), Vector2(0, 116 if _compact() else 92))
 	cont_btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	cont_btn.icon = IC.btn_tex("flag", 44)
@@ -2315,6 +2325,22 @@ func _replay_last() -> void:
 		_chal_play(SV.run_chal)
 	else:
 		_start_mode(_last_mode_id() if SV.run_mode == "chal" else String(SV.run_mode))
+
+
+# Puts a run saved with "Save and quit" back (run_save.gd).
+func _resume_run() -> void:
+	var snap: Dictionary = RS.load_snap()
+	if snap.is_empty():
+		toast(L.t("The saved run could not be read."))
+		RS.clear()
+		_refresh_main()
+		return
+	SV.run_mode = String(snap["mode"])
+	SV.run_hyper = bool(snap["hyper"])
+	SV.run_dex = int(snap["dex"])
+	SV.run_mods = Array(snap["mods"]).duplicate()
+	SV.resume_snap = snap
+	get_tree().change_scene_to_file("res://scenes/main.tscn")
 
 
 func _start_mode(mode: String) -> void:
@@ -3206,6 +3232,11 @@ func _refresh_main() -> void:
 	var ttl: String = String(SV.d.get("title", ""))
 	if ttl != "":
 		main_info.text += "\n" + L.t(ttl)
+	if is_instance_valid(resume_btn):
+		var snap: Dictionary = RS.load_snap()
+		resume_btn.visible = not snap.is_empty()
+		if not snap.is_empty():
+			resume_btn.text = "%s\n%s" % [L.t("Resume run"), RS.describe(snap)]
 	if is_instance_valid(cont_btn):
 		var first_run: bool = int(SV.d["stats"].get("runs", 0)) <= 0
 		cont_btn.text = "%s\n%s \u00b7 %s" % [L.t("Play") if first_run else L.t("Play again"), _name_of(dex), _mode_name(_last_mode_id())]
@@ -3515,6 +3546,8 @@ func _refresh_test() -> void:
 	test_box.add_child(_label("Like in Mystery Dungeon, a few questions will decide your personality and your partner.\nYou can accept the result or pick a different starter.", 24))
 	var b := _btn("Start the quiz", func(): _test_next(), Vector2(0, 60))
 	test_box.add_child(b)
+	var skip := _btn("Skip the quiz: pick a strong starter", func(): _test_pick_strong(), Vector2(0, 60))
+	test_box.add_child(skip)
 	focus_first = b
 
 
@@ -3584,6 +3617,39 @@ func _test_show_result(trt: String) -> void:
 	other.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(other)
 	_gf(ok)
+
+
+# "Skip the quiz": a short list of strong, fully evolved partners (most can Mega Evolve), chosen right away.
+func _test_pick_strong() -> void:
+	_clear(test_box)
+	test_box.add_child(_label("Pick a strong starter", 32, C_GOLD))
+	test_box.add_child(_label("Fully evolved partners, most of them able to Mega Evolve. You can collect the rest from the Gacha.", 18, Color("#f2e9d8")))
+	var grid := GridContainer.new()
+	grid.columns = 4 if _compact() else 6
+	grid.add_theme_constant_override("h_separation", 8)
+	grid.add_theme_constant_override("v_separation", 8)
+	test_box.add_child(grid)
+	var first: Button = null
+	for dx in ST.STRONG:
+		var dxi: int = int(dx)
+		if not SV.dex_by.has(dxi):
+			continue
+		var b := _btn("", func(): _accept_starter(dxi), Vector2(120, 110))
+		var tx: Texture2D = _icon_tex(dxi, false)
+		if tx != null:
+			b.icon = tx
+			b.expand_icon = true
+			b.add_theme_constant_override("icon_max_width", 56)
+		b.text = _name_of(dxi)
+		b.add_theme_font_size_override("font_size", 14)
+		b.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		b.vertical_icon_alignment = VERTICAL_ALIGNMENT_TOP
+		grid.add_child(b)
+		if first == null:
+			first = b
+	var back := _btn("Back", func(): _refresh_test(), Vector2(0, 52))
+	test_box.add_child(back)
+	_gf(first)
 
 
 func _test_pick_other() -> void:
@@ -7243,6 +7309,23 @@ func _build_settings() -> void:
 
 
 # Pantalla de novedades, como la pestana "What's new" del original: una tarjeta por version con etiquetas de color.
+var layout_ed: Control = null
+var resume_btn: Button = null
+
+
+func _build_layout() -> void:
+	var s: Control = _screen("layout")
+	layout_ed = LayoutEditor.new()
+	s.add_child(layout_ed)
+	layout_ed.build(self)
+
+
+func _refresh_layout() -> void:
+	if layout_ed != null:
+		layout_ed.refresh()
+		focus_first = layout_ed.stage
+
+
 func _build_news() -> void:
 	var s: Control = _screen("news")
 	var row := HBoxContainer.new()
@@ -7680,19 +7763,11 @@ func _set_graphics() -> void:
 	_srow("Colorblind mode", "Swaps red and green for blue and magenta and adds a pattern to the low-health bar.", _toggle_set("colorblind"))
 	_srow("Mono-type bonus (+20%)", "Experimental: single-type Pokémon deal +20% damage with moves of that type. Off by default while balance is reviewed.", _toggle_set("mono_bonus"))
 	_srow("Adaptive difficulty", "In normal runs, the game starts easy and gets harder as you upgrade: more enemy health and damage, more enemies, more frequent hordes and more experience needed per level.", _toggle_set("adaptive"))
-	_sec("HUD element sizes")
-	_hud_size("Health plate", "hud_plate")
-	_hud_size("Radar", "hud_radar")
-	_hud_size("Stats panel", "hud_stats")
-	_hud_size("Move bar", "hud_skills")
-	_hud_size("Resource counters", "hud_counters")
-	_hud_size("Item list", "hud_items")
-	var rsz := _btn("Reset sizes", func():
-		for k in ["hud_plate", "hud_radar", "hud_stats", "hud_skills", "hud_counters", "hud_items"]:
-			SV.d["settings"][k] = 100
-		SV.save()
-		_refresh_settings(), Vector2(220, 46))
-	_sadd(rsz)
+	_sec("HUD layout")
+	_srow("Radar", "Shows the radar (map) at the top left during a run.", _toggle_set("show_map"))
+	_sadd(_label("Move, resize and hide each HUD element, and save your layouts as presets.", 18, Color("#f2e9d8")))
+	var lay_btn := _btn("Edit HUD layout", func(): _show("layout"), Vector2(0, 50))
+	_sadd(lay_btn)
 
 
 func _set_controls() -> void:
@@ -7756,8 +7831,7 @@ func _set_account() -> void:
 	_sadd(_label("Your progress is saved on this device. To keep it safe or move it to another device: copy the save code, paste it into a Google Keep note, Google Drive, an email or a message to yourself, and on the other device use “Paste save code”.", 18, Color("#f2e9d8")))
 	_sec("Backup")
 	var cb := _btn("Copy save code", func():
-		var js := JSON.stringify(SV.d)
-		DisplayServer.clipboard_set(Marshalls.utf8_to_base64(js))
+		DisplayServer.clipboard_set(SV.encode_code(SV.d))
 		toast(L.t("Code copied")), Vector2(0, 50))
 	_sadd(cb)
 	focus_first = cb
@@ -7768,9 +7842,9 @@ func _set_account() -> void:
 			ib.text = L.t("Replace your current progress? Press again")
 			return
 		import_armed = false
-		var parsed = JSON.parse_string(Marshalls.base64_to_utf8(DisplayServer.clipboard_get().strip_edges()))
-		if parsed is Dictionary and parsed.has("owned") and parsed.has("coins"):
-			SV.d = SV._merge(SV.default_data(), parsed)
+		var res: Dictionary = SV.decode_code(DisplayServer.clipboard_get())
+		if bool(res["ok"]):
+			SV.d = SV._merge(SV.default_data(), res["data"])
 			SV._migrate_upgrades()
 			SV.save()
 			L.apply()
@@ -7778,8 +7852,31 @@ func _set_account() -> void:
 			get_tree().reload_current_scene()
 		else:
 			ib.text = L.t("Paste save code")
-			toast(L.t("Invalid code")))
+			var why: String = L.t(String(res["error"]))
+			if res.has("n"):
+				why = why % int(res["n"])
+			toast(L.t("Invalid code") + ": " + why))
 	_sadd(ib)
+	_sec("Redeem code")
+	_sadd(_label("Have a code for a special unlock? Type it here. Each code works once.", 18, Color("#f2e9d8")))
+	var code_in := LineEdit.new()
+	code_in.placeholder_text = L.t("Enter code")
+	code_in.max_length = 40
+	code_in.custom_minimum_size = Vector2(0, 50)
+	_sadd(code_in)
+	var redeem_fn := func():
+		var res: Dictionary = CODES.redeem(code_in.text, SV.d)
+		if bool(res["ok"]):
+			SV.save()
+			code_in.text = ""
+			toast(L.t(String(res["msg"])))
+			Aud.sfx("legend")
+			_update_top()
+		else:
+			toast(L.t(String(res["msg"])))
+	var rd := _btn("Redeem", redeem_fn, Vector2(0, 50))
+	code_in.text_submitted.connect(func(_t: String): redeem_fn.call())
+	_sadd(rd)
 	_sec("Danger zone")
 	var rb := _btn("Erase all progress", func(): pass, Vector2(0, 50))
 	_danger(rb)

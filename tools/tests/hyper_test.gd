@@ -17,8 +17,10 @@ func make_run(SV, hyper: bool):
 
 func _init() -> void:
 	var SV = load("res://scripts/save_data.gd")
+	Engine.set_meta("no_save", true)   # nothing here may write the real save
 	SV.ensure()
-	var snap: Dictionary = SV.d.duplicate(true)
+	var snap: Dictionary = SV.default_data()   # a clean profile, whatever save the player has (the real save is never written: no_save)
+	SV.d = snap.duplicate(true)
 	var res := {}
 	for hy in [false, true]:
 		var m = await make_run(SV, hy)

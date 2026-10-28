@@ -13,6 +13,11 @@ const ENTRIES := [
 		"date": "2026-10-27",
 		"title": "Megarift Survivors 0.1: Doofcraft-style edition (test build)",
 		"new": [
+			"HUD layout editor (Settings > Graphics > Edit HUD layout): drag or nudge every on-run HUD element, resize it, turn the radar and the stats panel on or off, and save your layouts as presets. The per-element size sliders moved here.",
+			"Save and quit: pause > Save and quit stores your Normal run and the main menu offers Resume run (not during boss fights, rifts or other special events).",
+			"Radar switch: Settings > Graphics > Radar turns the on-run map off.",
+			"Redeem codes: Settings > Account > Redeem code unlocks special bundles (starter pack, Mega pack, Legend pack and more). Each code works once.",
+			"New profiles can skip the quiz and pick a strong starter right away.",
 			"Mega Evolution: from minute 30 a unique card transforms capable Pokémon (41 Mega, Primal and Crowned forms) with +30% damage and HP, +10% speed and -10% cooldowns.",
 			"Mega Rifts from minute 15, a mega-capable badge in the collection, and Behemoth moves for Crowned Zacian and Zamazenta.",
 			"Common, Rare, Epic and Legendary upgrade cards: their bonuses are multiplied by 1, 1.25, 1.5 and 2.",
@@ -33,6 +38,7 @@ const ENTRIES := [
 			"Rifts: the first check is at 90 s and then every 30 s, with a 20% chance that grows 5% with every miss (max 50%). There is no longer a time limit: they keep appearing until Eternatus.",
 		],
 		"fixes": [
+			"Save codes are now short (about 14,000 characters even with everything unlocked). The importer ignores line breaks and spaces added when copying, says what is wrong when a code is rejected, and old codes still work.",
 			"Controller: the Cancel button (B / Circle) now skips a level-up upgrade for +25% XP, and the Skip prompt shows the button.",
 			"Controller: Up and Down now stay in their own column, so the Gacha tabs no longer bounce left and right, and the right panel of the mode list no longer jumps into the Challenges section.",
 			"Handhelds and squarer screens: the Pokémon collection uses bigger cards (6 per row) and the main menu uses the extra height.",

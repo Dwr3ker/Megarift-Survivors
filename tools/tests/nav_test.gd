@@ -26,6 +26,7 @@ func focus_rect() -> Rect2:
 	return f.get_global_rect() if f != null else Rect2()
 
 func _init() -> void:
+	Engine.set_meta("no_save", true)   # this test drives the real menus: never let it write the real save
 	var SV = load("res://scripts/save_data.gd")
 	var CR = load("res://scripts/crash_report.gd")
 	SV.ensure()
@@ -97,6 +98,42 @@ func _init() -> void:
 	menu3.queue_free()
 	await process_frame
 	Engine.remove_meta("force_compact")
+	# ---------- starter picker and redeem code ----------
+	var menu5 = (load("res://scenes/menu.tscn") as PackedScene).instantiate()
+	root.add_child(menu5)
+	for i in range(20):
+		await process_frame
+	menu5._show("test")
+	for i in range(5):
+		await process_frame
+	menu5._test_pick_strong()
+	for i in range(5):
+		await process_frame
+	var grid5: GridContainer = null
+	for c in menu5.test_box.get_children():
+		if c is GridContainer:
+			grid5 = c
+	check("'Skip the quiz' shows the 12 strong starters", grid5 != null and grid5.get_child_count() == 12, str(grid5.get_child_count() if grid5 != null else -1))
+	(grid5.get_child(0) as Button).pressed.emit()
+	await process_frame
+	check("choosing one makes it the partner", int(SV.d["selected"]) == 6 and SV.d["owned"].has("6"), str(SV.d["selected"]))
+	var tabs_n: int = menu5.SET_TABS.size()
+	for ti in range(tabs_n):
+		menu5.set_tab = ti
+		menu5._refresh_settings()
+		for i in range(3):
+			await process_frame
+	var found_code := false
+	for ti in range(tabs_n):
+		menu5.set_tab = ti
+		menu5._refresh_settings()
+		await process_frame
+		for n in menu5.screens["settings"].find_children("*", "LineEdit", true, false):
+			if (n as LineEdit).placeholder_text == "Enter code":
+				found_code = true
+	check("the settings have an 'Enter code' box", found_code)
+	menu5.queue_free()
+	await process_frame
 	# ---------- level-up: skip with the controller ----------
 	var PAD = load("res://scripts/pad.gd")
 	SV.run_dex = 6

@@ -6,10 +6,12 @@ func check(name: String, cond: bool, detail: String = "") -> void:
 	if not cond: ok = false
 
 func _init() -> void:
+	Engine.set_meta("no_save", true)   # nothing here may write the real save
 	var ETX = load("res://scripts/eternamax.gd")
 	var SV = load("res://scripts/save_data.gd")
 	SV.ensure()
 	var _guard: Dictionary = SV.d.duplicate(true)   # the real save is restored at the end (runs write to it)
+	SV.d = SV.default_data()   # tests start from a clean profile, whatever save the player has
 	SV.run_dex = 6
 	SV.run_mode = "normal"
 	SV.run_hyper = false

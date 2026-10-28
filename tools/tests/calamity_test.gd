@@ -6,11 +6,13 @@ func check(name: String, cond: bool, detail: String = "") -> void:
 	if not cond: ok = false
 
 func _init() -> void:
+	Engine.set_meta("no_save", true)   # nothing here may write the real save
 	var CAL = load("res://scripts/calamity.gd")
 	var SV = load("res://scripts/save_data.gd")
 	var PG = load("res://scripts/progress.gd")
 	SV.ensure()
 	var _guard: Dictionary = SV.d.duplicate(true)   # the real save is restored at the end (runs write to it)
+	SV.d = SV.default_data()   # tests start from a clean profile, whatever save the player has
 	# ---------- schedule ----------
 	check("15 min before the next Eternatus (minute 75 for the minute-90 one)", CAL.due_at(5400.0, 3600.0) == 4500.0, str(CAL.due_at(5400.0, 3600.0)))
 	check("never sooner than 8 min after the last Eternatus", CAL.due_at(5400.0, 4300.0) == 4780.0, str(CAL.due_at(5400.0, 4300.0)))

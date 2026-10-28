@@ -33,7 +33,7 @@ func _init() -> void:
 	var e: Dictionary = PN.ENTRIES[0]
 	check("newest patch-notes entry is 0.1.0", String(e["ver"]) == "0.1.0" and String(e["date"]) == "2026-10-27")
 	check("only this version's entry is listed (no inherited history)", PN.ENTRIES.size() == 1)
-	check("entry has 14 new items and 2 changes", (e["new"] as Array).size() == 14 and (e["changes"] as Array).size() == 2)
+	check("entry has 19 new items and 2 changes", (e["new"] as Array).size() == 19 and (e["changes"] as Array).size() == 2)
 	# every line must have a Spanish translation (the English text is the translation key)
 	var es = JSON.parse_string(FileAccess.open("res://data/lang_es.json", FileAccess.READ).get_as_text())
 	var missing: Array = []

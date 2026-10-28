@@ -40,6 +40,8 @@ The gamepad layout (Xbox, PlayStation, Nintendo) and every button can be changed
 
 ## Install / build
 
+**PC (Windows):** download `megarift-survivors-<version>-windows.zip` from the Releases page, unzip it and run `Megarift Survivors.exe` (a single file, no install). Windows SmartScreen may warn because the file is not signed: choose *More info* then *Run anyway*. Build it yourself with `tools/build_windows.ps1`.
+
 Download the APK from the [Releases page](https://github.com/Dwr3ker/Megarift-Survivors/releases) (sideload it: Android will ask you to allow installs from your browser or file manager), or build it yourself:
 
 1. Install [Godot **4.4.x**](https://godotengine.org/download/archive/) (developed with 4.4.1) and its **export templates**.
@@ -55,7 +57,7 @@ The in-game **update check** looks at `Dwr3ker/Megarift-Survivors` (`REPO` in `s
 
 ## Tests
 
-The feature work is covered by headless Godot scripts (one per system, 20 in total), in `tools/tests/`:
+The feature work is covered by headless Godot scripts (one per system, 22 in total), in `tools/tests/`:
 
 ```
 godot --headless --path . --script res://tools/tests/mega_run_test.gd

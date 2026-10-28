@@ -20,6 +20,8 @@ const ETX = preload("res://scripts/eternamax.gd")
 const DM = preload("res://scripts/doom.gd")
 const CAL = preload("res://scripts/calamity.gd")
 const CR = preload("res://scripts/crash_report.gd")
+const HL = preload("res://scripts/hud_layout.gd")
+const RS = preload("res://scripts/run_save.gd")
 const PL = preload("res://scripts/plates.gd")
 const ZC = preload("res://scripts/zcrystal.gd")
 const POI = preload("res://scripts/poi.gd")
@@ -452,6 +454,7 @@ const ETER_PAY_AGAIN := {"coins": 1000, "t10": 1, "t": 5}
 var eter_at := 3600.0     # segundo de partida en que toca el siguiente Eternatus
 var eter_kills := 0
 var bc_t := 0.0           # breadcrumb timer (see _process)
+var resumed := false      # this run was put back from a mid-run save (run_save.gd)
 var eter_prompt := false  # pantalla de eleccion pendiente (espera a que no haya otras cartas abiertas)
 var doom_winds := 0       # Segundos alientos cogidos (una por nivel de Doom, doom.gd)
 var dash_k := 1.0         # Sobremarcha: multiplicador del enfriamiento del dash
@@ -756,6 +759,7 @@ func _ready() -> void:
 	pause_ui.fov_changed.connect(func(_p: int): _apply_fov())
 	pause_ui.stick_fixed_changed.connect(func(on: bool): stick.fixed = on; stick.queue_redraw())
 	pause_ui.quit_run.connect(_abandon)
+	pause_ui.save_quit.connect(_save_and_quit)
 	pause_ui.summary_requested.connect(func(): pause_ui.show_summary(pause_summary()))
 	pause_ui.open_settings.connect(_open_settings)
 	stick = Stick.new()
@@ -787,6 +791,10 @@ func _ready() -> void:
 	for i in range(3):
 		if mode != "rush" and mode != "tower":
 			_spawn_one(randf() * TAU, true)
+	if not SV.resume_snap.is_empty():   # "Resume run" from the menu
+		var snap: Dictionary = SV.resume_snap
+		SV.resume_snap = {}
+		RS.apply(self, snap)
 
 
 func _add_input_actions() -> void:
@@ -1060,6 +1068,8 @@ func _finish_run() -> void:
 		return
 	run_saved = true
 	CR.mark_run_end()
+	if resumed:
+		RS.clear()   # the saved run ends with this one
 	cal = null
 	if etx != null:
 		etx.stop()
@@ -1186,6 +1196,20 @@ func _run_dmg_total() -> int:
 	for k in run_dmg:
 		t += float(run_dmg[k])
 	return int(t)
+
+
+# Pause > Save and quit: store the run and go back to the menu; the rewards stay in the saved run until it ends.
+func _save_and_quit() -> void:
+	var why: String = RS.block_reason(self)
+	if why != "":
+		_say(why, 3.0)
+		return
+	if RS.save(self):
+		run_saved = true   # nothing is paid out now
+		CR.mark_run_end()
+		_go_menu()
+	else:
+		_say("Could not save the run.", 3.0)
 
 
 func _abandon() -> void:
@@ -1470,23 +1494,31 @@ func _process(delta: float) -> void:
 	hud.flash_k = 1.0 if shake_on else 0.2
 	UIS.colorblind = bool(SV.d["settings"].get("colorblind", false))
 	var hs: float = clampf(float(SV.d["settings"].get("hud_scale", 100)) / 100.0, 0.8, 1.3)   # master size
-	var st_s: Dictionary = SV.d["settings"]
-	var s_plate: float = hs * clampf(float(st_s.get("hud_plate", 100)) / 100.0, 0.6, 1.5)
-	var s_radar: float = hs * clampf(float(st_s.get("hud_radar", 100)) / 100.0, 0.6, 1.5)
-	var s_skill: float = hs * clampf(float(st_s.get("hud_skills", 100)) / 100.0, 0.6, 1.5)
+	# Per-element size and position come from the HUD layout (Settings > Graphics > Edit HUD layout, hud_layout.gd).
+	var s_plate: float = hs * HL.scale_of("plate")
+	var s_radar: float = hs * HL.scale_of("radar")
+	var s_skill: float = hs * HL.scale_of("skills")
 	hud.hs = hs
 	hud.sc_plate = s_plate
 	hud.sc_radar = s_radar
-	hud.sc_stats = hs * clampf(float(st_s.get("hud_stats", 100)) / 100.0, 0.6, 1.5)
-	hud.sc_items = hs * clampf(float(st_s.get("hud_items", 100)) / 100.0, 0.6, 1.5)
-	hud.sc_cnt = hs * clampf(float(st_s.get("hud_counters", 100)) / 100.0, 0.6, 1.5)
+	hud.sc_stats = hs * HL.scale_of("stats")
+	hud.sc_items = hs * HL.scale_of("items")
+	hud.sc_cnt = hs * HL.scale_of("counters")
 	hud.sc_skill = s_skill
+	hud.off_plate = HL.offset("plate")
+	hud.off_stats = HL.offset("stats")
+	hud.off_items = HL.offset("items")
+	hud.off_cnt = HL.offset("counters")
+	hud.off_skill = HL.offset("skills")
+	var map_on: bool = HL.show_map()
+	hud.show_map = map_on
 	var hins: Vector4 = DSP.insets(get_tree())
+	mini.visible = map_on
 	mini.scale = Vector2(s_radar, s_radar)
-	mini.position = Vector2(12.0 + hins.x, 16.0 + hins.y + 90.0 * s_plate)   # same left edge as the health plate, 8 px under it
+	mini.position = Vector2(12.0 + hins.x, 16.0 + hins.y + 90.0 * s_plate) + HL.offset("radar")   # same left edge as the health plate, 8 px under it
 	var vps: Vector2 = get_viewport_rect().size
 	slots.scale = Vector2(s_skill, s_skill)
-	slots.position = Vector2(vps.x * 0.5 * (1.0 - s_skill), (vps.y - hins.w) * (1.0 - s_skill))
+	slots.position = Vector2(vps.x * 0.5 * (1.0 - s_skill), (vps.y - hins.w) * (1.0 - s_skill)) + HL.offset("skills")
 	# latido haptico con la vida baja (por debajo del 25 %)
 	if not player.dead and player.hp / maxf(1.0, player.max_hp) <= 0.25 and bool(SV.setting("vibration")):
 		if lowhp_hap_t == 0.0:
@@ -11601,7 +11633,7 @@ class Minimap extends Node2D:
 	var _acc := 0.0
 
 	func _on() -> bool:
-		return m.arena == null and not m.jd.active() and not m.hud.dead
+		return m.arena == null and not m.jd.active() and not m.hud.dead and m.hud.show_map   # the layout can switch the radar off
 
 	func _process(delta: float) -> void:
 		t += delta
@@ -11959,6 +11991,12 @@ class Hud extends Node2D:
 	var sc_items := 1.0
 	var sc_cnt := 1.0
 	var sc_skill := 1.0
+	var off_plate := Vector2.ZERO   # layout offsets (hud_layout.gd), virtual pixels
+	var off_stats := Vector2.ZERO
+	var off_items := Vector2.ZERO
+	var off_cnt := Vector2.ZERO
+	var off_skill := Vector2.ZERO
+	var show_map := true
 	var slot_n := 0   # number of skill slots (held items sit to their left)
 	var stats_bottom := 134.0   # y just under the stats panel (buffs hang from it)
 	var pops := {}   # recogidas recientes: tipo -> {n, t}, se muestran como "+N" bajo el contador
@@ -12076,6 +12114,7 @@ class Hud extends Node2D:
 		var gy := 34.0   # grid top
 		var ph: float = gy + float(rows) * rh + 6.0
 		var org := Vector2(vp.x - pw * k - 14.0 - ins.z, 134.0 + ins.y + (20.0 * float(ch_lines.size()) + 8.0 if ch_mode else 0.0) + (52.0 * float(team.size()) + 8.0 if not team.is_empty() else 0.0))
+		org += off_stats
 		stats_bottom = org.y + ph * k
 		draw_set_transform(org, 0.0, Vector2(k, k))
 		draw_rect(Rect2(UIS.SHADOW_OFF, Vector2(pw, ph)), UIS.SHADOW)
@@ -12120,9 +12159,9 @@ class Hud extends Node2D:
 		var pages: int = (items_hud.size() + per - 1) / per
 		var page: int = int(_page_t / 4.0) % pages
 		var x0: float = 16.0 + ins.x
-		var y0: float = 16.0 + ins.y + 90.0 * sc_plate + 196.0 * sc_radar + 14.0
+		var y0: float = 16.0 + ins.y + 90.0 * sc_plate + (196.0 * sc_radar if show_map else 0.0) + 14.0
 		var rows: int = mini(per, items_hud.size() - page * per)
-		draw_set_transform(Vector2(x0, y0), 0.0, Vector2(sc_items, sc_items))
+		draw_set_transform(Vector2(x0, y0) + off_items, 0.0, Vector2(sc_items, sc_items))
 		var ox: float = x0
 		var oy: float = y0
 		x0 = 0.0
@@ -12163,8 +12202,8 @@ class Hud extends Node2D:
 		# held items: stacked to the left of the skill bar, bottom-aligned with it
 		var n: int = maxi(1, slot_n)
 		var total: float = (80.0 * float(n) + 10.0 * float(n - 1)) * sc_skill
-		var lx: float = vp.x * 0.5 - total * 0.5 - 14.0
-		var y: float = vp.y - 14.0 - ins.w - 30.0 * sc_skill
+		var lx: float = vp.x * 0.5 - total * 0.5 - 14.0 + off_skill.x
+		var y: float = vp.y - 14.0 - ins.w - 30.0 * sc_skill + off_skill.y
 		var held: Array = []
 		if item_name != "":
 			held.append([item_name, Color("#ff8ad8"), item_id])
@@ -12823,7 +12862,7 @@ class Hud extends Node2D:
 		# placa de vida
 		var o := Vector2.ZERO
 		var pw := 232.0   # igual que el marco del minimapa
-		draw_set_transform(Vector2(12.0 + ins.x, 16.0 + ins.y), 0.0, Vector2(sc_plate, sc_plate))
+		draw_set_transform(Vector2(12.0 + ins.x, 16.0 + ins.y) + off_plate, 0.0, Vector2(sc_plate, sc_plate))
 		draw_rect(Rect2(o + UIS.SHADOW_OFF, Vector2(pw, 82.0)), UIS.SHADOW)
 		draw_style_box(UIS.frame(Color(UIS.BG, 0.92), UIS.EDGE), Rect2(o, Vector2(pw, 82.0)))
 		var bx0 := 10.0   # left edge of name / bar; moves right when the icon is shown
@@ -12918,8 +12957,8 @@ class Hud extends Node2D:
 			cwids.append(iw)
 			ctotal += iw
 		ctotal += cgap * float(citems.size() - 1)
-		var cx0: float = vp.x * 0.5 - ctotal * 0.5
-		var cy0: float = 66.0 + 18.0 * sc_cnt   # icon centre line
+		var cx0: float = vp.x * 0.5 - ctotal * 0.5 + off_cnt.x
+		var cy0: float = 66.0 + 18.0 * sc_cnt + off_cnt.y   # icon centre line
 		for n in range(citems.size()):
 			var ce: Array = citems[n]
 			var ckind: String = String(ce[0])

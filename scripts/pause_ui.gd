@@ -15,6 +15,7 @@ const TXS = preload("res://scripts/textscale.gd")
 
 signal resume
 signal quit_run
+signal save_quit
 signal open_settings
 signal summary_requested
 signal fov_changed(pct: int)
@@ -151,6 +152,7 @@ func build() -> void:
 	cont_btn = _btn("Continue", true, func(): resume.emit())
 	brow.add_child(cont_btn)
 	brow.add_child(_btn("Settings", false, func(): open_settings.emit()))
+	brow.add_child(_btn("Save and quit", false, func(): save_quit.emit()))
 	brow.add_child(_btn("Quit run", false, func(): quit_run.emit()))
 	_build_summary(root)
 	_build_tabs(root)
@@ -329,6 +331,11 @@ func _build_summary(root: Control) -> void:
 	rsp.alignment = BoxContainer.ALIGNMENT_END
 	rsp.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	bar.add_child(rsp)
+	var sum_save := _btn("Save and quit", false, func(): save_quit.emit())
+	sum_save.custom_minimum_size = Vector2(250, 56)
+	sum_save.add_theme_font_size_override("font_size", 22)
+	sum_save.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	rsp.add_child(sum_save)
 	var sum_quit := _btn("Quit run", false, func(): quit_run.emit())
 	sum_quit.custom_minimum_size = Vector2(250, 56)
 	sum_quit.add_theme_font_size_override("font_size", 22)

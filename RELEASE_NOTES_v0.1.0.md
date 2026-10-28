@@ -1,5 +1,14 @@
 # Megarift Survivors v0.1.0 — pre-release (test build)
 
+## Changes in 0.1.0-alpha.5
+- **Save codes fixed:** codes are now compressed (about 14,000 characters even with everything unlocked instead of 280,000). Pasting ignores line breaks, spaces and quotes added when copying, and says what is wrong ("cut short", "empty clipboard", "not a save") instead of just "Invalid code". Old codes still work.
+- **Redeem codes:** Settings > Account > Redeem code, for special unlock bundles. Each code works once per save.
+- **Strong starter:** on a new profile, "Skip the quiz: pick a strong starter" offers 12 fully evolved partners (most can Mega Evolve) right away.
+- **HUD layout editor:** Settings > Graphics > Edit HUD layout. Drag (mouse or finger), nudge (arrow keys, controller right stick) and resize (slider, L1/R1) the six on-run elements: health plate, radar, stats panel, item list, resource counters and move bar. Hide the radar or the stats panel, and save layouts as named presets (up to 8). The old per-element size sliders moved into the editor.
+- **Radar switch:** Settings > Graphics > Radar turns the map off during a run.
+- **Save and quit:** pause > Save and quit (on the Summary and Options tabs) stores a Normal run (Hyper included): clock, level, HP, moves, upgrades, items, coins and tickets, Mega state, Doom level, boss schedule and the map. The main menu then shows **Resume run**. Enemies on screen are not saved (the world repopulates), and you can't save during boss fights, rifts or other special events. One saved run at a time; it ends with the run.
+- **Windows build:** `megarift-survivors-0.1.0-alpha.5-windows.zip` is a single .exe for PC (no install). Windows SmartScreen may warn because the file is not signed.
+
 ## Changes in 0.1.0-alpha.4
 - **Controller:** the Cancel button (B / Circle) skips a level-up upgrade for +25% XP, and the on-screen Skip prompt now shows the button.
 
