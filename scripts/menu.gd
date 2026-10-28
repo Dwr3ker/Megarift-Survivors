@@ -873,7 +873,7 @@ func _ready() -> void:
 	back_btn = _btn("◀ Back", func(): _leave(), Vector2(150, 44))
 	top.add_child(back_btn)
 	credit_lbl = Label.new()
-	credit_lbl.text = L.t("Made by JayElDragon")
+	credit_lbl.text = L.t("Made by Dwr3ker")
 	credit_lbl.add_theme_font_size_override("font_size", 18)
 	credit_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	credit_lbl.custom_minimum_size = Vector2(118, 0)

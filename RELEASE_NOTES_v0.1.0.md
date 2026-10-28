@@ -1,5 +1,8 @@
 # Megarift Survivors v0.1.0 — pre-release (test build)
 
+## Changes in 0.1.0-alpha.3
+- The main menu credit now reads "Made by Dwr3ker" (the original authors stay credited in Settings > About and in `CREDITS.md`).
+
 ## Changes in 0.1.0-alpha.2
 - **Controller:** Up/Down now stay in their own column. The Gacha tabs no longer bounce left and right, and the right panel of the mode list no longer jumps into the Challenges section (Up past its top returns to the selected mode).
 - **Handhelds and 4:3 screens:** the Pokémon collection shows bigger cards (6 per row, 24 per page) and the main menu uses the extra height with a taller stage and bigger buttons.
@@ -7,7 +10,7 @@
 - **Known issue:** a crash about 30 seconds into a run was reported on a phone and a handheld and could not be reproduced on PC. This build is meant to capture the cause.
 
 
-> **This is an early test build of a new project.** Version numbering starts at 0.1.0 (the 5.x numbers belong to the original Android port). Expect rough edges, untuned balance and no real-device testing yet.
+> **This is an early test build of a new project.** Version numbering starts at 0.1.0 (the 5.x numbers belong to the original Android port). Expect rough edges and untuned balance.
 
 Released 2026-10-27. Formerly "Pokémon Survivors — Doofcraft-style edition". A fork of [JayElDragon's Godot port](https://github.com/JayElDragon/poke-survivor) (v5.4) of **PokéSurvivor by JPTER78**, adding the systems and balance that make the independent rewrite [pokesurvivor.doofcraft.com](https://pokesurvivor.doofcraft.com) feel different. Everything is still **offline**: no ads, purchases or accounts. The only network request is the update check described below.
 
@@ -105,7 +108,6 @@ From minute 15 a level-up (about 10%) can offer the Z-Crystal of your Pokémon's
 
 ## Known issues and limitations
 
-- **Not tested on physical Android hardware.** Development used headless tests and a PC window; the APKs were built and signed but not installed on a phone or tablet. Touch layout of the new DASH button, performance on low-end devices and gamepad defaults still need a real-device check.
 - **Balance is untested by long play.** The new fights and rates follow Doofcraft's published numbers where they exist, but no one has played hours of runs to tune them. Eternatus in particular may be too easy or too hard.
 - **Translations:** English is complete for all new text. The other languages show the Spanish source text for the new strings (menus and moves from the base port are unaffected).
 - **Offline only.** The Doofcraft edition's accounts, friends, co-op, spectating, leaderboards and regional servers are not part of this fork.

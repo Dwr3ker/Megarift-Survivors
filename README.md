@@ -61,7 +61,7 @@ The feature work is covered by headless Godot scripts (one per system, 20 in tot
 godot --headless --path . --script res://tools/tests/mega_run_test.gd
 ```
 
-Each prints `PASS`/`FAIL` per check and ends with `RESULT: PASS` or `FAIL`. Tests that start a run snapshot your save and restore it when they finish. They exercise game logic only: **they cannot tell you how the game feels**, and none of this has been verified on physical Android hardware yet (see the release notes).
+Each prints `PASS`/`FAIL` per check and ends with `RESULT: PASS` or `FAIL`. Tests that start a run snapshot your save and restore it when they finish. They exercise game logic only: **they cannot tell you how the game feels**,.
 
 ## Credits and licenses
 
