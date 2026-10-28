@@ -55,7 +55,7 @@ The in-game **update check** looks at `Dwr3ker/Megarift-Survivors` (`REPO` in `s
 
 ## Tests
 
-The feature work is covered by headless Godot scripts (one per system, 19 in total), in `tools/tests/`:
+The feature work is covered by headless Godot scripts (one per system, 20 in total), in `tools/tests/`:
 
 ```
 godot --headless --path . --script res://tools/tests/mega_run_test.gd

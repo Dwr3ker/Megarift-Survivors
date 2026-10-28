@@ -44,7 +44,9 @@ const UI_THEMES := [
 const DEFAULT_THEME := 0
 const GP := preload("res://scripts/gachapon.gd")
 const C_GOLD := Color("#ffd65c")
+const CR = preload("res://scripts/crash_report.gd")
 const PER_PAGE := 32   # 8 columns x 4 rows per page: the grid fits the screen without a half-clipped row
+const PER_PAGE_COMPACT := 24   # 6 columns x 4 rows with bigger cards on squarer / handheld screens
 
 var theme_main := Theme.new()
 var screens := {}
@@ -820,6 +822,10 @@ func _build_theme() -> void:
 
 
 func _ready() -> void:
+	if not bool(Engine.get_meta("menu_overlay", false)) and CR.take_crash_flag():
+		_show_crash_report.call_deferred()
+	if "--autorun" in OS.get_cmdline_args():   # test hook: start a normal run a few seconds after launch (never used by a normal launch)
+		get_tree().create_timer(5.0).timeout.connect(func(): _start_mode("normal"))
 	TXS.hook(self)
 	get_tree().node_added.connect(_on_node_added)
 	SV.ensure()
@@ -1734,6 +1740,10 @@ func _input(event: InputEvent) -> void:
 					sc2.scroll_vertical += 130 if dn2 else -130
 					get_viewport().set_input_as_handled()
 					return
+	if _column_nav(event):
+		get_viewport().set_input_as_handled()
+		call_deferred("_follow_focus")
+		return
 	if _grid_nav(event):
 		get_viewport().set_input_as_handled()
 		call_deferred("_follow_focus")
@@ -1755,6 +1765,73 @@ func _input(event: InputEvent) -> void:
 			return
 		_go_back()
 		get_viewport().set_input_as_handled()
+
+
+# Focusable controls under a node (visible, enabled), used by _column_nav.
+func _focusables(n: Node, out: Array) -> void:
+	for ch in n.get_children():
+		if ch is Control:
+			var c := ch as Control
+			if not c.visible:
+				continue
+			if c.focus_mode == Control.FOCUS_ALL and not (c is BaseButton and (c as BaseButton).disabled) and c.size.x > 4.0 and c.size.y > 4.0:
+				out.append(c)
+		_focusables(ch, out)
+
+
+# D-pad Up/Down that stays in the current column. The row-based navigation (_grid_nav) merges a left tab column and the
+# right-hand buttons into shared rows, so the focus zig-zags between them. Only acts when a control overlaps the current one
+# horizontally; otherwise the row navigation runs as before.
+func _column_nav(event: InputEvent) -> bool:
+	var dir := Vector2i.ZERO
+	if event.is_action_pressed("ui_down", true):
+		dir = Vector2i(0, 1)
+	elif event.is_action_pressed("ui_up", true):
+		dir = Vector2i(0, -1)
+	else:
+		return false   # Left/Right keep the row-cycling of _grid_nav
+	if _popup_open() or listening != "" or not screens.has(cur):
+		return false
+	if gacha_result != null and gacha_result.visible:
+		return false
+	var f: Control = get_viewport().gui_get_focus_owner()
+	if f == null or f is Slider or f is LineEdit or f is TextEdit or f is OptionButton or not screens[cur].is_ancestor_of(f):
+		return false
+	var all: Array = []
+	_focusables(screens[cur], all)
+	var fr: Rect2 = f.get_global_rect()
+	var best: Control = null
+	var best_gap := INF
+	var best_ov := 0.0
+	for c in all:
+		if c == f or f.is_ancestor_of(c) or c.is_ancestor_of(f):
+			continue
+		var cr: Rect2 = c.get_global_rect()
+		var gap: float
+		var ov: float
+		if dir.y != 0:
+			gap = (cr.get_center().y - fr.get_center().y) * float(dir.y)
+			ov = minf(fr.end.x, cr.end.x) - maxf(fr.position.x, cr.position.x)
+		else:
+			gap = (cr.get_center().x - fr.get_center().x) * float(dir.x)
+			ov = minf(fr.end.y, cr.end.y) - maxf(fr.position.y, cr.position.y)
+		if gap <= 2.0 or ov <= 1.0:
+			continue
+		if gap < best_gap - 0.5 or (absf(gap - best_gap) <= 0.5 and ov > best_ov):
+			best = c
+			best_gap = gap
+			best_ov = ov
+	if best != null:
+		best.grab_focus()
+		Aud.sfx("hover")
+		return true
+	# Mode list: the right-hand panel is its own column. Up past its first control goes back to the selected mode, and Down at the
+	# bottom stays put instead of jumping into the list's Challenges section.
+	if cur == "modes" and dir.y != 0 and not mode_tiles.values().has(f) and mode_tiles.has(modes_sel):
+		if dir.y < 0:
+			(mode_tiles[modes_sel] as Control).grab_focus()
+		return true
+	return false
 
 
 # Léxico con mando: pestañas (columna izquierda), filtros y rejilla se recorren por separado, sin saltos raros.
@@ -1953,7 +2030,7 @@ func _build_main() -> void:
 	var cbx: StyleBoxFlat = _shad(UIS.box(UIS.INK, UIS.EDGE, 3, false), 10, Vector2(0, 6), 0.6)
 	cbx.set_content_margin_all(3)
 	card.add_theme_stylebox_override("panel", cbx)
-	card.custom_minimum_size = Vector2(0, 320)
+	card.custom_minimum_size = Vector2(0, 440 if _compact() else 320)   # squarer screens have room for a taller stage
 	left.add_child(card)
 	var stage := StageBG.new()   # escenario bajo el Pokemon (el Pokemon se anade despues, encima)
 	stage.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -2003,16 +2080,16 @@ func _build_main() -> void:
 		_stat_chip(String(ck[0]), String(ck[1]), chips)
 	# columna derecha: Continuar + mosaico de secciones (la franja de color indica el grupo)
 	var right := VBoxContainer.new()
-	right.custom_minimum_size = Vector2(500, 0)
+	right.custom_minimum_size = Vector2(540 if _compact() else 500, 0)
 	right.alignment = BoxContainer.ALIGNMENT_CENTER
 	right.add_theme_constant_override("separation", 10)
 	row.add_child(right)
-	cont_btn = _btn("", func(): _start_mode(_last_mode_id()), Vector2(0, 92))
+	cont_btn = _btn("", func(): _start_mode(_last_mode_id()), Vector2(0, 116 if _compact() else 92))
 	cont_btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	cont_btn.icon = IC.btn_tex("flag", 44)
 	cont_btn.add_theme_constant_override("icon_max_width", 48)
 	cont_btn.add_theme_constant_override("h_separation", 18)
-	cont_btn.add_theme_font_size_override("font_size", 24)
+	cont_btn.add_theme_font_size_override("font_size", 28 if _compact() else 24)
 	_gold_btn(cont_btn, true)
 	for stn in ["normal", "hover", "pressed", "focus"]:
 		var csb := cont_btn.get_theme_stylebox(stn) as StyleBoxFlat
@@ -2036,12 +2113,12 @@ func _build_main() -> void:
 		right.add_child(hr)
 		for info in r:
 			var key: String = String(info[0])
-			var tb: Button = _tile(String(info[1]), String(info[2]), info[3], func(): _menu_pick(key), 116.0)
+			var tb: Button = _tile(String(info[1]), String(info[2]), info[3], func(): _menu_pick(key), 156.0 if _compact() else 116.0)
 			hr.add_child(tb)
 			main_btns[key] = tb
 			if key == "goals":
 				goals_btn = tb
-	var gp := _tile("TM Gachapon", "gcoin", UIS.ORCHID, func(): _menu_pick("gachapon"), 64.0, true)
+	var gp := _tile("TM Gachapon", "gcoin", UIS.ORCHID, func(): _menu_pick("gachapon"), 80.0 if _compact() else 64.0, true)
 	right.add_child(gp)
 	main_btns["gachapon"] = gp
 	main_play_btn = cont_btn   # el foco por defecto es "Continuar": una pulsacion y a jugar
@@ -2051,7 +2128,7 @@ func _build_main() -> void:
 func _tile(text: String, icon: String, accent: Color, cb: Callable, h: float, wide: bool = false) -> Button:
 	var b := _btn(text, cb, Vector2(0, h))
 	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	b.add_theme_font_size_override("font_size", 20)
+	b.add_theme_font_size_override("font_size", 24 if _compact() else 20)
 	if wide:
 		# icon + name centred together as one group
 		b.text = ""
@@ -3865,7 +3942,7 @@ func _dex_step(d: int) -> void:
 			break
 	ix = posmod(ix + d, list.size())
 	dex_sel = int(list[ix]["dex"])
-	dex_page = ix / PER_PAGE
+	dex_page = ix / _per_page()
 	_refresh_dex()
 
 
@@ -3887,13 +3964,37 @@ func _dex_mark() -> void:
 		_card_style(b, base, C_GOLD if sel else (Color("#35d0b0") if team else Color("#3a3262")), 4 if sel else 2)
 
 
+# Shown on the first menu after a run that did not end normally: the tail of the previous session's log.
+func _show_crash_report() -> void:
+	var cr: Control = CR.new()
+	add_child(cr)
+	cr.build(CR.previous_log_tail())
+
+
+# Squarer screens (4:3 handhelds) get bigger collection cards: fewer columns, larger text.
+func _compact() -> bool:
+	if Engine.has_meta("force_compact"):   # tests
+		return bool(Engine.get_meta("force_compact"))
+	var vp: Vector2 = get_viewport_rect().size
+	return vp.x / maxf(vp.y, 1.0) < 1.5
+
+
+func _per_page() -> int:
+	return PER_PAGE_COMPACT if _compact() else PER_PAGE
+
+
+func _dex_cols() -> int:
+	return 6 if _compact() else 8
+
+
 func _dex_card(p: Dictionary, owned: bool) -> Button:
+	var ck: float = 1.3 if _compact() else 1.0
 	var dx: int = int(p["dex"])
 	var show: bool = owned or dex_pick_party
 	var types: Array = p["types"]
 	var tcol := Color.html(String(MD.TYPE_COLOR.get(String(types[0]), "#b0a99f")))
 	var b := Button.new()
-	b.custom_minimum_size = Vector2(86, 96)
+	b.custom_minimum_size = Vector2(86, 96) * ck
 	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	b.focus_mode = Control.FOCUS_ALL
 	b.clip_contents = true
@@ -3906,7 +4007,7 @@ func _dex_card(p: Dictionary, owned: bool) -> Button:
 			tn.append(L.t(String(MD.TYPE_NAME[String(t)])))
 		b.tooltip_text = "%s · %s" % [L.t(String(p["name"])), " / ".join(PackedStringArray(tn))]
 	# numero
-	var nl := _label("#%03d" % dx, 11, UIS.MUTED if show else Color(UIS.MUTED, 0.55))
+	var nl := _label("#%03d" % dx, roundi(11.0 * ck), UIS.MUTED if show else Color(UIS.MUTED, 0.55))
 	nl.autowrap_mode = TextServer.AUTOWRAP_OFF
 	nl.position = Vector2(6.0, 3.0)
 	nl.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -3914,8 +4015,8 @@ func _dex_card(p: Dictionary, owned: bool) -> Button:
 	# sprite
 	var tr := TextureRect.new()
 	tr.set_anchors_preset(Control.PRESET_FULL_RECT)
-	tr.offset_top = 16.0
-	tr.offset_bottom = -32.0
+	tr.offset_top = 16.0 * ck
+	tr.offset_bottom = -32.0 * ck
 	tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -3925,9 +4026,9 @@ func _dex_card(p: Dictionary, owned: bool) -> Button:
 		tr.modulate = Color(0, 0, 0, 0.5)
 	b.add_child(tr)
 	# nombre
-	var nm := _label(L.t(String(p["name"])) if show else "", 12, UIS.TEXT)
+	var nm := _label(L.t(String(p["name"])) if show else "", roundi(12.0 * ck), UIS.TEXT)
 	nm.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	nm.offset_top = -30.0
+	nm.offset_top = -30.0 * ck
 	nm.offset_bottom = -9.0
 	nm.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	nm.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
@@ -3998,7 +4099,8 @@ func _mega_badge(dx: int) -> Control:
 
 func _refresh_dex() -> void:
 	var list: Array = _dex_filtered()
-	var pages: int = maxi(1, ceili(float(list.size()) / float(PER_PAGE)))
+	dex_grid.columns = _dex_cols()
+	var pages: int = maxi(1, ceili(float(list.size()) / float(_per_page())))
 	dex_page = clampi(dex_page, 0, pages - 1)
 	_clear(dex_grid)
 	dex_cards.clear()
@@ -4017,7 +4119,7 @@ func _refresh_dex() -> void:
 	dex_prog_bar.max_value = maxf(1.0, float(prog.y))
 	dex_prog_bar.value = float(prog.x)
 	var first: Button = null
-	for i in range(dex_page * PER_PAGE, mini(list.size(), (dex_page + 1) * PER_PAGE)):
+	for i in range(dex_page * _per_page(), mini(list.size(), (dex_page + 1) * _per_page())):
 		var p: Dictionary = list[i]
 		var dx: int = int(p["dex"])
 		var owned: bool = SV.owns(dx)

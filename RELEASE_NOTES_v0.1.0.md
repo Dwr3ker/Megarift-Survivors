@@ -1,5 +1,12 @@
 # Megarift Survivors v0.1.0 — pre-release (test build)
 
+## Changes in 0.1.0-alpha.2
+- **Controller:** Up/Down now stay in their own column. The Gacha tabs no longer bounce left and right, and the right panel of the mode list no longer jumps into the Challenges section (Up past its top returns to the selected mode).
+- **Handhelds and 4:3 screens:** the Pokémon collection shows bigger cards (6 per row, 24 per page) and the main menu uses the extra height with a taller stage and bigger buttons.
+- **Crash report:** if a run ends unexpectedly, the next launch shows the end of the game log (with the `[run]` clock lines) so it can be photographed and sent. File logging is on for mobile. The Android vibration permission was added; if the game still closes about 30 seconds into a run, try turning Vibration off in Settings and send the report screen.
+- **Known issue:** a crash about 30 seconds into a run was reported on a phone and a handheld and could not be reproduced on PC. This build is meant to capture the cause.
+
+
 > **This is an early test build of a new project.** Version numbering starts at 0.1.0 (the 5.x numbers belong to the original Android port). Expect rough edges, untuned balance and no real-device testing yet.
 
 Released 2026-10-27. Formerly "Pokémon Survivors — Doofcraft-style edition". A fork of [JayElDragon's Godot port](https://github.com/JayElDragon/poke-survivor) (v5.4) of **PokéSurvivor by JPTER78**, adding the systems and balance that make the independent rewrite [pokesurvivor.doofcraft.com](https://pokesurvivor.doofcraft.com) feel different. Everything is still **offline**: no ads, purchases or accounts. The only network request is the update check described below.

@@ -19,6 +19,7 @@ const FM = preload("res://scripts/forme.gd")
 const ETX = preload("res://scripts/eternamax.gd")
 const DM = preload("res://scripts/doom.gd")
 const CAL = preload("res://scripts/calamity.gd")
+const CR = preload("res://scripts/crash_report.gd")
 const PL = preload("res://scripts/plates.gd")
 const ZC = preload("res://scripts/zcrystal.gd")
 const POI = preload("res://scripts/poi.gd")
@@ -450,6 +451,7 @@ const ETER_PAY_FIRST := {"coins": 1500, "t10": 2, "t": 10}
 const ETER_PAY_AGAIN := {"coins": 1000, "t10": 1, "t": 5}
 var eter_at := 3600.0     # segundo de partida en que toca el siguiente Eternatus
 var eter_kills := 0
+var bc_t := 0.0           # breadcrumb timer (see _process)
 var eter_prompt := false  # pantalla de eleccion pendiente (espera a que no haya otras cartas abiertas)
 var doom_winds := 0       # Segundos alientos cogidos (una por nivel de Doom, doom.gd)
 var dash_k := 1.0         # Sobremarcha: multiplicador del enfriamiento del dash
@@ -560,6 +562,7 @@ var bond_first := ""
 
 
 func _ready() -> void:
+	CR.mark_run_start()
 	RenderingServer.set_default_clear_color(Color("#141028"))
 	randomize()
 	L.apply()
@@ -1046,6 +1049,7 @@ func _open_settings() -> void:
 
 
 func _go_menu() -> void:
+	CR.mark_run_end()
 	PG.off = false
 	Engine.time_scale = 1.0
 	get_tree().change_scene_to_file("res://scenes/menu.tscn")
@@ -1055,6 +1059,7 @@ func _finish_run() -> void:
 	if run_saved:
 		return
 	run_saved = true
+	CR.mark_run_end()
 	cal = null
 	if etx != null:
 		etx.stop()
@@ -1332,6 +1337,10 @@ func _process(delta: float) -> void:
 			Aud.sfx("select")
 	elif player.dead:
 		ret_cd = 0.0
+	bc_t -= delta
+	if bc_t <= 0.0:   # breadcrumb for the log file: where the run was when something went wrong
+		bc_t = 10.0
+		print("[run] t=%d enemies=%d hp=%d lvl=%d boss=%s choosing=%s" % [int(run_time), enemies.size(), int(player.hp), player.level, str(_boss_alive()), str(choosing)])
 	# S59: redes de seguridad contra el "mundo congelado" (choosing/time_scale atascados sin que haya nada en pantalla).
 	if choosing and not cards.open:
 		choose_idle += delta
