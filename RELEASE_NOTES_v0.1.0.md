@@ -1,5 +1,14 @@
 # Megarift Survivors v0.1.0 — pre-release (test build)
 
+## Changes in 0.1.0-alpha.7
+- Random redeem codes: new codes give a random legendary (any generation or a chosen one), a random shiny, a shiny legendary or a Mega-capable Pokémon. They prefer something you don't have yet and pay coins when nothing new is left.
+- Run in progress: if you left a run saved, the menu reminds you when it opens and when you press Play: resume it or give it up.
+- Keyboard options for PC: Settings > Controls > Keyboard lets you rebind Options, Build summary, move cycling, Z-Move, Dynamax, Dash, Team swap and moves 1-6.
+- Pause: Tab (Select on a gamepad) opens the Build summary and Esc (Start) opens Options. The key of the open tab closes it; the other key switches tab. Dynamax moved from Select to X by default.
+- New profiles: Skip the quiz now lets you pick any of the normal starters (the strong starter list was removed).
+- Menus: the left stick moves through menus more slowly.
+- Boss HP bar at the top centre, below the clock, counters, Dynamax bar and notices.
+
 ## Changes in 0.1.0-alpha.6
 - **Fusion:** a fused move can fuse again with another evolved, max-level move, up to 4 moves in one slot. The slot bar now shows every move inside a slot, so a fusion bonded with another move no longer seems to disappear.
 - **Shiny toggle:** "Use shiny version" in the collection only changes the Pokémon you are viewing (it was changing every owned Pokémon).
@@ -10,7 +19,7 @@
 ## Changes in 0.1.0-alpha.5
 - **Save codes fixed:** codes are now compressed (about 14,000 characters even with everything unlocked instead of 280,000). Pasting ignores line breaks, spaces and quotes added when copying, and says what is wrong ("cut short", "empty clipboard", "not a save") instead of just "Invalid code". Old codes still work.
 - **Redeem codes:** Settings > Account > Redeem code, for special unlock bundles. Each code works once per save.
-- **Strong starter:** on a new profile, "Skip the quiz: pick a strong starter" offers 12 fully evolved partners (most can Mega Evolve) right away.
+- **Strong starter:** on a new profile, "Skip the quiz: pick a starter" offers 12 fully evolved partners (most can Mega Evolve) right away.
 - **HUD layout editor:** Settings > Graphics > Edit HUD layout. Drag (mouse or finger), nudge (arrow keys, controller right stick) and resize (slider, L1/R1) the six on-run elements: health plate, radar, stats panel, item list, resource counters and move bar. Hide the radar or the stats panel, and save layouts as named presets (up to 8). The old per-element size sliders moved into the editor.
 - **Radar switch:** Settings > Graphics > Radar turns the map off during a run.
 - **Save and quit:** pause > Save and quit (on the Summary and Options tabs) stores a Normal run (Hyper included): clock, level, HP, moves, upgrades, items, coins and tickets, Mega state, Doom level, boss schedule and the map. The main menu then shows **Resume run**. Enemies on screen are not saved (the world repopulates), and you can't save during boss fights, rifts or other special events. One saved run at a time; it ends with the run.

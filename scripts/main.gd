@@ -43,6 +43,7 @@ const PXF = preload("res://scripts/pxfont.gd")
 const UIS = preload("res://scripts/ui_style.gd")
 const DSP = preload("res://scripts/display.gd")
 const PAD = preload("res://scripts/pad.gd")
+const KB = preload("res://scripts/keys.gd")
 const PADI = preload("res://scripts/padicons.gd")
 const ARENA = preload("res://scripts/arena.gd")
 const FUS = preload("res://scripts/fusions.gd")
@@ -486,6 +487,7 @@ var ebullets: Array = []
 var player_vel := Vector2.ZERO
 var coins := 0
 var paused := false
+var pause_tab := 0   # which tab the pause screen opens on: 0 = Build summary, 1 = Options
 var choose_idle := 0.0
 var ret_cd := 0.0
 var ret_last := 0
@@ -908,46 +910,41 @@ func _unhandled_input(event: InputEvent) -> void:
 	var slot := -1
 	var cyc := 0
 	var go := false
-	var toggle_pause := false
+	var toggle_pause := false   # Esc / Start: Options
+	var summary_pause := false  # Tab / Select: Build summary
 	var confirm := false
 	var cancel := false
 	var tpos := Vector2(-1.0, -1.0)
 	if event is InputEventKey and event.pressed and not event.echo:
-		match event.keycode:
-			KEY_1:
-				slot = 0
-			KEY_2:
-				slot = 1
-			KEY_3:
-				slot = 2
-			KEY_4:
-				slot = 3
-			KEY_5:
-				slot = 4
-			KEY_6:
-				slot = 5
-			KEY_Q:
-				cyc = -1
-			KEY_E:
-				cyc = 1
-			KEY_TAB:
-				swap_req = -1
-			KEY_Z:
-				z_req = true
-			KEY_C:
-				dyn_req = true
-			KEY_SHIFT:
+		var kact: String = KB.action_of(event.keycode)
+		if kact.begins_with("slot"):
+			slot = int(kact.substr(4)) - 1
+		elif kact == "prev":
+			cyc = -1
+		elif kact == "next":
+			cyc = 1
+		elif kact == "swap":
+			swap_req = -1
+		elif kact == "zmove":
+			z_req = true
+		elif kact == "dynamax":
+			dyn_req = true
+		elif kact == "dash":
+			dash_req = true
+		elif kact == "options":
+			toggle_pause = true
+		elif kact == "summary":
+			summary_pause = true
+		elif event.keycode == KEY_P:
+			toggle_pause = true
+		elif event.keycode == KEY_ENTER or event.keycode == KEY_KP_ENTER or event.keycode == KEY_SPACE:
+			confirm = true
+			if event.keycode == KEY_SPACE and hud.act_txt == "":   # Espacio: interactuar si hay algo cerca; si no, dash
 				dash_req = true
-			KEY_ESCAPE, KEY_P:
-				toggle_pause = true
-			KEY_ENTER, KEY_KP_ENTER, KEY_SPACE:
-				confirm = true
-				if event.keycode == KEY_SPACE and hud.act_txt == "":   # Espacio: interactuar si hay algo cerca; si no, dash
-					dash_req = true
-			KEY_BACKSPACE, KEY_X:
-				cancel = true
-			_:
-				go = true
+		elif event.keycode == KEY_BACKSPACE or event.keycode == KEY_X:
+			cancel = true
+		else:
+			go = true
 	elif event is InputEventJoypadButton and event.pressed:
 		var bi: int = event.button_index
 		if bi == PAD.btn("dash"):   # por defecto comparte boton con "Atras": en partida es dash, en menus sigue siendo atras
@@ -960,7 +957,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			cyc = -1
 		elif bi == PAD.btn("next"):
 			cyc = 1
-		elif bi == PAD.btn("pause") or (bi == JOY_BUTTON_BACK and not PAD.is_mapped(JOY_BUTTON_BACK)):
+		elif bi == PAD.btn("summary"):
+			summary_pause = true
+		elif bi == PAD.btn("pause"):
 			toggle_pause = true
 		elif bi == PAD.btn("swap"):
 			swap_req = -1
@@ -985,10 +984,21 @@ func _unhandled_input(event: InputEvent) -> void:
 	var sreq: int = swap_req
 	swap_req = -2
 	if player.dead:
-		if (go or confirm or cancel or toggle_pause or slot >= 0) and _death_clock() > 1.3:
+		if (go or confirm or cancel or toggle_pause or summary_pause or slot >= 0) and _death_clock() > 1.3:
 			_go_menu()
 	elif paused:
-		if toggle_pause or cancel:
+		# the key of the tab that is open closes the pause; the other key switches tab
+		if toggle_pause:
+			if pause_ui.tab == 1:
+				paused = false
+			else:
+				pause_ui.set_tab(1)
+		elif summary_pause:
+			if pause_ui.tab == 0:
+				paused = false
+			else:
+				pause_ui.set_tab(0)
+		elif cancel:
 			paused = false
 	elif z_state != "":
 		pass
@@ -1010,8 +1020,13 @@ func _unhandled_input(event: InputEvent) -> void:
 		if sreq > -2 and mode == "team":
 			_swap_team(_team_next() if sreq == -1 else sreq)
 		if toggle_pause:
+			pause_tab = 1
+			paused = true
+		elif summary_pause:
+			pause_tab = 0
 			paused = true
 		elif tpos.x >= 0.0 and hud.pause_rects()[0].has_point(tpos):
+			pause_tab = 0
 			paused = true
 		elif slot >= 0:
 			_set_active(slot)
@@ -1207,6 +1222,7 @@ func _save_and_quit() -> void:
 	if RS.save(self):
 		run_saved = true   # nothing is paid out now
 		CR.mark_run_end()
+		Engine.set_meta("resume_prompted", true)   # they just saved on purpose: no reminder on the menu
 		_go_menu()
 	else:
 		_say("Could not save the run.", 3.0)
@@ -1320,7 +1336,7 @@ func _process(delta: float) -> void:
 		var want_ui: bool = paused and not player.dead
 		if want_ui != pause_ui.visible:
 			if want_ui:
-				pause_ui.open()
+				pause_ui.open(pause_tab)
 			else:
 				pause_ui.close()
 	if hud.toast_t > 0.0:
@@ -1535,6 +1551,10 @@ func _process(delta: float) -> void:
 	hud.dash_max = DASH_CD * dash_k
 	hud.z_cd_max = ZC.COOLDOWN if z_crystal else ZM.COOLDOWN
 	hud.dyn_cd_max = DYN.COOLDOWN
+	var bb = _bar_boss()
+	hud.boss_max = float(bb.max_hp) if bb != null else 0.0
+	hud.boss_hp = float(bb.hp) if bb != null else 0.0
+	hud.boss_name = String(bb.enemy_name) if bb != null else ""
 	hud.revives = revives
 	hud.z_dim = _z_dim()
 	hud.z_state = z_state
@@ -5113,6 +5133,19 @@ func _spawn_boss(b: Dictionary, t_v: float = -1.0):
 	shake = 14.0
 	_hap(120)
 	return e
+
+
+# The boss shown in the top-centre HP bar: the closest living boss (wild legendaries have their own fight and do not count).
+func _bar_boss():
+	var best = null
+	var bd := 1.0e12
+	for e in enemies:
+		if is_instance_valid(e) and e.boss and not e.dead and not _is_wildleg(e) and e.max_hp > 0.0:
+			var d: float = e.position.distance_squared_to(player.position)
+			if d < bd:
+				bd = d
+				best = e
+	return best
 
 
 func _boss_alive() -> bool:
@@ -11963,6 +11996,9 @@ class Hud extends Node2D:
 	var mom := 0.0
 	var dash_cd := 0.0
 	var dash_max := DASH_CD
+	var boss_max := 0.0       # top-centre boss HP bar (0 = no boss)
+	var boss_hp := 0.0
+	var boss_name := ""
 	var z_cd_max := 120.0     # full Z-Move cooldown, for the ring on the Z button
 	var dyn_cd_max := 0.0     # full Dynamax cooldown
 	var hyper := false
@@ -12314,7 +12350,32 @@ class Hud extends Node2D:
 			y = DYN_BAR_Y + 22.0 + 26.0
 		if thief_notice >= 0.0 or rift_notice >= 0.0:
 			y = maxf(y, notice_cy(vp) + 34.0 + 28.0)   # under the notice box
+		if boss_max > 0.0:
+			y = maxf(y, boss_bar_y(vp) + 44.0)
 		return y
+
+	# The boss HP bar sits at the very bottom of the centre-top stack: under the clock, counters, Dynamax bar and notices.
+	func boss_bar_y(vp: Vector2) -> float:
+		var y := 112.0
+		if dyn_left >= 0.0:
+			y = DYN_BAR_Y + 22.0 + 8.0
+		if thief_notice >= 0.0 or rift_notice >= 0.0:
+			y = maxf(y, notice_cy(vp) + 34.0 + 10.0)
+		return y
+
+	func draw_boss_bar(font: Font, vp: Vector2) -> void:
+		if boss_max <= 0.0:
+			return
+		var w: float = minf(420.0, vp.x - 420.0)
+		var x0: float = vp.x * 0.5 - w * 0.5
+		var y: float = boss_bar_y(vp)
+		var fr: float = clampf(boss_hp / boss_max, 0.0, 1.0)
+		draw_rect(Rect2(x0 - 3.0, y - 3.0, w + 6.0, 30.0), Color(0, 0, 0, 0.72))
+		draw_rect(Rect2(x0, y, w, 24.0), UIS.INK)
+		draw_rect(Rect2(x0, y, w * fr, 24.0), Color("#d83a4e") if fr > 0.25 else Color("#ff9a3a"))
+		var lab: String = "%s  %d%%" % [L.t(boss_name).to_upper(), ceili(fr * 100.0)]
+		_dso(font, Vector2(x0, y + 18.0), lab, HORIZONTAL_ALIGNMENT_CENTER, w, 15, 3, Color(UIS.INK, 0.9))
+		_ds(font, Vector2(x0, y + 18.0), lab, HORIZONTAL_ALIGNMENT_CENTER, w, 15, Color.WHITE)
 
 	func draw_thief_notice(font: Font, vp: Vector2) -> void:
 		if thief_notice < 0.0:
@@ -13006,6 +13067,7 @@ class Hud extends Node2D:
 		draw_rift(font, vp)
 		draw_rift_notice(font, vp)
 		draw_thief_notice(font, vp)
+		draw_boss_bar(font, vp)
 		draw_thieves(font, vp)
 		draw_threats(font, vp, ins)
 		draw_hit_dir(vp)

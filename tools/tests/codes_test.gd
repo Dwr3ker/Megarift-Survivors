@@ -81,5 +81,50 @@ func _init() -> void:
 	var r7: Dictionary = CODES.redeem("Unlock All", sv)
 	check("UNLOCKALL unlocks everything", bool(r7["ok"]) and sv["owned"].size() == SV.dex_list.size() and sv["ach"].size() > 200 and int(sv["pup"]["25"]["hp"]) == 10 and int(sv["coins"]) >= 9999999)
 	check("the plain code words are not stored in the table", not str(CODES.TABLE).contains("MEGARIFT") and not str(CODES.TABLE).contains("UNLOCKALL"))
+	# ---------- random codes ----------
+	var sv2: Dictionary = SV.default_data()
+	var gens_ok := true
+	for g in range(1, 10):
+		var before: int = sv2["owned"].size()
+		var rl: Dictionary = CODES.redeem("legendary%d" % g, sv2)
+		var got: int = int(CODES._random_reward("rleg:%d" % g, SV.default_data())["dex"])
+		var is_leg: bool = bool(SV.dex_by[got].get("leg", false)) and int(SV.dex_by[got]["gen"]) == g
+		if not bool(rl["ok"]) or sv2["owned"].size() != before + 1 or not is_leg:
+			gens_ok = false
+	check("LEGENDARY1..9 each give one legendary of that generation", gens_ok)
+	check("a random code works only once", not bool(CODES.redeem("LEGENDARY3", sv2)["ok"]))
+	var sv3: Dictionary = SV.default_data()
+	var rs: Dictionary = CODES.redeem("shiny", sv3)
+	var got_dex: int = -1
+	for k in sv3["owned"]:
+		got_dex = int(k)
+	check("SHINY gives one shiny Pokémon and counts it", bool(rs["ok"]) and sv3["owned"].size() == 1 and bool(sv3["owned"][str(got_dex)]["shiny"]) and int(sv3["stats"]["shinies"]) == 1)
+	var sv4: Dictionary = SV.default_data()
+	for p in SV.dex_list:
+		if int(p["gen"]) == 2:
+			sv4["owned"][str(int(p["dex"]))] = {"n": 1, "shiny": false}
+	var rg: Dictionary = CODES.redeem("shiny 2", sv4)
+	var shiny_n := 0
+	for k in sv4["owned"]:
+		if bool(sv4["owned"][k]["shiny"]):
+			shiny_n += 1
+	check("SHINY2 turns one owned Gen 2 Pokémon shiny", bool(rg["ok"]) and shiny_n == 1 and sv4["owned"].size() == 100)
+	var sv5: Dictionary = SV.default_data()
+	var rsl: Dictionary = CODES.redeem("shinylegendary", sv5)
+	var kd: int = int(CODES._random_reward("rshinyleg:0", SV.default_data())["dex"])
+	check("SHINYLEGENDARY gives a shiny legendary", bool(rsl["ok"]) and sv5["owned"].size() == 1 and bool(SV.dex_by[kd].get("leg", false)))
+	var sv6: Dictionary = SV.default_data()
+	var rm: Dictionary = CODES.redeem("megarandom", sv6)
+	var md := -1
+	for k in sv6["owned"]:
+		md = int(k)
+	check("MEGARANDOM gives a Mega-capable Pokémon", bool(rm["ok"]) and MG.is_capable(md))
+	var sv7: Dictionary = SV.default_data()
+	for p in SV.dex_list:
+		sv7["owned"][str(int(p["dex"]))] = {"n": 1, "shiny": true}
+	var c0: int = int(sv7["coins"])
+	var rd: Dictionary = CODES.redeem("legendary", sv7)
+	check("with nothing new left a random code pays coins", bool(rd["ok"]) and int(sv7["coins"]) == c0 + CODES.DUPLICATE_COINS, str(rd["msg"]))
+	check("messages are templates with arguments", String(rs["msg"]).contains("%s") and (rs["args"] as Array).size() == 1)
 	print("RESULT: ", "PASS" if ok else "FAIL")
 	quit(0 if ok else 1)

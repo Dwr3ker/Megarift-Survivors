@@ -1,4 +1,5 @@
 extends SceneTree
+const ST = preload("res://scripts/starters_data.gd")
 # Headless check of the handheld fixes: D-pad stays in its column (gacha), the mode list keeps the right panel separate,
 # the collection grid and main menu adapt to squarer screens, and the crash report flow.
 # Run with the environment variable MEGARIFT_CRASH_TEST=1 so the crash flag is written on desktop.
@@ -106,17 +107,17 @@ func _init() -> void:
 	menu5._show("test")
 	for i in range(5):
 		await process_frame
-	menu5._test_pick_strong()
+	menu5._test_pick_other()
 	for i in range(5):
 		await process_frame
 	var grid5: GridContainer = null
 	for c in menu5.test_box.get_children():
 		if c is GridContainer:
 			grid5 = c
-	check("'Skip the quiz' shows the 12 strong starters", grid5 != null and grid5.get_child_count() == 12, str(grid5.get_child_count() if grid5 != null else -1))
+	check("'Skip the quiz' shows the regular starters", grid5 != null and grid5.get_child_count() == ST.STARTERS.size(), str(grid5.get_child_count() if grid5 != null else -1))
 	(grid5.get_child(0) as Button).pressed.emit()
 	await process_frame
-	check("choosing one makes it the partner", int(SV.d["selected"]) == 6 and SV.d["owned"].has("6"), str(SV.d["selected"]))
+	check("choosing one makes it the partner", int(SV.d["selected"]) == int(ST.STARTERS[0]["dex"]) and SV.d["owned"].has(str(int(ST.STARTERS[0]["dex"]))), str(SV.d["selected"]))
 	var tabs_n: int = menu5.SET_TABS.size()
 	for ti in range(tabs_n):
 		menu5.set_tab = ti

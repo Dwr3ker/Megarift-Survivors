@@ -5,6 +5,7 @@ extends CanvasLayer
 const NAVG = preload("res://scripts/navgrid.gd")
 const SV = preload("res://scripts/save_data.gd")
 const PAD = preload("res://scripts/pad.gd")
+const KB = preload("res://scripts/keys.gd")
 const PADI = preload("res://scripts/padicons.gd")
 const IC = preload("res://scripts/icons.gd")
 const L = preload("res://scripts/lang.gd")
@@ -861,8 +862,11 @@ func _refresh_hints() -> void:
 	hint_row.add_child(PADI.rect(PAD.btn("next"), 30.0))
 	hint_row.add_child(_txt("cycle"))
 	hint_row.add_child(_txt("·"))
+	hint_row.add_child(PADI.rect(PAD.btn("summary"), 30.0))
+	hint_row.add_child(_txt("summary"))
+	hint_row.add_child(_txt("·"))
 	hint_row.add_child(PADI.rect(PAD.btn("pause"), 30.0))
-	hint_row.add_child(_txt("pause"))
+	hint_row.add_child(_txt("options"))
 
 
 # Mismo manejo del mando que el menu principal: filas, ciclo izquierda/derecha y columna recordada.
@@ -883,9 +887,9 @@ func _input(event: InputEvent) -> void:
 		elif event.button_index == PAD.btn("next"):
 			sw = 1
 	elif event is InputEventKey and event.pressed and not event.echo:
-		if event.keycode == KEY_Q or event.keycode == KEY_PAGEUP:
+		if event.keycode == KB.key("prev") or event.keycode == KEY_PAGEUP:
 			sw = -1
-		elif event.keycode == KEY_E or event.keycode == KEY_PAGEDOWN:
+		elif event.keycode == KB.key("next") or event.keycode == KEY_PAGEDOWN:
 			sw = 1
 	if sw != 0:
 		set_tab(clampi(tab + sw, 0, 1))
@@ -920,7 +924,7 @@ func _refresh_text_btn() -> void:
 		txt_btn.text = L.t("Text") + ": " + L.t(String(TXS.NAMES[TXS.idx()]))
 
 
-func open() -> void:
+func open(first_tab: int = 0) -> void:
 	_refresh_text_btn()
 	TXS.scale_tree(self)
 	if aim_btn != null:
@@ -931,7 +935,7 @@ func open() -> void:
 	_refresh_mute()
 	visible = true
 	summary_requested.emit()
-	set_tab(0)
+	set_tab(clampi(first_tab, 0, 1))
 
 
 func close() -> void:

@@ -24,6 +24,7 @@ const PXF = preload("res://scripts/pxfont.gd")
 const DSP = preload("res://scripts/display.gd")
 const SLOTS = preload("res://scripts/slots.gd")
 const PAD = preload("res://scripts/pad.gd")
+const KB = preload("res://scripts/keys.gd")
 const PADI = preload("res://scripts/padicons.gd")
 const UPD = preload("res://scripts/updater.gd")
 const PN = preload("res://scripts/patchnotes.gd")
@@ -844,6 +845,9 @@ func _ready() -> void:
 		DSP.apply_window()
 		Aud.setup(self)
 		Aud.music("village")
+		if not Engine.has_meta("resume_prompted") and not Engine.has_meta("no_save"):
+			Engine.set_meta("resume_prompted", true)   # once per launch: the reminder is for runs left over from an earlier session
+			_ongoing_prompt.call_deferred(Callable())
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	_build_theme()
 	RenderingServer.set_default_clear_color(UIS.BACKDROP)
@@ -1625,11 +1629,32 @@ func _input(event: InputEvent) -> void:
 			DisplayServer.virtual_keyboard_hide()
 			get_viewport().set_input_as_handled()
 		return
+	if is_instance_valid(run_prompt):
+		# the run reminder owns the input: Back closes it only when it was opened by pressing Play (the run is kept)
+		if PAD.is_cancel(event) and bool(run_prompt.get_meta("cancel_ok", false)):
+			run_prompt.queue_free()
+			get_viewport().set_input_as_handled()
+		elif PAD.stick_event(event):
+			get_viewport().set_input_as_handled()
+		return
 	# En la lista de modos el stick solo mueve arriba/abajo: un empuje lateral sin querer ya no mete el cursor en los modificadores.
 	var sf: Control = get_viewport().gui_get_focus_owner()
 	PAD.vertical_only = cur == "modes" and sf != null and mode_tiles.values().has(sf)
 	if listening == "" and PAD.stick_event(event):
 		get_viewport().set_input_as_handled()   # el stick izquierdo navega como cruceta (un salto por empujon)
+		return
+	if listening.begins_with("key:"):
+		# keyboard rebinding: the next key pressed is assigned (Esc cancels)
+		if event is InputEventKey and event.pressed and not event.echo:
+			if event.keycode != KEY_ESCAPE:
+				KB.set_key(listening.substr(4), event.keycode)
+			listening = ""
+			_refresh_listen()
+			get_viewport().set_input_as_handled()
+		elif event is InputEventJoypadButton and event.pressed:
+			listening = ""
+			_refresh_listen()
+			get_viewport().set_input_as_handled()
 		return
 	if listening != "":
 		if event is InputEventJoypadButton and event.pressed:
@@ -2343,7 +2368,63 @@ func _resume_run() -> void:
 	get_tree().change_scene_to_file("res://scenes/main.tscn")
 
 
+# Reminder that a run is waiting: resume it or give it up. `then` (optional) runs after giving up (a new run was requested).
+var run_prompt: Control = null
+
+
+func _ongoing_prompt(then: Callable = Callable()) -> void:
+	var snap: Dictionary = RS.load_snap()
+	if snap.is_empty() or is_instance_valid(run_prompt):
+		return
+	var ov := Control.new()
+	ov.set_anchors_preset(Control.PRESET_FULL_RECT)
+	ov.z_index = 3000
+	add_child(ov)
+	run_prompt = ov
+	var shade := ColorRect.new()
+	shade.color = Color(0, 0, 0, 0.8)
+	shade.set_anchors_preset(Control.PRESET_FULL_RECT)
+	ov.add_child(shade)
+	var cc := CenterContainer.new()
+	cc.set_anchors_preset(Control.PRESET_FULL_RECT)
+	ov.add_child(cc)
+	var pc := PanelContainer.new()
+	pc.custom_minimum_size = Vector2(560, 0)
+	cc.add_child(pc)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 14)
+	pc.add_child(v)
+	v.add_child(_label("You have a run in progress", 30, C_GOLD))
+	v.add_child(_label(RS.describe(snap), 22, Color("#fff7d6")))
+	v.add_child(_label("Resume it, or give it up to start fresh. A run you give up is lost for good.", 18, Color("#f2e9d8")))
+	var res := _btn("Resume run", func():
+		ov.queue_free()
+		_resume_run(), Vector2(0, 58))
+	v.add_child(res)
+	var giv := _btn("Give up this run", func():
+		RS.clear()
+		ov.queue_free()
+		_refresh_main()
+		if then.is_valid():
+			then.call(), Vector2(0, 52))
+	v.add_child(giv)
+	# focus stays on these two buttons (up/down swap, left/right stay put) so a controller cannot wander into the menu behind
+	for pair in [[res, giv], [giv, res]]:
+		var b: Button = pair[0]
+		b.focus_neighbor_top = b.get_path_to(pair[1])
+		b.focus_neighbor_bottom = b.get_path_to(pair[1])
+		b.focus_neighbor_left = b.get_path_to(b)
+		b.focus_neighbor_right = b.get_path_to(b)
+		b.focus_next = b.get_path_to(pair[1])
+		b.focus_previous = b.get_path_to(pair[1])
+	_gf(res)
+	ov.set_meta("cancel_ok", then.is_valid())
+
+
 func _start_mode(mode: String) -> void:
+	if RS.exists() and not is_instance_valid(run_prompt):
+		_ongoing_prompt(func(): _start_mode(mode))   # a saved run is waiting: resume it or give it up before starting another
+		return
 	if not mode.begins_with("chal"):
 		SV.d["last_mode"] = mode
 	SV.run_mode = mode
@@ -3546,7 +3627,7 @@ func _refresh_test() -> void:
 	test_box.add_child(_label("Like in Mystery Dungeon, a few questions will decide your personality and your partner.\nYou can accept the result or pick a different starter.", 24))
 	var b := _btn("Start the quiz", func(): _test_next(), Vector2(0, 60))
 	test_box.add_child(b)
-	var skip := _btn("Skip the quiz: pick a strong starter", func(): _test_pick_strong(), Vector2(0, 60))
+	var skip := _btn("Skip the quiz: pick a starter", func(): _test_pick_other(), Vector2(0, 60))
 	test_box.add_child(skip)
 	focus_first = b
 
@@ -3619,39 +3700,6 @@ func _test_show_result(trt: String) -> void:
 	_gf(ok)
 
 
-# "Skip the quiz": a short list of strong, fully evolved partners (most can Mega Evolve), chosen right away.
-func _test_pick_strong() -> void:
-	_clear(test_box)
-	test_box.add_child(_label("Pick a strong starter", 32, C_GOLD))
-	test_box.add_child(_label("Fully evolved partners, most of them able to Mega Evolve. You can collect the rest from the Gacha.", 18, Color("#f2e9d8")))
-	var grid := GridContainer.new()
-	grid.columns = 4 if _compact() else 6
-	grid.add_theme_constant_override("h_separation", 8)
-	grid.add_theme_constant_override("v_separation", 8)
-	test_box.add_child(grid)
-	var first: Button = null
-	for dx in ST.STRONG:
-		var dxi: int = int(dx)
-		if not SV.dex_by.has(dxi):
-			continue
-		var b := _btn("", func(): _accept_starter(dxi), Vector2(120, 110))
-		var tx: Texture2D = _icon_tex(dxi, false)
-		if tx != null:
-			b.icon = tx
-			b.expand_icon = true
-			b.add_theme_constant_override("icon_max_width", 56)
-		b.text = _name_of(dxi)
-		b.add_theme_font_size_override("font_size", 14)
-		b.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		b.vertical_icon_alignment = VERTICAL_ALIGNMENT_TOP
-		grid.add_child(b)
-		if first == null:
-			first = b
-	var back := _btn("Back", func(): _refresh_test(), Vector2(0, 52))
-	test_box.add_child(back)
-	_gf(first)
-
-
 func _test_pick_other() -> void:
 	_clear(test_box)
 	test_box.add_child(_label("Choose your partner", 32, C_GOLD))
@@ -3674,6 +3722,8 @@ func _test_pick_other() -> void:
 		grid.add_child(b)
 		if first == null:
 			first = b
+	var back := _btn("Back", func(): _refresh_test(), Vector2(0, 52))
+	test_box.add_child(back)
 	_gf(first)
 
 
@@ -7784,6 +7834,21 @@ func _set_controls() -> void:
 		_refresh_settings()))
 	_srow("Fixed joystick", "The joystick stays at the bottom left instead of appearing where you touch.", _toggle_set("stick_fixed"))
 	_srow("Manual aim", "Aim yourself: gamepad right stick, mouse, or a second finger dragging on the right half of the screen. If you don't aim, the game aims for you.", _toggle_set("manual_aim"))
+	_sec("Keyboard (PC)")
+	_sadd(_label("Click a key in the list, then press the key you want. Esc cancels. Enter or Space confirm, Backspace or X go back, and P also opens Options.", 20, Color("#f2e9d8")))
+	for a in KB.ACTIONS:
+		var kact: String = a
+		var kid: String = "key:" + kact
+		var kb := _btn(L.t("Press a key…") if listening == kid else KB.key_name(KB.key(kact)), func():
+			listening = "" if listening == kid else kid
+			last_act = kid
+			_refresh_listen(), Vector2(190, 46))
+		if listening == kid:
+			_gold_btn(kb, true)
+		_srow(KB.LABELS[kact], "", kb)
+		if kid == last_act:
+			focus_first = kb
+	_sadd(_btn("Reset keys", func(): KB.reset(); last_act = ""; _refresh_settings(), Vector2(280, 46)))
 	_sec("Gamepad")
 	_sadd(_label("Left stick or D-pad: move and navigate menus. Press a button in the list, then the gamepad button you want to assign to it.", 20, Color("#f2e9d8")))
 	_srow("Gamepad type", "Changes the button names and resets the mapping.", _seg(PAD.NAMES, PAD.layout(), func(i: int):
@@ -7869,7 +7934,14 @@ func _set_account() -> void:
 		if bool(res["ok"]):
 			SV.save()
 			code_in.text = ""
-			toast(L.t(String(res["msg"])))
+			var shown: String = L.t(String(res["msg"]))
+			var margs: Array = res.get("args", [])
+			if not margs.is_empty():
+				for ai in range(margs.size()):
+					if margs[ai] is String:
+						margs[ai] = L.t(String(margs[ai]))
+				shown = shown % margs
+			toast(shown)
 			Aud.sfx("legend")
 			_update_top()
 		else:

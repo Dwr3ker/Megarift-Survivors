@@ -5,11 +5,12 @@ const SV = preload("res://scripts/save_data.gd")
 const TL = preload("res://scripts/lang.gd")
 const NAMES := ["Xbox", "PlayStation", "Nintendo"]
 # accion -> [texto (clave de traduccion)]
-const ACTIONS := ["prev", "next", "pause", "confirm", "cancel", "reroll", "ban", "swap", "zmove", "dynamax", "dash", "slot1", "slot2", "slot3", "slot4", "slot5", "slot6"]
+const ACTIONS := ["prev", "next", "pause", "summary", "confirm", "cancel", "reroll", "ban", "swap", "zmove", "dynamax", "dash", "slot1", "slot2", "slot3", "slot4", "slot5", "slot6"]
 const LABELS := {
 	"prev": "Previous move",
 	"next": "Next move",
-	"pause": "Pause",
+	"pause": "Options (pause)",
+	"summary": "Build summary",
 	"confirm": "Confirm / pick",
 	"cancel": "Back / cancel",
 	"reroll": "Reroll cards",
@@ -41,8 +42,8 @@ static func defaults(lay: int = -1) -> Dictionary:
 		lay = layout()
 	var ok := JOY_BUTTON_B if lay == 2 else JOY_BUTTON_A
 	var no := JOY_BUTTON_A if lay == 2 else JOY_BUTTON_B
-	return {"prev": JOY_BUTTON_LEFT_SHOULDER, "next": JOY_BUTTON_RIGHT_SHOULDER, "pause": JOY_BUTTON_START,
-		"confirm": ok, "cancel": no, "reroll": JOY_BUTTON_Y, "ban": JOY_BUTTON_X, "swap": JOY_BUTTON_RIGHT_STICK, "zmove": JOY_BUTTON_LEFT_STICK, "dynamax": JOY_BUTTON_BACK, "dash": no,
+	return {"prev": JOY_BUTTON_LEFT_SHOULDER, "next": JOY_BUTTON_RIGHT_SHOULDER, "pause": JOY_BUTTON_START, "summary": JOY_BUTTON_BACK,
+		"confirm": ok, "cancel": no, "reroll": JOY_BUTTON_Y, "ban": JOY_BUTTON_X, "swap": JOY_BUTTON_RIGHT_STICK, "zmove": JOY_BUTTON_LEFT_STICK, "dynamax": JOY_BUTTON_X, "dash": no,
 		# v5.3: elegir movimiento directo con la cruceta (1-4); los huecos 5 y 6 tambien con los gatillos izquierdo / derecho
 		"slot1": JOY_BUTTON_DPAD_UP, "slot2": JOY_BUTTON_DPAD_RIGHT, "slot3": JOY_BUTTON_DPAD_DOWN, "slot4": JOY_BUTTON_DPAD_LEFT, "slot5": JOY_BUTTON_MISC1, "slot6": JOY_BUTTON_TOUCHPAD}
 
@@ -60,6 +61,20 @@ static func is_mapped(b: int) -> bool:
 		if btn(a) == b:
 			return true
 	return false
+
+
+# Older saved maps predate the Build summary button (Select / View). Give it Select and move Dynamax off it (to X).
+static func _migrate_summary() -> void:
+	SV.ensure()
+	var m = SV.d["settings"].get("padmap", {})
+	if not (m is Dictionary) or m.is_empty() or m.has("summary"):
+		return
+	m["summary"] = JOY_BUTTON_BACK
+	for a in m:
+		if a != "summary" and int(m[a]) == JOY_BUTTON_BACK:
+			m[a] = JOY_BUTTON_X
+	SV.d["settings"]["padmap"] = m
+	SV.save()
 
 
 # Asigna un boton a una accion; si otra accion lo usaba, intercambian.
@@ -133,6 +148,7 @@ static func _set_joy(action: String, buttons: Array) -> void:
 
 # Aplica el mapa a las acciones de la interfaz (ui_accept / ui_cancel).
 static func apply() -> void:
+	_migrate_summary()
 	_set_joy("ui_accept", [confirm_btn()])
 	_set_joy("ui_cancel", [cancel_btn()])
 
@@ -144,8 +160,8 @@ static func apply() -> void:
 # ---------------------------------------------------------------
 const STICK_ON := 0.6       # a partir de aqui el stick cuenta como empujado
 const STICK_OFF := 0.35     # por debajo de aqui se considera suelto (evita rebotes)
-const STICK_DELAY := 0.42   # espera antes de empezar a repetir
-const STICK_REPEAT := 0.16  # segundos entre saltos mientras se mantiene
+const STICK_DELAY := 0.6    # espera antes de empezar a repetir
+const STICK_REPEAT := 0.3   # segundos entre saltos mientras se mantiene
 static var vertical_only := false   # el stick ignora el eje X (lista de modos)
 static var _sdir := Vector2i.ZERO
 static var _snext := 0.0
