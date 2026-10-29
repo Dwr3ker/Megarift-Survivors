@@ -1,5 +1,12 @@
 # Megarift Survivors v0.1.0 — pre-release (test build)
 
+## Changes in 0.1.0-alpha.6
+- **Fusion:** a fused move can fuse again with another evolved, max-level move, up to 4 moves in one slot. The slot bar now shows every move inside a slot, so a fusion bonded with another move no longer seems to disappear.
+- **Shiny toggle:** "Use shiny version" in the collection only changes the Pokémon you are viewing (it was changing every owned Pokémon).
+- **Item found:** the swap screen shows the new item once at the top, with one card per item you would give up.
+- **HUD:** Z-Move cooldown is a ring with the time inside the button (like Dynamax); rift and thief notices no longer sit behind the Dynamax bar.
+- Z-Moves and Dynamax were not unlocking by themselves: Dynamax needs one Dynamax den beaten and a Z-Move needs 250 kills with its type (or a Z-Crystal). The unlock-everything test save and the UNLOCKALL code unlock both on purpose.
+
 ## Changes in 0.1.0-alpha.5
 - **Save codes fixed:** codes are now compressed (about 14,000 characters even with everything unlocked instead of 280,000). Pasting ignores line breaks, spaces and quotes added when copying, and says what is wrong ("cut short", "empty clipboard", "not a save") instead of just "Invalid code". Old codes still work.
 - **Redeem codes:** Settings > Account > Redeem code, for special unlock bundles. Each code works once per save.

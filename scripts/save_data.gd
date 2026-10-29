@@ -138,6 +138,7 @@ static func ensure() -> void:
 		d["settings"]["fov_v2"] = true
 		if int(d["settings"].get("fov", 165)) == 140:
 			d["settings"]["fov"] = 165
+	_migrate_shiny()
 	if not d["settings"].has("show_map"):   # radar on by default (HUD layout)
 		d["settings"]["show_map"] = true
 	# Panel de estadisticas del HUD: activado por defecto (una sola vez); luego se puede apagar en Ajustes.
@@ -203,6 +204,18 @@ static func _b64_fix(t: String) -> String:
 	return b
 
 
+# The old single "use shiny" switch turned on every shiny you own; it is now a choice per Pokémon (shiny_pref).
+static func _migrate_shiny() -> void:
+	if d.get("shiny_pref") is Dictionary:
+		return
+	d["shiny_pref"] = {}
+	if bool(d.get("shiny_on", false)):   # keep that look, now one Pokémon at a time
+		for k in d["owned"]:
+			if bool((d["owned"][k] as Dictionary).get("shiny", false)):
+				d["shiny_pref"][String(k)] = true
+	d["shiny_on"] = false
+
+
 static func _read_json(path: String):
 	if not FileAccess.file_exists(path):
 		return null
@@ -260,6 +273,23 @@ static func setting(k: String):
 
 static func owns(dex: int) -> bool:
 	return d["owned"].has(str(dex))
+
+
+# Shiny look per Pokémon: you own its shiny version AND chose to use it ("Use shiny version" on that Pokémon only).
+static func shiny_wanted(dex: int) -> bool:
+	var k := str(dex)
+	if not d["owned"].has(k) or not bool((d["owned"][k] as Dictionary).get("shiny", false)):
+		return false
+	return bool((d.get("shiny_pref", {}) as Dictionary).get(k, false))
+
+
+static func set_shiny_pref(dex: int, on: bool) -> void:
+	if not (d.get("shiny_pref") is Dictionary):
+		d["shiny_pref"] = {}
+	if on:
+		d["shiny_pref"][str(dex)] = true
+	else:
+		(d["shiny_pref"] as Dictionary).erase(str(dex))
 
 
 # Equipo guardado (solo Pokemon que tienes); si falta, el seleccionado + los primeros que tengas.

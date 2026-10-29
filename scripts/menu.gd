@@ -3218,7 +3218,7 @@ func _refresh_main() -> void:
 	if not SV.owns(dex) and SV.owned_count() > 0:
 		dex = int(SV.d["owned"].keys()[0])
 		SV.d["selected"] = dex
-	var shn: bool = bool(SV.d["shiny_on"]) and SV.owns(dex) and bool(SV.d["owned"][str(dex)]["shiny"])
+	var shn: bool = SV.shiny_wanted(dex)
 	if is_instance_valid(main_prev):
 		main_prev.queue_free()
 	main_prev = Preview.new()
@@ -4086,7 +4086,7 @@ func _dex_card(p: Dictionary, owned: bool) -> Button:
 	tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var shn: bool = owned and bool(SV.d["owned"][str(dx)].get("shiny", false)) and bool(SV.d["shiny_on"])
+	var shn: bool = owned and SV.shiny_wanted(dx)
 	tr.texture = _icon_tex(dx, shn)
 	if not show:
 		tr.modulate = Color(0, 0, 0, 0.5)
@@ -4283,7 +4283,7 @@ func _dex_detail() -> void:
 	pv.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	dex_pv_box.add_child(pv)
 	var shiny_owned: bool = owned and bool(SV.d["owned"][str(dx)].get("shiny", false))
-	pv.setup(dx, shiny_owned and bool(SV.d["shiny_on"]), 6.0, not owned)
+	pv.setup(dx, shiny_owned and SV.shiny_wanted(dx), 6.0, not owned)
 	var ball := IC.rect("ball", 52)
 	ball.position = Vector2(8, 8)
 	ball.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -4419,8 +4419,8 @@ func _dex_detail() -> void:
 	if shiny_owned:
 		var cb := CheckButton.new()
 		cb.text = "Use shiny version ✨"
-		cb.button_pressed = bool(SV.d["shiny_on"])
-		cb.toggled.connect(func(on: bool): SV.d["shiny_on"] = on; SV.save(); _refresh_dex())
+		cb.button_pressed = SV.shiny_wanted(dx)
+		cb.toggled.connect(func(on: bool): SV.set_shiny_pref(dx, on); SV.save(); _refresh_dex())
 		dex_detail.add_child(cb)
 	# boton Elegir (fijo abajo)
 	if not (dex_pick_party or dex_pick_team or dex_pick_coop):
@@ -6732,7 +6732,7 @@ func _goals_profile() -> Button:
 	pv2.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	pv2.set_anchors_preset(Control.PRESET_FULL_RECT)
 	stage.add_child(pv2)
-	pv2.setup(sd, bool(SV.d.get("shiny_on", false)), 2.8)
+	pv2.setup(sd, SV.shiny_wanted(sd), 2.8)
 	_stage_arrow(stage, -1, func(): _cycle_sel(-1))
 	_stage_arrow(stage, 1, func(): _cycle_sel(1))
 	var nrow := HBoxContainer.new()
@@ -7114,7 +7114,7 @@ func _show_card() -> void:
 	var main_pv := Preview.new()
 	main_pv.custom_minimum_size = Vector2(230, 170)
 	pr.add_child(main_pv)
-	main_pv.setup(sd, bool(SV.d.get("shiny_on", false)), 6.0)
+	main_pv.setup(sd, SV.shiny_wanted(sd), 6.0)
 	var favs: Array = SV.d.get("favs", [0, 0, 0])
 	for i in range(3):
 		var dex: int = int(favs[i]) if i < favs.size() else 0

@@ -671,7 +671,7 @@ func _ready() -> void:
 	sh_aura.m = self
 	sh_aura.z_index = 2
 	player.add_child(sh_aura)
-	if SV.owns(sel_dex) and bool(SV.d["owned"][str(sel_dex)]["shiny"]) and bool(SV.d["shiny_on"]):
+	if SV.shiny_wanted(sel_dex):
 		player.set_shiny()
 	player.max_hp = float(st["hp"]) + float(perks["hp"])
 	if _has_mod("frail"):
@@ -1533,6 +1533,8 @@ func _process(delta: float) -> void:
 	hud.mom = mom
 	hud.dash_cd = dash_cd
 	hud.dash_max = DASH_CD * dash_k
+	hud.z_cd_max = ZC.COOLDOWN if z_crystal else ZM.COOLDOWN
+	hud.dyn_cd_max = DYN.COOLDOWN
 	hud.revives = revives
 	hud.z_dim = _z_dim()
 	hud.z_state = z_state
@@ -1639,8 +1641,9 @@ func _refresh_slots() -> void:
 		var gicons: Array = []
 		var gnames: Array = []
 		for gm in g:
-			gicons.append(("evo:" if bool(gm["evolved"]) else "move:") + String(gm.get("recipe", gm["id"])))
-			gnames.append(String(gm["name"]))
+			for pm in _parts_of(gm):
+				gicons.append(("evo:" if bool(pm["evolved"]) else "move:") + String(pm["id"]))
+				gnames.append(String(pm["name"]))
 		info.append({
 			"name": String(m["name"]),
 			"color": _col(m),
@@ -1650,7 +1653,7 @@ func _refresh_slots() -> void:
 			"cd": cdm,
 			"evo": bool(m["evolved"]),
 			"icon": ("evo:" if bool(m["evolved"]) else "move:") + String(m.get("recipe", m["id"])),
-			"n": g.size(),
+			"n": gicons.size(),
 			"icons": gicons,
 			"names": gnames,
 		})
@@ -2602,7 +2605,7 @@ func _swap_team(i: int, auto: bool = false) -> void:
 	team_cur = i
 	ab_fx = AB.fx_of(_pdex())
 	var dx: int = int(nx["dex"])
-	var shn: bool = SV.owns(dx) and bool(SV.d["owned"][str(dx)]["shiny"]) and bool(SV.d["shiny_on"])
+	var shn: bool = SV.shiny_wanted(dx)
 	player.rebody(dx, _sm(dx), shn)
 	player.max_hp = float(nx["base"]) + team_bonus
 	player.hp = minf(player.max_hp, float(nx["hp"]))
@@ -8435,25 +8438,32 @@ func _offer_bond(quiet: bool = false) -> void:
 # ---------------------------------------------------------------
 # S54: fusion de dos movimientos vinculados (evolucionados y al maximo) en un Movimiento de Vinculo
 # ---------------------------------------------------------------
+const FUSE_MAX := 4   # a fused move can hold up to 4 original moves
 const FUSE_DMG := 2.2   # cada mitad pega mucho mas que un evolucionado normal (x1,8)
 var fuse_asked := ""
 var fused_once := false   # solo una fusion por partida
 var fused_away: Array = []   # movimientos consumidos: ya no se ofrecen en las mejoras
 
 
+func _parts_of(m: Dictionary) -> Array:
+	return m["parts"] if m.has("parts") else [m]
+
+
 func _fuse_pair() -> Array:
-	if fused_once or bond_ids.size() != 2:
+	if bond_ids.size() != 2:
 		return []
 	var out: Array = []
 	for id in bond_ids:
 		for m in player.moves:
-			if String(m["id"]) == String(id) and not m.has("parts"):
+			if String(m["id"]) == String(id):
 				out.append(m)
-	if out.size() != 2:
+	if out.size() != 2 or out[0] == out[1]:
 		return []
 	for m in out:
 		if not bool(m["evolved"]) or int(m["lvl"]) < _max_lvl(m):
 			return []
+	if _parts_of(out[0]).size() + _parts_of(out[1]).size() > FUSE_MAX:
+		return []
 	return out
 
 
@@ -8488,18 +8498,24 @@ func _do_fuse() -> void:
 	var a: Dictionary = pr[0]
 	var b: Dictionary = pr[1]
 	var fm: Dictionary = a.duplicate(true)
-	fm["parts"] = [a, b]
-	for pm in fm["parts"]:
-		if pm.has("dmg"):
-			pm["dmg"] = float(pm["dmg"]) * FUSE_DMG
-		if pm.has("cd"):
-			pm["cd"] = float(pm["cd"]) * 0.8
-	fm["name"] = "%s + %s" % [String(a["name"]), String(b["name"])]
+	var parts: Array = []
+	var names: Array = []
+	for src in [a, b]:
+		for pm in _parts_of(src):
+			if not src.has("parts"):   # parts of an older fusion already got the bonus
+				if pm.has("dmg"):
+					pm["dmg"] = float(pm["dmg"]) * FUSE_DMG
+				if pm.has("cd"):
+					pm["cd"] = float(pm["cd"]) * 0.8
+			parts.append(pm)
+			names.append(String(pm["name"]))
+			fused_away.append(String(pm["id"]))
+	fm["parts"] = parts
+	fm["name"] = " + ".join(names)
 	fm["fused"] = true
 	fused_once = true
-	fused_away.append(String(a["id"]))
-	fused_away.append(String(b["id"]))
-	var rec: Dictionary = FUS.find(String(a["id"]), String(b["id"]))
+	fm.erase("recipe")
+	var rec: Dictionary = FUS.find(String(a["id"]), String(b["id"])) if parts.size() == 2 else {}
 	if not rec.is_empty():
 		fm["name"] = String(rec["name"])
 		fm["recipe"] = String(rec["id"])
@@ -8716,16 +8732,15 @@ func _fuse_hint() -> void:
 	if bond_ids.size() != 2 or mode == "tower":
 		return
 	var why := ""
-	if fused_once:
-		why = L.t("You can only fuse once per run")
-	else:
-		for id in bond_ids:
-			for m in player.moves:
-				if String(m["id"]) == String(id) and not why != "":
-					if m.has("parts"):
-						why = L.t("%s is already a fusion") % L.t(String(m["name"]))
-					elif not bool(m["evolved"]):
-						why = L.t("To fuse, %s must be evolved") % L.t(String(m["name"]))
+	var total := 0
+	for id in bond_ids:
+		for m in player.moves:
+			if String(m["id"]) == String(id):
+				total += _parts_of(m).size()
+				if why == "" and not bool(m["evolved"]):
+					why = L.t("To fuse, %s must be evolved") % L.t(String(m["name"]))
+	if why == "" and total > FUSE_MAX:
+		why = L.t("A fusion can hold at most 4 moves")
 	if why != "":
 		get_tree().create_timer(2.8).timeout.connect(func(): _say(why, 3.4))
 
@@ -8913,17 +8928,26 @@ func _offer_item() -> void:
 	if String(nw["id"]) == "rarecandy":
 		slots = [1]   # el Caramelo Raro no ocupa hueco: una sola carta
 	for sl in slots:
-		var tg: String = "New item"
-		if slots.size() >= 2:
-			tg = L.t("Replaces: %s") % L.t(_item_name_of(item if int(sl) == 1 else (item2 if int(sl) == 2 else item3)))
-		picks.append({"cat": "itemtake", "slot": int(sl), "id": String(nw["id"]), "key": "it:%s:%d" % [String(nw["id"]), int(sl)], "w": 1.0,
-			"title": String(nw["name"]), "desc": String(nw["desc"]), "icon": String(nw["id"]), "tag": tg, "color": Color("#ff8ad8")})
+		var old_id: String = item if int(sl) == 1 else (item2 if int(sl) == 2 else item3)
+		if slots.size() >= 2 and old_id != "":
+			# several held items: one card per item you could give up, showing THAT item (the new one is shown once above the cards)
+			var old_desc := ""
+			for oit in TD.ITEMS:
+				if String(oit["id"]) == old_id:
+					old_desc = String(oit["desc"])
+			picks.append({"cat": "itemtake", "slot": int(sl), "id": String(nw["id"]), "key": "it:%s:%d" % [String(nw["id"]), int(sl)], "w": 1.0,
+				"title": L.t(_item_name_of(old_id)), "desc": L.t("You give up: %s") % L.t(old_desc), "icon": old_id, "tag": L.t("Swap out"), "color": Color("#ff8ad8")})
+		else:
+			picks.append({"cat": "itemtake", "slot": int(sl), "id": String(nw["id"]), "key": "it:%s:%d" % [String(nw["id"]), int(sl)], "w": 1.0,
+				"title": String(nw["name"]), "desc": String(nw["desc"]), "icon": String(nw["id"]), "tag": "New item", "color": Color("#ff8ad8")})
 	if item != "":
 		picks.append({"cat": "itemkeep", "id": item, "key": "keep", "w": 1.0, "title": "Keep yours",
 			"desc": L.t("You keep your current items."), "icon": item, "tag": "No changes", "color": Color("#8fa3c4")})
 	choosing = true
 	cards.show_cards(picks, L.t("You can carry three items") if three else L.t("You can carry two items"), L.t("You found an item"), false)
 	_item_ui(String(nw["id"]))
+	if slots.size() >= 2 and String(nw["id"]) != "rarecandy":
+		cards.item_new = {"id": String(nw["id"]), "name": L.t(String(nw["name"])), "desc": L.t(String(nw["desc"]))}
 
 
 func _item_ui(new_id: String) -> void:
@@ -10908,11 +10932,16 @@ class Slots extends Node2D:
 				IC.draw_in(self, String(it.get("icon", "star")), tile.get_center() + Vector2(0.0, 1.0), 32.0)
 			else:
 				# movimientos combinados: se ven todos, uno junto a otro (antes una sola icono con un "x2")
-				var kc: int = mini(ics.size(), 3)
-				var isz: float = 21.0 if kc == 2 else 14.0
-				for ci in range(kc):
-					var cxp: float = tile.position.x + tile.size.x * (float(ci) + 0.5) / float(kc)
-					IC.draw_in(self, String(ics[ci]), Vector2(cxp, tile.get_center().y + 1.0), isz)
+				var kc: int = mini(ics.size(), 4)
+				if kc == 4:
+					for ci in range(4):
+						var gp := Vector2(tile.position.x + tile.size.x * (0.27 + 0.46 * float(ci % 2)), tile.position.y + tile.size.y * (0.27 + 0.46 * float(ci / 2)))
+						IC.draw_in(self, String(ics[ci]), gp, 14.0)
+				else:
+					var isz: float = 21.0 if kc == 2 else 14.0
+					for ci in range(kc):
+						var cxp: float = tile.position.x + tile.size.x * (float(ci) + 0.5) / float(kc)
+						IC.draw_in(self, String(ics[ci]), Vector2(cxp, tile.get_center().y + 1.0), isz)
 			# barrido de recarga (solo en movimientos de recarga >= 1,5 s) y destello al estar listo
 			var fr0: float = clampf(float(it["frac"]), 0.0, 1.0)
 			if fr0 < 1.0 and float(it.get("cd", 0.0)) >= 1.5:
@@ -11050,6 +11079,7 @@ class Cards extends Node2D:
 	signal lock_toggled
 	signal block_pressed
 	var item_mode := false
+	var item_new: Dictionary = {}   # the item found, shown once above the cards when the cards are the items you could swap out
 	var lock_on := false
 	var block_name := ""
 	# Proteccion contra pulsaciones del combate: al abrirse cartas nuevas no se acepta ninguna entrada durante GRACE segundos.
@@ -11118,6 +11148,7 @@ class Cards extends Node2D:
 
 	func hide_cards() -> void:
 		open = false
+		item_new = {}
 		can_skip = false
 		queue_redraw()
 
@@ -11246,11 +11277,22 @@ class Cards extends Node2D:
 		var font := ThemeDB.fallback_font
 		var vp: Vector2 = get_viewport_rect().size
 		draw_rect(Rect2(Vector2.ZERO, vp), Color(0, 0, 0, 0.6))
-		draw_string(font, Vector2(0.0, vp.y * 0.5 - 174.0), L.t(headline), HORIZONTAL_ALIGNMENT_CENTER, vp.x, 40, Color("#ffd65c"))
+		draw_string(font, Vector2(0.0, vp.y * 0.5 - 174.0 - (30.0 if not item_new.is_empty() else 0.0)), L.t(headline), HORIZONTAL_ALIGNMENT_CENTER, vp.x, 40, Color("#ffd65c"))
 		if ban_mode:
 			draw_string(font, Vector2(0.0, vp.y * 0.5 - 142.0), L.t("Pick a new move to ban it"), HORIZONTAL_ALIGNMENT_CENTER, vp.x, 22, Color("#ff9aa5"))
 		else:
-			draw_string(font, Vector2(0.0, vp.y * 0.5 - 142.0), L.t(title), HORIZONTAL_ALIGNMENT_CENTER, vp.x, 20, Color.WHITE)
+			if item_new.is_empty():
+				draw_string(font, Vector2(0.0, vp.y * 0.5 - 142.0), L.t(title), HORIZONTAL_ALIGNMENT_CENTER, vp.x, 20, Color.WHITE)
+			else:
+				# new item banner: icon, name and what it does, with a hint for the cards below
+				var bw: float = minf(vp.x - 40.0, 720.0)
+				var br := Rect2(vp.x * 0.5 - bw * 0.5, vp.y * 0.5 - 186.0, bw, 36.0)
+				draw_rect(br.grow(2.0), Color("#ffd65c"))
+				draw_rect(br, Color("#2a1f4d"))
+				IC.draw_in(self, String(item_new["id"]), br.position + Vector2(22.0, 18.0), 28.0)
+				var head: String = "%s: %s" % [L.t("NEW"), String(item_new["name"])]
+				draw_string(font, br.position + Vector2(46.0, 16.0), head, HORIZONTAL_ALIGNMENT_LEFT, bw - 56.0, 17, Color("#ffd65c"))
+				draw_string(font, br.position + Vector2(46.0, 31.0), String(item_new["desc"]), HORIZONTAL_ALIGNMENT_LEFT, bw - 56.0, 13, Color("#f2e9d8"))
 		var rs: Array = _rects()
 		for i in range(rs.size()):
 			var r: Rect2 = rs[i]
@@ -11921,6 +11963,8 @@ class Hud extends Node2D:
 	var mom := 0.0
 	var dash_cd := 0.0
 	var dash_max := DASH_CD
+	var z_cd_max := 120.0     # full Z-Move cooldown, for the ring on the Z button
+	var dyn_cd_max := 0.0     # full Dynamax cooldown
 	var hyper := false
 	var run_time := 0.0
 	var kills := 0
@@ -12255,6 +12299,23 @@ class Hud extends Node2D:
 		var perp := Vector2(-hit_dir.y, hit_dir.x)
 		draw_colored_polygon(PackedVector2Array([q - hit_dir * 26.0, q + hit_dir * 6.0 + perp * 22.0, q + hit_dir * 6.0 - perp * 22.0]), Color(1.0, 0.18, 0.26, a))
 
+	# Centre-top stack, from the top: clock, resource counters, Dynamax bar (while active), rift / thief notice, banner.
+	const DYN_BAR_Y := 114.0
+
+	func notice_cy(vp: Vector2) -> float:
+		var base: float = vp.y * 0.2
+		if dyn_left >= 0.0:
+			base = maxf(base, DYN_BAR_Y + 22.0 + 12.0 + 34.0)   # clear of the Dynamax bar
+		return base
+
+	func banner_y(vp: Vector2) -> float:
+		var y := 140.0
+		if dyn_left >= 0.0:
+			y = DYN_BAR_Y + 22.0 + 26.0
+		if thief_notice >= 0.0 or rift_notice >= 0.0:
+			y = maxf(y, notice_cy(vp) + 34.0 + 28.0)   # under the notice box
+		return y
+
 	func draw_thief_notice(font: Font, vp: Vector2) -> void:
 		if thief_notice < 0.0:
 			return
@@ -12265,7 +12326,7 @@ class Hud extends Node2D:
 		var w1: float = font.get_string_size(t1, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 26).x
 		var w2: float = font.get_string_size(t2, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 16).x
 		var bw: float = minf(vp.x - 24.0, maxf(w1, w2) + 48.0)
-		draw_set_transform(Vector2(vp.x * 0.5, vp.y * 0.2), 0.0, Vector2(pop, pop))
+		draw_set_transform(Vector2(vp.x * 0.5, notice_cy(vp)), 0.0, Vector2(pop, pop))
 		var sb := StyleBoxFlat.new()
 		sb.bg_color = Color(0.2, 0.14, 0.02, 0.88 * a)
 		sb.border_color = Color(1.0, 0.82, 0.25, a)
@@ -12321,7 +12382,7 @@ class Hud extends Node2D:
 		var w1: float = font.get_string_size(t1, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 26).x
 		var w2: float = font.get_string_size(t2, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 16).x
 		var bw: float = minf(vp.x - 24.0, maxf(w1, w2) + 48.0)
-		draw_set_transform(Vector2(vp.x * 0.5, vp.y * 0.2), 0.0, Vector2(pop, pop))
+		draw_set_transform(Vector2(vp.x * 0.5, notice_cy(vp)), 0.0, Vector2(pop, pop))
 		var r := Rect2(-bw * 0.5, -34.0, bw, 68.0)
 		var sb := StyleBoxFlat.new()
 		sb.bg_color = Color(0.102, 0.043, 0.2, 0.88 * a)
@@ -12616,10 +12677,10 @@ class Hud extends Node2D:
 			var w: float = minf(360.0, vp.x - 380.0)
 			var x0: float = vp.x * 0.5 - w * 0.5
 			var fr: float = clampf(dyn_left / DYN.DUR, 0.0, 1.0)
-			draw_rect(Rect2(x0 - 2.0, 108.0, w + 4.0, 22.0), Color(0, 0, 0, 0.7))
-			draw_rect(Rect2(x0, 110.0, w * fr, 18.0), tcol if fr > 0.25 else Color("#ffb347"))
-			_dso(font, Vector2(x0, 125.0), "DYNAMAX  %d s" % ceili(dyn_left), HORIZONTAL_ALIGNMENT_CENTER, w, 15, 3, Color(UIS.INK, 0.9))
-			_ds(font, Vector2(x0, 125.0), "DYNAMAX  %d s" % ceili(dyn_left), HORIZONTAL_ALIGNMENT_CENTER, w, 15, Color.WHITE)
+			draw_rect(Rect2(x0 - 2.0, DYN_BAR_Y, w + 4.0, 22.0), Color(0, 0, 0, 0.7))
+			draw_rect(Rect2(x0, DYN_BAR_Y + 2.0, w * fr, 18.0), tcol if fr > 0.25 else Color("#ffb347"))
+			_dso(font, Vector2(x0, DYN_BAR_Y + 17.0), "DYNAMAX  %d s" % ceili(dyn_left), HORIZONTAL_ALIGNMENT_CENTER, w, 15, 3, Color(UIS.INK, 0.9))
+			_ds(font, Vector2(x0, DYN_BAR_Y + 17.0), "DYNAMAX  %d s" % ceili(dyn_left), HORIZONTAL_ALIGNMENT_CENTER, w, 15, Color.WHITE)
 		if dyn_flash < 2.7:
 			var fl: float = clampf(1.0 - dyn_flash / 0.25, 0.0, 1.0)
 			if fl > 0.0:
@@ -12675,9 +12736,11 @@ class Hud extends Node2D:
 			draw_arc(c, 46.0, 0.0, TAU, 40, tcol if ready else Color(0.5, 0.52, 0.58), 4.0)
 			_ds(font, Vector2(c.x - 44.0, c.y + (2.0 if dyn_btn == 3 else 11.0)), "MAX", HORIZONTAL_ALIGNMENT_CENTER, 88.0, 28 if dyn_btn == 3 else 32, Color.WHITE if ready else Color(0.6, 0.62, 0.68))
 			if dyn_btn == 3:
+				if dyn_cd_max > 0.0:   # the ring fills as the cooldown runs out
+					draw_arc(c, 46.0, -PI * 0.5, -PI * 0.5 + TAU * clampf(1.0 - dyn_cd / dyn_cd_max, 0.0, 1.0), 40, tcol, 4.0)
 				_ds(font, Vector2(c.x - 44.0, c.y + 26.0), "%d:%02d" % [int(dyn_cd) / 60, int(dyn_cd) % 60], HORIZONTAL_ALIGNMENT_CENTER, 88.0, 18, Color(0.85, 0.88, 0.95))
 			elif not ready:
-				_ds(font, Vector2(c.x - 50.0, c.y + 70.0), L.t("Min 3"), HORIZONTAL_ALIGNMENT_CENTER, 100.0, 16, Color(0.75, 0.78, 0.85))
+				_ds(font, Vector2(c.x - 44.0, c.y + 28.0), L.t("Min 3"), HORIZONTAL_ALIGNMENT_CENTER, 88.0, 16, Color(0.75, 0.78, 0.85))
 
 	func draw_z(font: Font, vp: Vector2) -> void:
 		var tcol: Color = Color.html(String(MD.TYPE_COLOR.get(z_type, "#ffffff")))
@@ -12764,11 +12827,17 @@ class Hud extends Node2D:
 			draw_circle(c, 46.0, Color(0.05, 0.07, 0.14, 0.85))
 			draw_arc(c, 46.0, 0.0, TAU, 40, tcol if ready else Color(0.5, 0.52, 0.58), 4.0)
 			var zc: Color = Color.WHITE if ready else Color(0.6, 0.62, 0.68)
-			IC.draw_in(self, "zc:" + z_type, c + Vector2(0.0, -2.0 - (beat * 2.0 if ready else 0.0)), 64.0, zc)
 			if z_btn == 3:
-				_ds(font, Vector2(c.x - 50.0, c.y + 70.0), "%d:%02d" % [int(z_cd) / 60, int(z_cd) % 60], HORIZONTAL_ALIGNMENT_CENTER, 100.0, 16, Color(0.75, 0.78, 0.85))
+				# cooling down: the ring fills in the Z-Move's colour and the time sits inside the button (outside it, the Dash button overlapped it)
+				if z_cd_max > 0.0:
+					draw_arc(c, 46.0, -PI * 0.5, -PI * 0.5 + TAU * clampf(1.0 - z_cd / z_cd_max, 0.0, 1.0), 40, tcol, 4.0)
+				IC.draw_in(self, "zc:" + z_type, c + Vector2(0.0, -16.0), 36.0, zc)
+				_ds(font, Vector2(c.x - 44.0, c.y + 28.0), "%d:%02d" % [int(z_cd) / 60, int(z_cd) % 60], HORIZONTAL_ALIGNMENT_CENTER, 88.0, 22, Color.WHITE)
 			elif not ready:
-				_ds(font, Vector2(c.x - 50.0, c.y + 70.0), L.t("Min 3"), HORIZONTAL_ALIGNMENT_CENTER, 100.0, 16, Color(0.75, 0.78, 0.85))
+				IC.draw_in(self, "zc:" + z_type, c + Vector2(0.0, -12.0), 40.0, zc)
+				_ds(font, Vector2(c.x - 44.0, c.y + 28.0), L.t("Min 3"), HORIZONTAL_ALIGNMENT_CENTER, 88.0, 16, Color(0.75, 0.78, 0.85))
+			else:
+				IC.draw_in(self, "zc:" + z_type, c + Vector2(0.0, -2.0 - beat * 2.0), 64.0, zc)
 
 	func pause_rects() -> Array:
 		var vp: Vector2 = get_viewport_rect().size
@@ -12931,7 +13000,7 @@ class Hud extends Node2D:
 			var wcw: float = font.get_string_size(wclock, HORIZONTAL_ALIGNMENT_LEFT, -1.0, roundi(28.0 * TXS.k())).x
 			_ds(font, Vector2(vp.x * 0.5 + wcw * 0.5 + 18.0, 35.0), L.t(weather_text), HORIZONTAL_ALIGNMENT_LEFT, -1.0, 20, Color("#cfe2ff"))
 		if banner != "":
-			_ds(font, Vector2(0.0, 140.0), L.t(banner), HORIZONTAL_ALIGNMENT_CENTER, vp.x, 20, Color("#ffffff"))
+			_ds(font, Vector2(0.0, banner_y(vp)), L.t(banner), HORIZONTAL_ALIGNMENT_CENTER, vp.x, 20, Color("#ffffff"))
 		draw_join(font, vp)
 		draw_fusion(font, vp)
 		draw_rift(font, vp)

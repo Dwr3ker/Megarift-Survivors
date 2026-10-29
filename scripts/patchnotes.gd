@@ -38,6 +38,10 @@ const ENTRIES := [
 			"Rifts: the first check is at 90 s and then every 30 s, with a 20% chance that grows 5% with every miss (max 50%). There is no longer a time limit: they keep appearing until Eternatus.",
 		],
 		"fixes": [
+			"Fusion: a fused move can now fuse again with another evolved, max-level move, up to 4 moves in one slot. The slot bar shows every move inside it (a fusion bonded with another move no longer seems to vanish).",
+			"Collection: Use shiny version now only affects the Pokémon you are looking at, not everything you own.",
+			"Item found: the swap screen shows the new item once at the top and one card per item you would give up, instead of repeating the same item.",
+			"HUD: the Z-Move cooldown is a clear ring with the time inside the button (like Dynamax), and rift and thief notices no longer hide behind the Dynamax bar.",
 			"Save codes are now short (about 14,000 characters even with everything unlocked). The importer ignores line breaks and spaces added when copying, says what is wrong when a code is rejected, and old codes still work.",
 			"Controller: the Cancel button (B / Circle) now skips a level-up upgrade for +25% XP, and the Skip prompt shows the button.",
 			"Controller: Up and Down now stay in their own column, so the Gacha tabs no longer bounce left and right, and the right panel of the mode list no longer jumps into the Challenges section.",
