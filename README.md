@@ -2,11 +2,11 @@
 
 A free, fan-made, **offline** survivor-like for Android. Survive endless waves of Pokémon, level up, evolve your moves, open rifts to fight legendaries and face the final boss.
 
-This is a fork of **[JayElDragon's Godot port](https://github.com/JayElDragon/poke-survivor)** of **[PokéSurvivor by JPTER78](https://github.com/JPTER78/pokesurvivor)**. It keeps everything from that port (touch and gamepad controls, 11 languages, local saves, minimap, 960+ Pokémon, gacha, missions, achievements) and adds the systems and balance that make the independent rewrite at [pokesurvivor.doofcraft.com](https://pokesurvivor.doofcraft.com) feel different: Mega Evolution, rarity-tier cards, Hyper mode, a real final boss and more.
+This is a fork of **[JayElDragon's Godot port](https://github.com/JayElDragon/poke-survivor)** of **[PokéSurvivor by JPTER78](https://github.com/JPTER78/pokesurvivor)**. It keeps everything from that port (touch and gamepad controls, 11 languages, local saves, minimap, 960+ Pokémon, gacha, missions, achievements) and adds the systems and balance that make the independent rewrite at [pokesurvivor.doofcraft.com](https://pokesurvivor.doofcraft.com) feel different: Mega Evolution, rarity-tier cards, Hyper mode, a real final boss, an endgame, save-and-resume and more.
 
 > **No ads. No purchases. No accounts.** Your progress stays on your device. The only network request the game makes is a single update check against this repository's GitHub releases when the menu opens (nothing is sent but a standard HTTPS request); it can be switched off by emptying `REPO` in `scripts/updater.gd`.
 
-Current version: **0.1.0 — pre-release / test build** — see [`RELEASE_NOTES_v0.1.0.md`](RELEASE_NOTES_v0.1.0.md). This is an early build of a new project: expect rough edges.
+Current version: **0.1.0 (pre-release alpha builds, latest `v0.1.0-alpha.8`)** — see [`RELEASE_NOTES_v0.1.0.md`](RELEASE_NOTES_v0.1.0.md). This is an early build of a new project: expect rough edges.
 
 ## What's new compared with the base port
 
@@ -20,10 +20,16 @@ Current version: **0.1.0 — pre-release / test build** — see [`RELEASE_NOTES_
 | **Doom (endgame)** | Each extra Eternatus you beat raises a Doom level: tougher elites with traits, a bigger swarm, Mega rifts, new Eternatus attacks, endgame cards, Overcap upgrades and scaling coins. |
 | **Wild legendaries** | From minute 30, up to three legendaries roam among the normal enemies, appearing more and more often. |
 | **Dash** | Shift/Space, an on-screen DASH button or a controller button. Short burst with brief invulnerability that damages what it crosses. |
+| **Mega Calamity** | Between two Eternatus fights, a Mega legendary arrives with telegraphed attacks (Stomp and Barrage) and a good reward. |
 | **Deoxys formes** | A Unique card from minute 5 lets Deoxys switch between Attack, Defense and Speed Forme. |
 | **Arceus plates** | Arceus starts with Judgment and finds Plates that change its type, its Judgment and its look. |
+| **Kyurem and DNA Splicers** | Kyurem starts with its own move, Glaciate. From minute 30 a Unique card fuses it into Black Kyurem (+40% damage) or White Kyurem (+25% damage, −15% cooldowns). Glaciate then evolves into Freeze Shock (an electrified lance that paralyses) or Ice Burn (white fire that burns). |
 | **Z-Crystal card** | From minute 15 a card can unlock your type's Z-Move for the run (2-minute recharge). |
+| **Effects under the Pokémon** | Rings, hit arcs and beams come out from under the sprite; limits on live effects keep busy runs smooth. |
 | **Balance** | +10% damage with your own type, Momentum for chained defeats, speed cap, shorter enemy shields. |
+| **Save and resume** | Pause → *Save and quit* stores a Normal run; the menu reminds you of it and offers *Resume run* or *Give up*. Save codes are compressed (about 14,000 characters for a full save). |
+| **Customisation** | HUD layout editor (move, resize and hide every on-run element, with presets), radar switch, per-Pokémon *Use shiny version*, keyboard rebinding and gamepad remapping. |
+| **Redeem codes** | Settings → Account → Redeem code unlocks special bundles and random Pokémon. |
 
 ## Controls
 
@@ -33,10 +39,12 @@ Current version: **0.1.0 — pre-release / test build** — see [`RELEASE_NOTES_
 | Switch move | 1–6, Q / E | tap a move icon | LB / RB, D-pad |
 | **Dash** | **Shift**, or **Space** when nothing is nearby to interact with | **DASH** button | **Cancel button** (B on the Xbox layout); it shares the button with "Back" in menus |
 | Z-Move | Z | Z button | left stick click |
-| Dynamax | C | MAX button | View / Back |
-| Pause | Esc / P | pause button | Menu / Start |
+| Dynamax | C | MAX button | X |
+| Build summary | Tab | pause button | View / Select |
+| Options (pause) | Esc / P | pause button | Menu / Start |
+| Team swap (Team Mode) | R | — | right stick click |
 
-The gamepad layout (Xbox, PlayStation, Nintendo) and every button can be changed in **Settings → Controls**.
+The gamepad layout (Xbox, PlayStation, Nintendo) and every gamepad button and keyboard key can be changed in **Settings → Controls**. In the Pokémon list, LB / RB step through the regions.
 
 ## Install / build
 
@@ -57,13 +65,13 @@ The in-game **update check** looks at `Dwr3ker/Megarift-Survivors` (`REPO` in `s
 
 ## Tests
 
-The feature work is covered by headless Godot scripts (one per system, 22 in total), in `tools/tests/`:
+The feature work is covered by headless Godot scripts (one per system, 31 in total), in `tools/tests/`:
 
 ```
 godot --headless --path . --script res://tools/tests/mega_run_test.gd
 ```
 
-Each prints `PASS`/`FAIL` per check and ends with `RESULT: PASS` or `FAIL`. Tests that start a run snapshot your save and restore it when they finish. They exercise game logic only: **they cannot tell you how the game feels**,.
+Each prints `PASS`/`FAIL` per check and ends with `RESULT: PASS` or `FAIL`. Tests that start a run snapshot your save and restore it when they finish. They exercise game logic only: **they cannot tell you how the game feels**.
 
 ## Credits and licenses
 
