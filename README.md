@@ -25,11 +25,20 @@ Current version: **0.1.0 (pre-release alpha builds, latest `v0.1.0-alpha.8`)** �
 | **Arceus plates** | Arceus starts with Judgment and finds Plates that change its type, its Judgment and its look. |
 | **Kyurem and DNA Splicers** | Kyurem starts with its own move, Glaciate. From minute 30 a Unique card fuses it into Black Kyurem (+40% damage) or White Kyurem (+25% damage, −15% cooldowns). Glaciate then evolves into Freeze Shock (an electrified lance that paralyses) or Ice Burn (white fire that burns). |
 | **Z-Crystal card** | From minute 15 a card can unlock your type's Z-Move for the run (2-minute recharge). |
+| **In-run evolution** *(alpha.9)* | Charmander → Charmeleon → Charizard during a run. Pokémon that can evolve get a guaranteed Evolution card at Lv. 16 and 34 (three-stage lines) or Lv. 20 (two-stage lines); Eevee-style branches let you choose. Evolving gives the next stage's stats, a full heal and a permanent bonus. Starting unevolved is weaker early but scales further; starting fully evolved is stronger early and earns a *Seasoned* bonus that grows with your level (about 5% behind late), and only a run that starts as the Mega-capable Pokémon can Mega Evolve. |
+| **Dynamax and Z-Move visuals** *(alpha.9)* | Z-Moves gather energy into your Pokémon during the cinematic; Dynamax drops a beam of light, each Max Wave is a real shockwave and the big ones show the type's Max move name. |
+| **Chained fusions** | Two bonded, evolved, max-level moves fuse into one; a fusion can fuse again with another until it holds 4 moves, and the move bar shows every move in the slot. |
+| **Boss HP bar** | A boss bar at the top centre, below the clock, counters and notices. |
+| **Item swap screen** | Finding an item with a full bag shows the new item once, with one card per item you would give up. |
 | **Effects under the Pokémon** | Rings, hit arcs and beams come out from under the sprite; limits on live effects keep busy runs smooth. |
 | **Balance** | +10% damage with your own type, Momentum for chained defeats, speed cap, shorter enemy shields. |
-| **Save and resume** | Pause → *Save and quit* stores a Normal run; the menu reminds you of it and offers *Resume run* or *Give up*. Save codes are compressed (about 14,000 characters for a full save). |
-| **Customisation** | HUD layout editor (move, resize and hide every on-run element, with presets), radar switch, per-Pokémon *Use shiny version*, keyboard rebinding and gamepad remapping. |
-| **Redeem codes** | Settings → Account → Redeem code unlocks special bundles and random Pokémon. |
+| **Save and resume** | Pause → *Save and quit* stores a Normal run; the menu reminds you of it and offers *Resume run* or *Give up*. A resumed run keeps the permanent upgrades it was saved with, so you cannot leave, buy upgrades and come back stronger. Save codes are compressed (about 14,000 characters for a full save). |
+| **Customisation** | HUD layout editor (move, resize and hide every on-run element, with presets), radar switch, per-Pokémon *Use shiny version*, a Poké Ball on each Pokémon's page that shows its rarity, keyboard rebinding and gamepad remapping. |
+| **Redeem codes** | Settings → Account → Redeem code unlocks special bundles, random Pokémon and a chosen Pokémon (alpha.9). |
+
+## Feature guide (PDF)
+
+[`docs/Megarift-Survivors-features.pdf`](docs/Megarift-Survivors-features.pdf) lists the features of this port with screenshots. It is rebuilt from this README and `docs/features.json` on every commit by the git hook in `.githooks/` (run `git config core.hooksPath .githooks` once after cloning; it needs `pip install reportlab pillow`). `tools/capture_docs.ps1` refreshes the screenshots by running the game.
 
 ## Controls
 
@@ -65,7 +74,7 @@ The in-game **update check** looks at `Dwr3ker/Megarift-Survivors` (`REPO` in `s
 
 ## Tests
 
-The feature work is covered by headless Godot scripts (one per system, 31 in total), in `tools/tests/`:
+The feature work is covered by headless Godot scripts (one per system, 34 in total), in `tools/tests/`:
 
 ```
 godot --headless --path . --script res://tools/tests/mega_run_test.gd

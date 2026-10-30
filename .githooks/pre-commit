@@ -1,0 +1,17 @@
+#!/bin/sh
+# Rebuilds docs/Megarift-Survivors-features.pdf from README.md + docs/features.json and adds it to the commit.
+# Enable once per clone:  git config core.hooksPath .githooks      (needs: pip install reportlab pillow)
+# It never blocks a commit: if Python or reportlab is missing it only prints a warning.
+cd "$(git rev-parse --show-toplevel)" || exit 0
+PY=python
+command -v python >/dev/null 2>&1 || PY=python3
+if ! command -v "$PY" >/dev/null 2>&1; then
+  echo "pre-commit: Python not found, feature PDF not rebuilt" >&2
+  exit 0
+fi
+if "$PY" tools/make_features_pdf.py >/dev/null 2>&1; then
+  git add docs/Megarift-Survivors-features.pdf
+else
+  echo "pre-commit: could not rebuild docs/Megarift-Survivors-features.pdf (pip install reportlab pillow); committing without it" >&2
+fi
+exit 0

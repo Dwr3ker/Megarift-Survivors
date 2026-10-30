@@ -17,6 +17,8 @@ const RAR = preload("res://scripts/rarity.gd")
 const WL = preload("res://scripts/wildleg.gd")
 const FM = preload("res://scripts/forme.gd")
 const KYU = preload("res://scripts/kyurem.gd")
+const EVL = preload("res://scripts/evolution.gd")
+const PWF = preload("res://scripts/power_fx.gd")
 const ETX = preload("res://scripts/eternamax.gd")
 const DM = preload("res://scripts/doom.gd")
 const CAL = preload("res://scripts/calamity.gd")
@@ -272,6 +274,16 @@ var mega_done := false
 var plate := "normal"    # Arceus: tipo de la placa actual (plates.gd)
 var plate_t := -1000000.0   # run_time de la ultima placa
 var forme := ""          # Deoxys: forma actual ("", attack, defense, speed); ver forme.gd
+# In-run evolution (evolution.gd): the species the Pokémon is right now (0 = the one the run started with), the permanent
+# bonuses earned by evolving, and the "seasoned" bonus of a run that started evolved.
+var cur_dex := 0
+var evo_dmg := 0.0
+var evo_spd := 0.0
+var evo_steps := 0
+var seas_dmg := 0.0
+var seas_spd := 0.0
+var seas_hp_done := 0.0
+var seas_level_seen := -1
 var kyurem := ""         # Kyurem: "", black or white (DNA Splicers); see kyurem.gd
 var forme_t := -1000000.0   # run_time del ultimo cambio de forma
 var dyn_cd := 0.0
@@ -497,6 +509,7 @@ var ret_last := 0
 var unfreeze_count := 0
 var pause_ui: CanvasLayer
 var mini: Node2D
+var zoom_punch := 0.0   # brief camera push-in (Z-Move cinematic, Dynamax); decays by itself
 var cam_zoom := 1.65  # campo de vision: ajustable en la pausa (100-200 %), se guarda en Ajustes
 var settings_open := false
 var run_saved := false
@@ -1056,6 +1069,8 @@ func _notification(what: int) -> void:
 		if player.dead:
 			if _death_clock() > 1.3:
 				_go_menu()
+		elif shop_open:
+			kec.close_ui()   # Android Back (many gamepads send B as Back) closes the Kecleon shop instead of pausing behind it
 		elif paused:
 			paused = false
 		elif not choosing:
@@ -1511,10 +1526,14 @@ func _process(delta: float) -> void:
 		elif bonds > 0 and not choosing and (arena == null or _arena_bond_ready()):
 			_offer_bond(true)
 	ground.center = player.position
+	EVL.tick(self)
+	if zoom_punch != 0.0:
+		zoom_punch = move_toward(zoom_punch, 0.0, delta * 0.3)
+		cam.zoom = Vector2(cam_zoom, cam_zoom) * (1.0 + zoom_punch)
 	cam.offset = Vector2(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0)) * shake * (1.0 if shake_on else 0.0)
 	shake = maxf(0.0, shake - 30.0 * delta)
 	hud.hp = player.hp
-	hud.icon_tex = _hud_icon(_pdex())
+	hud.icon_tex = _hud_icon(_cur_dex())
 	hud.flash_k = 1.0 if shake_on else 0.2
 	UIS.colorblind = bool(SV.d["settings"].get("colorblind", false))
 	var hs: float = clampf(float(SV.d["settings"].get("hud_scale", 100)) / 100.0, 0.8, 1.3)   # master size
@@ -1580,7 +1599,7 @@ func _process(delta: float) -> void:
 	hud.dyn_type = String(player.types[0])
 	hud.dyn_btn = 0 if (mode == "tower" or not DYN.unlocked(SV.d["stats"]) or _dyn_on()) else (3 if dyn_used else (2 if run_time >= DYN.MIN_TIME else 0))
 	hud.dyn_cd = dyn_cd
-	hud.ab_name = L.t(String(AB.FX[AB.of(_pdex())]["name"]))
+	hud.ab_name = L.t(String(AB.FX[AB.of(_cur_dex())]["name"]))
 	hud.show_stats = bool(SV.setting("stats_box"))
 	if hud.show_stats:
 		# Filas del panel lateral: [etiqueta, valor, valor secundario, estado (1 sube, -1 baja, 0 neutro)]
@@ -1797,7 +1816,7 @@ func _rk_add(key: String) -> float:
 # Dificultad adaptativa (solo partida normal): empieza facil (mas aun para jugadores nuevos) y sube con tus mejoras.
 # Mide tu poder (mejoras de la partida + nivel + mejoras permanentes) y mueve vida, dano, spawn, hordas y experiencia necesaria.
 func _adapt_on() -> bool:
-	return mode == "normal" and bool(SV.d["settings"].get("adaptive", true)) and arena == null
+	return mode == "normal" and bool(SV.run_setting("adaptive", true)) and arena == null
 
 
 func _power() -> float:
@@ -1983,6 +2002,7 @@ func _z_start() -> void:
 	z_state = "cine"
 	z_t = 0.0
 	player.invuln = 5.0
+	PWF.z_gather(self, z_type, ZM.CINE_T)
 	Aud.sfx("legend")
 	_ring(player.position, 10.0, 220.0, Color.html(String(MD.TYPE_COLOR.get(z_type, "#ffffff"))), 0.8)
 	player.attack_face = 1.5
@@ -1990,6 +2010,7 @@ func _z_start() -> void:
 
 func _z_cine(delta: float) -> void:
 	z_t += delta
+	zoom_punch = maxf(zoom_punch, 0.08)   # the camera stays pushed in for the cinematic, then eases back
 	player.invuln = 5.0
 	if z_t < 0.7:
 		shake = maxf(shake, 3.0)
@@ -2043,14 +2064,14 @@ func _atk() -> float:
 		k *= 1.4
 	if _has_item("lifeorb"):
 		k *= 1.3   # antes, con las dos a la vez (Doble equipaje) la Vidasfera no sumaba daño pero seguía quitando vida
-	return base_atk * pow(1.10, _lvf("atk")) * (1.0 + _buff_mul("atk")) * k * (1.5 if _pw("fury") else 1.0) * (1.5 if wp_t > 0.0 else 1.0) * _rk("atk") * (1.0 + 0.003 * float(reap_kills)) * (1.0 + _abn("dmg") + _moxie() + (_abn("defiant") if defiant_t > 0.0 else 0.0)) * (DYN.DMG_K if _dyn_on() else 1.0) * (MG.ATK_K * DM.mega_atk_k(eter_kills) if _mega_on() else 1.0) * (FM.ATK_K if forme == "attack" else 1.0) * KYU.atk_k(self) * (1.0 + MOM_PER * mom)
+	return base_atk * pow(1.10, _lvf("atk")) * (1.0 + _buff_mul("atk")) * k * (1.5 if _pw("fury") else 1.0) * (1.5 if wp_t > 0.0 else 1.0) * _rk("atk") * (1.0 + 0.003 * float(reap_kills)) * (1.0 + _abn("dmg") + _moxie() + (_abn("defiant") if defiant_t > 0.0 else 0.0)) * (DYN.DMG_K if _dyn_on() else 1.0) * (MG.ATK_K * DM.mega_atk_k(eter_kills) if _mega_on() else 1.0) * (FM.ATK_K if forme == "attack" else 1.0) * KYU.atk_k(self) * (1.0 + evo_dmg + seas_dmg) * (1.0 + MOM_PER * mom)
 
 
 func _spd() -> float:
 	if mode == "chal" and _ch_rs("no_move"):
 		return 0.0
 	var k: float = (1.35 if _has_item("choicescarf") else 1.0) * (1.1 if _has_item("ti_flying") else 1.0)
-	return minf(base_spd * SPD_MAX, base_spd * pow(1.07, _lvf("spd")) * (1.0 + _buff_mul("spd")) * k * (1.4 if _pw("haste") else 1.0) * (0.8 if _has_mod("slow") else 1.0) * _rk("spd") * (1.0 + _abn("spd") + _ab_wspd()) * (DYN.STAT_K if _dyn_on() else 1.0) * (MG.SPD_K if _mega_on() else 1.0) * (FM.SPD_K if forme == "speed" else 1.0) * (kec.spd_mul() if kec != null else 1.0))
+	return minf(base_spd * SPD_MAX, base_spd * pow(1.07, _lvf("spd")) * (1.0 + _buff_mul("spd")) * k * (1.4 if _pw("haste") else 1.0) * (0.8 if _has_mod("slow") else 1.0) * _rk("spd") * (1.0 + _abn("spd") + _ab_wspd()) * (DYN.STAT_K if _dyn_on() else 1.0) * (MG.SPD_K if _mega_on() else 1.0) * (FM.SPD_K if forme == "speed" else 1.0) * (1.0 + evo_spd + seas_spd) * (kec.spd_mul() if kec != null else 1.0))
 
 
 func _cd_mul() -> float:
@@ -2223,6 +2244,12 @@ func _pdex() -> int:
 	if mode == "team" and not team.is_empty():
 		return int(team[team_cur]["dex"])
 	return int(SV.run_dex)
+
+
+# The species the Pokémon is NOW (it changes when it evolves in the run). _pdex() stays the species the run started with:
+# Mega Evolution, formes and species items follow that one.
+func _cur_dex() -> int:
+	return cur_dex if cur_dex > 0 and mode != "team" else _pdex()
 
 
 # Los objetos exclusivos de especie solo salen a quien puede usarlos.
@@ -4102,7 +4129,7 @@ func _hit_enemy(e, dmg: float, col: Color, dir: Vector2, knock: float, mtype: St
 				if e.burn > 0 or e.poison > 0 or e.slow > 0.0 or e.para_t > 0.0 or e.sleep_t > 0.0 or e.frozen_t > 0.0 or e.conf_t > 0.0:
 					d_final *= 1.2
 	# S58.6 (PENDIENTE DE APROBACION, desactivado por defecto): Pokemon de un solo tipo +20% con movimientos de ese tipo, una vez por golpe.
-	if bool(SV.d["settings"].get("mono_bonus", false)) and player.types.size() == 1 and String(player.types[0]) == mtype and not ab_fx.has("owntype"):
+	if bool(SV.run_setting("mono_bonus", false)) and player.types.size() == 1 and String(player.types[0]) == mtype and not ab_fx.has("owntype"):
 		d_final *= 1.2
 	if not ab_fx.is_empty():
 		if String(ab_fx.get("pinch", "")) == mtype and player.hp < player.max_hp * 0.4:
@@ -8304,8 +8331,12 @@ func _offer() -> Array:
 		pool = keep
 	# --- elegir tres ---
 	var picked: Array = []
+	# Evolution (evolution.gd): once the Pokémon reaches the level for its stage the card is always the first one offered
+	var evc: Dictionary = EVL.card(self)
+	if not evc.is_empty():
+		picked.append(evc)
 	# Megaevolucion: carta rara (siempre ocupa un hueco cuando sale)
-	if randf() < MG.OFFER_CHANCE:
+	if picked.is_empty() and randf() < MG.OFFER_CHANCE:
 		var mc: Dictionary = MG.card(self)
 		if not mc.is_empty():
 			picked.append(mc)
@@ -8697,10 +8728,10 @@ func pause_summary() -> Dictionary:
 		[L.t("Level"), "%d" % player.level, "star"],
 		[L.t("Defeats"), "%d" % kills, "fist"],
 		[L.t("Types"), "/".join(PackedStringArray(_ptypes_text())), "star"],
-		[L.t("Ability"), L.t(String(AB.FX[AB.of(_pdex())]["name"])), "star"],
+		[L.t("Ability"), L.t(String(AB.FX[AB.of(_cur_dex())]["name"])), "star"],
 	]
 	var out := {"moves": [], "stats": [], "items": [], "all": all_stats, "time": run_time, "level": player.level,
-		"hp": "%d / %d" % [int(player.hp), int(player.max_hp)], "window": DPS_WIN, "kills": kills, "pname": L.t(String(_dex_by[_pdex()]["name"])), "dex": _pdex(), "ab_name": L.t(String(AB.FX[AB.of(_pdex())]["name"])), "ab_desc": L.t(String(AB.FX[AB.of(_pdex())]["desc"])), "types": _ptypes_text(), "hp_ratio": clampf(float(player.hp) / maxf(1.0, float(player.max_hp)), 0.0, 1.0), "sprite": _sum_sprite()}
+		"hp": "%d / %d" % [int(player.hp), int(player.max_hp)], "window": DPS_WIN, "kills": kills, "pname": L.t(String(_dex_by[_cur_dex()]["name"])), "dex": _cur_dex(), "ab_name": L.t(String(AB.FX[AB.of(_cur_dex())]["name"])), "ab_desc": L.t(String(AB.FX[AB.of(_cur_dex())]["desc"])), "types": _ptypes_text(), "hp_ratio": clampf(float(player.hp) / maxf(1.0, float(player.max_hp)), 0.0, 1.0), "sprite": _sum_sprite()}
 	var old: Dictionary = dmg_hist[0] if not dmg_hist.is_empty() else {}
 	var span: float = float(maxi(1, dmg_hist.size() - 1)) if not dmg_hist.is_empty() else 1.0
 	for mv in player.moves:
@@ -8853,6 +8884,23 @@ func _on_card_chosen(idx: int) -> void:
 		PL.apply(self, String(c["ptype"]))
 		pending_levels = maxi(0, pending_levels - 1)
 		Aud.sfx("confirm")
+		cards.hide_cards()
+		choosing = false
+		return
+	if cat == "evolve":   # one possible form: evolve at once; several (Eevee...): choose
+		var evt: Array = EVL._available(self, int(_cur_dex()))
+		if evt.size() == 1:
+			EVL.apply(self, int(evt[0]))
+			pending_levels = maxi(0, pending_levels - 1)
+			cards.hide_cards()
+			choosing = false
+			return
+		Aud.sfx("select")
+		cards.show_cards(EVL.picks(self), L.t("Choose an evolution"), L.t("Evolution!"), false)
+		return
+	if cat == "evolvepick":
+		EVL.apply(self, int(id))
+		pending_levels = maxi(0, pending_levels - 1)
 		cards.hide_cards()
 		choosing = false
 		return
@@ -12861,7 +12909,7 @@ class Hud extends Node2D:
 			draw_rect(Rect2(Vector2.ZERO, vp), Color(0.0, 0.0, 0.04, z_dim))
 		if z_state == "cine":
 			var T: float = ZM.CINE_T
-			var cy: float = vp.y * 0.42
+			var cy: float = vp.y * 0.3   # higher than before so the banner no longer covers the Pokémon while it gathers energy
 			var open: float = _ease_out(clampf((z_t - 0.05) / 0.3, 0.0, 1.0))
 			var fade: float = clampf((T - z_t) / 0.3, 0.0, 1.0)
 			var al: float = open * fade

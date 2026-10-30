@@ -126,5 +126,52 @@ func _init() -> void:
 	var rd: Dictionary = CODES.redeem("legendary", sv7)
 	check("with nothing new left a random code pays coins", bool(rd["ok"]) and int(sv7["coins"]) == c0 + CODES.DUPLICATE_COINS, str(rd["msg"]))
 	check("messages are templates with arguments", String(rs["msg"]).contains("%s") and (rs["args"] as Array).size() == 1)
+	# ---------- GIMME codes ----------
+	var sg: Dictionary = SV.default_data()
+	var rga: Dictionary = CODES.redeem("gimme all", sg)
+	var n_sprites := 0
+	for p in SV.dex_list:
+		if SV.smeta.has(str(int(p["dex"]))):
+			n_sprites += 1
+	var any_shiny := false
+	for k in sg["owned"]:
+		if bool(sg["owned"][k]["shiny"]):
+			any_shiny = true
+	check("GIMMEALL gives every Pokémon with no upgrades, achievements or shinies", bool(rga["ok"]) and sg["owned"].size() == n_sprites and sg["pup"].is_empty() and not any_shiny and (not sg.has("ach") or sg["ach"].is_empty()), "%d owned of %d" % [sg["owned"].size(), n_sprites])
+	check("GIMMEALL works only once", not bool(CODES.redeem("GIMMEALL", sg)["ok"]))
+	var sp: Dictionary = SV.default_data()
+	var rp: Dictionary = CODES.redeem("GIMMEPIKACHU", sp)
+	check("GIMMEPIKACHU gives Pikachu", bool(rp["ok"]) and sp["owned"].has("25") and (rp["args"] as Array)[0] == "Pikachu", str(rp["msg"]))
+	check("each GIMME code works once", not bool(CODES.redeem("gimme-pikachu", sp)["ok"]) and bool(CODES.redeem("GIMMEEEVEE", sp)["ok"]))
+	check("a name that is not a Pokémon is rejected", not bool(CODES.redeem("GIMMEFOOBAR", sp)["ok"]) and not bool(CODES.redeem("GIMME", sp)["ok"]))
+	var mm: Dictionary = CODES.redeem("GIMMEMRMIME", SV.default_data())
+	check("names with punctuation work (Mr. Mime)", bool(mm["ok"]))
+	var shinies := 0
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 12345
+	for i in range(4000):
+		var fresh: Dictionary = SV.default_data()
+		if bool(CODES._gimme_reward("gimme:25", fresh, rng)["shiny"]):
+			shinies += 1
+	check("the shiny chance matches one gacha pull (1%)", shinies >= 15 and shinies <= 70, "%d shinies in 4000 (expected about %d)" % [shinies, int(4000.0 * SV.SHINY_PULL)])
+	var dup: Dictionary = SV.default_data()
+	dup["owned"]["25"] = {"n": 1, "shiny": false}
+	var rd2: Dictionary = {}
+	rng.seed = 7
+	for i in range(50):
+		var cp: Dictionary = dup.duplicate(true)
+		rd2 = CODES._gimme_reward("gimme:25", cp, rng)
+		if not bool(rd2["shiny"]):
+			check("a duplicate pays the gacha refund", int(cp["coins"]) == int(dup["coins"]) + int(SV.REFUND[int(SV.dex_by[25]["rarity"]) - 1]), str(rd2["msg"]))
+			break
+	var already: Dictionary = SV.default_data()
+	already["owned"]["25"] = {"n": 1, "shiny": true}
+	var allfail := true
+	for i in range(200):
+		var cp2: Dictionary = already.duplicate(true)
+		var r3x: Dictionary = CODES._gimme_reward("gimme:25", cp2, rng)
+		if bool(r3x["shiny"]):
+			allfail = false
+	check("a shiny you already have is never given twice", allfail)
 	print("RESULT: ", "PASS" if ok else "FAIL")
 	quit(0 if ok else 1)

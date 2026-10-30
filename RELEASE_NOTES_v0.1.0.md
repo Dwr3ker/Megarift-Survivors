@@ -1,5 +1,15 @@
 # Megarift Survivors v0.1.0 — pre-release (test build)
 
+## Changes in 0.1.0-alpha.9
+- **Redeem codes:** GIMMEALL (every Pokémon, no upgrades) and GIMME followed by a Pokémon's name (that Pokémon with the gacha shiny chance); plus random legendary, shiny and Mega codes.
+- **Features PDF:** docs/Megarift-Survivors-features.pdf, rebuilt from the README on every commit.
+- Save and resume: a resumed run keeps the permanent upgrades (and the Adaptive difficulty and Mono-type settings) it was saved with, so you can no longer leave a run, buy upgrades and come back stronger.
+- The Poké Ball on a Pokémon's page now shows its rarity: a different ball from Common to Legendary.
+- **In-run evolution:** In-run evolution: Pokémon that can evolve (Charmander, Charmeleon, Eevee...) get a guaranteed Evolution card when they reach their level (Lv. 16 and 34 in three-stage lines, Lv. 20 in two-stage lines). Evolving brings the next stage's stats, a full heal and a permanent damage, HP and speed bonus. Starting unevolved is weaker early but scales further; starting fully evolved is stronger early and earns a Seasoned bonus that grows with your level (about 5% behind in the very late game), and only a run that starts as the Mega-capable Pokémon can Mega Evolve. The Pokémon list shows each Pokémon's evolution line.
+- Kecleon shop with a controller: Confirm now buys the highlighted item and Back / Start close the shop on any button layout (Xbox, PlayStation, Nintendo or a custom map); the shop opens on the first item you can afford and says Not enough coins when you press Confirm on one you can't; Android's Back button closes the shop instead of pausing behind it.
+- New redeem codes: GIMMEALL gives every Pokémon with no upgrades, and GIMME followed by a Pokémon's name (for example GIMMEPIKACHU) gives that Pokémon with the same shiny chance as a gacha pull; a duplicate pays the gacha refund. Each works once.
+- Dynamax and Z-Moves look better: Z-Moves gather energy into your Pokémon during the cinematic (motes, turning rune rings and a camera push-in, with the banner moved up so it no longer covers it); Dynamax drops a beam of light on your Pokémon, each Max Wave is a real shockwave, the big ones show the name of the type's Max move, and it ends in a puff of red mist.
+
 ## Changes in 0.1.0-alpha.8
 - **Kyurem:** DNA Splicers, a unique level-up card from minute 30, fuses Kyurem into Black Kyurem (+40% damage) or White Kyurem (+25% damage, -15% cooldowns), both with +20% HP. Kyurem now starts with its own move, Glaciate (a freezing wind). When Glaciate evolves it becomes Glaciate+, or Black Kyurem's Freeze Shock (a colossal electrified lance that paralyses) or White Kyurem's Ice Burn (a vast blaze of white fire that burns). New Black and White Kyurem sprites.
 - **Effects:** rings, hit arcs and beams now come out from under the Pokémon instead of covering it.

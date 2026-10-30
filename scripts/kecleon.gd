@@ -3,6 +3,7 @@ extends RefCounted
 # un reroll por visita con precio global creciente, un solo Kecleon activo y separacion minima.
 # Los efectos se conectan a las funciones de estadisticas ya existentes en main.gd (no hay pipelines paralelos).
 
+const PAD = preload("res://scripts/pad.gd")
 const REROLL := [50, 100, 175, 275, 400, 550]
 const VISIT_TIME := 75.0
 const MIN_SEP := 520.0
@@ -641,7 +642,20 @@ func open_ui() -> void:
 	close.pressed.connect(close_ui)
 	row2.add_child(close)
 	_refresh_ui()
-	if not ui_btns.is_empty():
+	PAD.apply()   # make sure the gamepad's Confirm / Back buttons drive the shop buttons
+	_focus_first_buy(close)
+
+
+# Focus the first item you can afford (a disabled button gives no feedback when you press it); with none, the Close button.
+func _focus_first_buy(close: Button = null) -> void:
+	for b in ui_btns:
+		var bb: Button = b
+		if bb.visible and not bb.disabled:
+			bb.grab_focus()
+			return
+	if close != null:
+		close.grab_focus()
+	elif not ui_btns.is_empty():
 		(ui_btns[0] as Button).grab_focus()
 
 
@@ -759,13 +773,32 @@ func ui_input(event: InputEvent) -> bool:
 				close_ui()
 				return true
 	elif event is InputEventJoypadButton and event.pressed:
-		if event.button_index == JOY_BUTTON_B:
+		var bi: int = event.button_index
+		# Confirm first (on a Nintendo layout the right-hand button is Confirm), then Back / Start close the shop
+		if bi == PAD.btn("confirm"):
+			_press_focused()
+			return true
+		if bi == PAD.btn("cancel") or bi == PAD.btn("pause") or (bi == JOY_BUTTON_BACK and not PAD.is_mapped(JOY_BUTTON_BACK)):
 			close_ui()
 			return true
-		if event.button_index == JOY_BUTTON_X:
+		if bi == PAD.btn("ban") or bi == JOY_BUTTON_X:
 			_on_reroll()
 			return true
 	return false
+
+
+# Confirm on the highlighted shop button, even if the engine did not turn it into a press (custom pad map, disabled item).
+func _press_focused() -> void:
+	var f = m.get_viewport().gui_get_focus_owner()
+	if not (f is Button) or ui == null or not ui.is_ancestor_of(f):
+		return
+	var b: Button = f
+	if b.disabled:
+		m.Aud.sfx("hit")   # cannot afford it: say so instead of doing nothing
+		if ui_info != null:
+			ui_info.text = m.L.t("Not enough coins") if not bought else m.L.t("Thanks for your purchase!")
+		return
+	b.pressed.emit()
 
 
 # ------------------------------------------------------------------ ciclo de vida (lo llama main cada frame de juego)

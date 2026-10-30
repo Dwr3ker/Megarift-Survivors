@@ -24,6 +24,7 @@ const PXF = preload("res://scripts/pxfont.gd")
 const DSP = preload("res://scripts/display.gd")
 const SLOTS = preload("res://scripts/slots.gd")
 const PAD = preload("res://scripts/pad.gd")
+const EVL = preload("res://scripts/evolution.gd")
 const KB = preload("res://scripts/keys.gd")
 const PADI = preload("res://scripts/padicons.gd")
 const UPD = preload("res://scripts/updater.gd")
@@ -845,6 +846,7 @@ func _ready() -> void:
 		DSP.apply_window()
 		Aud.setup(self)
 		Aud.music("village")
+		SV.pin_clear()   # back on the menu: no run is being resumed
 		if not Engine.has_meta("resume_prompted") and not Engine.has_meta("no_save"):
 			Engine.set_meta("resume_prompted", true)   # once per launch: the reminder is for runs left over from an earlier session
 			_ongoing_prompt.call_deferred(Callable())
@@ -2381,6 +2383,7 @@ func _resume_run() -> void:
 	SV.run_dex = int(snap["dex"])
 	SV.run_mods = Array(snap["mods"]).duplicate()
 	SV.resume_snap = snap
+	SV.pin_run(snap)   # the run keeps the upgrades it was saved with
 	get_tree().change_scene_to_file("res://scenes/main.tscn")
 
 
@@ -4364,7 +4367,8 @@ func _dex_detail() -> void:
 	dex_pv_box.add_child(pv)
 	var shiny_owned: bool = owned and bool(SV.d["owned"][str(dx)].get("shiny", false))
 	pv.setup(dx, shiny_owned and SV.shiny_wanted(dx), 6.0, not owned)
-	var ball := IC.rect("ball", 52)
+	var ball_name: String = String(RARITY_BALL[clampi(int(p["rarity"]) - 1, 0, 4)])   # the Poké Ball shows the Pokémon's rarity
+	var ball := IC.rect(ball_name, 52)
 	ball.position = Vector2(8, 8)
 	ball.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	dex_pv_box.add_child(ball)
@@ -4395,7 +4399,7 @@ func _dex_detail() -> void:
 		bv.add_child(tl)
 		dex_pv_box.add_child(bdg)
 	# barra de nombre
-	dex_namebar.add_child(IC.rect("ball", 36))
+	dex_namebar.add_child(IC.rect(ball_name, 36))
 	var nm := _label(("#%03d  %s" % [dx, L.t(String(p["name"]))]) if owned else "#%03d  ???" % dx, 26, C_GOLD)
 	nm.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	nm.clip_text = true
@@ -4442,6 +4446,19 @@ func _dex_detail() -> void:
 		var flb := _label(L.t("Can change Forme in runs (Attack, Defense or Speed)"), 18, Color("#ff9ee0"))
 		flb.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		sv.add_child(flb)
+	var evl_to: Array = EVL.evolves_to(dx)   # evolution in runs (evolution.gd)
+	if not evl_to.is_empty():
+		var evn: Array = []
+		for ec in evl_to:
+			if SV.dex_by.has(int(ec)):
+				evn.append(L.t(String(SV.dex_by[int(ec)]["name"])))
+		var elb := _label(L.t("Evolves in runs (Lv. %d) into %s: a weaker start, a stronger late game.") % [EVL.level_for(dx), ", ".join(PackedStringArray(evn.slice(0, 3))) + ("…" if evn.size() > 3 else "")], 18, Color("#ffd65c"))
+		elb.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		sv.add_child(elb)
+	elif EVL.line_len(dx) > 1:
+		var flb2 := _label(L.t("Fully evolved: a strong start and a bonus that grows with your level."), 18, Color("#ffd65c"))
+		flb2.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		sv.add_child(flb2)
 	# habilidad
 	var abd: Dictionary = AB.FX[AB.of(dx)]
 	var ap := _dpanel()

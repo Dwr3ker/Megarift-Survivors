@@ -16,6 +16,36 @@ static var run_dex := 25
 static var run_mode := "normal"    # normal | daily | rush | party | type | team
 static var run_hyper := false      # Modo Hyper elegido para la partida normal que se va a jugar (no se guarda)
 static var run_mods: Array = []
+# While a saved run is resumed, the Pokémon's permanent upgrades and the balance settings are the ones it had when it was saved:
+# you cannot leave a run, buy upgrades and come back with them. (Set by the menu when it resumes, cleared on the next menu.)
+static var pin_dex := -1
+static var pin_pup: Dictionary = {}
+static var pin_set: Dictionary = {}
+const PIN_SETTINGS := ["adaptive", "mono_bonus"]
+
+
+static func pin_run(snap: Dictionary) -> void:
+	pin_clear()
+	if not snap.has("pup"):
+		return   # a run saved by an older version: nothing to pin
+	pin_dex = int(snap["dex"])
+	pin_pup = (snap["pup"] as Dictionary).duplicate(true)
+	pin_set = (snap.get("set", {}) as Dictionary).duplicate()
+
+
+static func pin_clear() -> void:
+	pin_dex = -1
+	pin_pup = {}
+	pin_set = {}
+
+
+# A gameplay setting as the current run sees it (pinned to the saved run's value while it is resumed).
+static func run_setting(k: String, def = false):
+	if pin_set.has(k):
+		return pin_set[k]
+	return d["settings"].get(k, def)
+
+
 static var resume_snap: Dictionary = {}   # a saved run waiting to be put back (run_save.gd); set by the menu, read by the run
 static var run_chal: Dictionary = {}   # instancia del reto en juego (modo "chal")
 static var run_seed := 0
@@ -454,6 +484,8 @@ static func bind_set(dex: int, slot: int, id: String) -> void:
 # ---- mejoras ----
 static func up_level(id: String, dex: int = -1) -> int:
 	var key := str(run_dex if dex < 0 else dex)
+	if pin_dex >= 0 and str(pin_dex) == key:
+		return int(pin_pup.get(id, 0))
 	var m: Dictionary = d["pup"].get(key, {})
 	return int(m.get(id, 0))
 

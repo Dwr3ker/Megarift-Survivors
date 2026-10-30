@@ -13,6 +13,7 @@ const ENTRIES := [
 		"date": "2026-10-27",
 		"title": "Megarift Survivors 0.1: Doofcraft-style edition (test build)",
 		"new": [
+			"In-run evolution: Pokémon that can evolve (Charmander, Charmeleon, Eevee...) get a guaranteed Evolution card when they reach their level (Lv. 16 and 34 in three-stage lines, Lv. 20 in two-stage lines). Evolving brings the next stage's stats, a full heal and a permanent damage, HP and speed bonus. Starting unevolved is weaker early but scales further; starting fully evolved is stronger early and earns a Seasoned bonus that grows with your level (about 5% behind in the very late game), and only a run that starts as the Mega-capable Pokémon can Mega Evolve. The Pokémon list shows each Pokémon's evolution line.",
 			"HUD layout editor (Settings > Graphics > Edit HUD layout): drag or nudge every on-run HUD element, resize it, turn the radar and the stats panel on or off, and save your layouts as presets. The per-element size sliders moved here.",
 			"Save and quit: pause > Save and quit stores your Normal run and the main menu offers Resume run (not during boss fights, rifts or other special events).",
 			"Radar switch: Settings > Graphics > Radar turns the on-run map off.",
@@ -38,6 +39,11 @@ const ENTRIES := [
 			"Rifts: the first check is at 90 s and then every 30 s, with a 20% chance that grows 5% with every miss (max 50%). There is no longer a time limit: they keep appearing until Eternatus.",
 		],
 		"fixes": [
+			"Save and resume: a resumed run keeps the permanent upgrades (and the Adaptive difficulty and Mono-type settings) it was saved with, so you can no longer leave a run, buy upgrades and come back stronger.",
+			"The Poké Ball on a Pokémon's page now shows its rarity: a different ball from Common to Legendary.",
+			"Kecleon shop with a controller: Confirm now buys the highlighted item and Back / Start close the shop on any button layout (Xbox, PlayStation, Nintendo or a custom map); the shop opens on the first item you can afford and says Not enough coins when you press Confirm on one you can't; Android's Back button closes the shop instead of pausing behind it.",
+			"New redeem codes: GIMMEALL gives every Pokémon with no upgrades, and GIMME followed by a Pokémon's name (for example GIMMEPIKACHU) gives that Pokémon with the same shiny chance as a gacha pull; a duplicate pays the gacha refund. Each works once.",
+			"Dynamax and Z-Moves look better: Z-Moves gather energy into your Pokémon during the cinematic (motes, turning rune rings and a camera push-in, with the banner moved up so it no longer covers it); Dynamax drops a beam of light on your Pokémon, each Max Wave is a real shockwave, the big ones show the name of the type's Max move, and it ends in a puff of red mist.",
 			"Kyurem: DNA Splicers, a unique level-up card from minute 30, fuses Kyurem into Black Kyurem (+40% damage) or White Kyurem (+25% damage, -15% cooldowns), both with +20% HP. Kyurem now starts with its own move, Glaciate, a freezing wind. When Glaciate evolves it becomes Glaciate+, or Black Kyurem's Freeze Shock (a colossal electrified lance that paralyses) or White Kyurem's Ice Burn (a vast blaze of white fire that burns).",
 			"Effects: rings, hit arcs and beams now come out from under the Pokémon instead of covering it.",
 			"Performance: fewer draw calls with lots of effects: limits on live rings, beams and hit arcs, lighter big rings and beams, bullets redraw only when they animate, and a cap on floating damage numbers.",

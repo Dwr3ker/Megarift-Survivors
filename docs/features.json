@@ -1,0 +1,52 @@
+{
+ "Mega Evolution": [
+  "screens/mega_charizard.jpg",
+  "screens/pokemon_list_mega_capable.jpg"
+ ],
+ "Rarity-tier cards": [
+  "screens/level_up_cards.jpg"
+ ],
+ "Eternamax Eternatus": [
+  "screens/eternamax_eternatus.jpg"
+ ],
+ "Deoxys formes": [
+  "screens/deoxys_attack_forme.jpg"
+ ],
+ "Arceus plates": [
+  "screens/arceus_fire_plate.jpg"
+ ],
+ "Kyurem and DNA Splicers": [
+  "screens/black_kyurem_freeze_shock.jpg",
+  "screens/white_kyurem.jpg"
+ ],
+ "In-run evolution": [
+  "screens/evolution_card.jpg",
+  "screens/evolved_charmeleon.jpg",
+  "screens/pokemon_list_evolution_line_rarity_ball.jpg"
+ ],
+ "Dynamax and Z-Move visuals": [
+  "screens/dynamax_beam.jpg",
+  "screens/dynamax_max_wave.jpg",
+  "screens/z_move_cinematic.jpg"
+ ],
+ "Chained fusions": [
+  "screens/fusion_four_moves.jpg"
+ ],
+ "Boss HP bar": [
+  "screens/boss_hp_bar.jpg"
+ ],
+ "Item swap screen": [
+  "screens/item_swap_screen.jpg"
+ ],
+ "Effects under the Pokémon": [
+  "screens/black_kyurem_freeze_shock.jpg"
+ ],
+ "Save and resume": [
+  "screens/resume_reminder.jpg",
+  "screens/main_menu.jpg"
+ ],
+ "Customisation": [
+  "screens/hud_layout_editor.jpg",
+  "screens/settings_controls.jpg"
+ ]
+}

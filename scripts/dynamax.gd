@@ -3,6 +3,7 @@ extends RefCounted
 # Una vez por partida; se desbloquea al vencer una guarida Dynamax (stat "dens"). Cada guarida vencida lo recarga.
 const ZMS = preload("res://scripts/zmove.gd")
 const Aud = preload("res://scripts/audio.gd")
+const PWF = preload("res://scripts/power_fx.gd")
 
 const COOLDOWN := 240.0   # 4 minutos desde que acaba
 const DUR := 60.0
@@ -209,7 +210,7 @@ func start(main) -> void:
 	aura_node = Aura.new()
 	aura_node.h = m.player.body_h
 	aura_node.w = m.player.radius * 1.8
-	aura_node.col = Color(0.9, 0.08, 0.25)
+	aura_node.col = Color(0.9, 0.08, 0.25).lerp(Color.html(String(m.MD.TYPE_COLOR.get(type, "#ff2a6d"))), 0.22)   # red, with a hint of the type
 	m.player.add_child(aura_node)
 	m.player.invuln = maxf(m.player.invuln, 1.2)
 	m.shake = maxf(m.shake, 9.0)
@@ -217,6 +218,7 @@ func start(main) -> void:
 	m.pfx.ring(m.player.position, 10.0, 360.0, col, 0.7, 6.0)
 	m.pfx.ring(m.player.position, 10.0, 240.0, Color.WHITE, 0.5, 4.0)
 	m.pfx.burst(m.player.position, col, 28, 260.0)
+	PWF.dyn_enter(m, type)
 
 
 # Destello y sonido de cada paso del crecimiento.
@@ -249,6 +251,7 @@ func stop() -> void:
 	var col: Color = Color.html(String(m.MD.TYPE_COLOR.get(type, "#ff2a6d")))
 	m.pfx.ring(m.player.position, 10.0, 200.0, col, 0.5, 4.0)
 	m.pfx.burst(m.player.position, col, 14, 160.0)
+	PWF.dyn_exit(m, type)
 
 
 func tick(delta: float) -> void:
@@ -280,6 +283,7 @@ func _pulse(big: bool, col: Color) -> void:
 	z.dmg = (30.0 + 8.0 * float(m.player.level)) * m._atk() * (1.9 if big else 1.0)
 	var r: float = 420.0 if big else 280.0
 	z.boom(z.c, r, 6.0 if big else 3.0)
+	PWF.dyn_wave(m, z.c, r, type, big)
 	var st: Array = STATUS.get(type, ["", 0, 0.0])
 	z.hit(z.c, r, 1.0, 260.0 if big else 140.0, String(st[0]), int(st[1]), float(st[2]))
 	if big:

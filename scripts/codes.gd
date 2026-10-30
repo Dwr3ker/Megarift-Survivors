@@ -11,6 +11,9 @@ extends RefCounted
 #   SHINY, SHINY1..SHINY9               a random shiny (any generation / that generation); owned Pokémon turn shiny
 #   SHINYLEGENDARY                      a random shiny legendary
 #   MEGARANDOM                          a random Pokémon that can Mega Evolve
+# GIMME codes (typed in plain, each works once per save):
+#   GIMMEALL                            every Pokémon, with no upgrades, achievements or shinies
+#   GIMME<name>  (e.g. GIMMEPIKACHU)    that Pokémon, with the same shiny chance as one gacha pull; a duplicate pays the gacha refund
 const SV = preload("res://scripts/save_data.gd")
 const MG = preload("res://scripts/mega.gd")
 const ST = preload("res://scripts/starters_data.gd")
@@ -69,6 +72,8 @@ static func redeem(text: String, d: Dictionary) -> Dictionary:
 	if n == "":
 		return {"ok": false, "msg": "Type a code first."}
 	var id: String = String(TABLE.get(hash_of(n), ""))
+	if id == "" and n.begins_with("GIMME"):
+		id = _gimme_id(n)
 	if id == "":
 		return {"ok": false, "msg": "That code is not valid."}
 	var used: Dictionary = d.get("codes_used", {})
@@ -104,13 +109,64 @@ static func redeem(text: String, d: Dictionary) -> Dictionary:
 		"all":
 			UNL.apply(d, true)
 			msg = "Everything unlocked."
+		"gimmeall":
+			var every: Array = []
+			for p in SV.dex_list:
+				if SV.smeta.has(str(int(p["dex"]))):
+					every.append(int(p["dex"]))
+			msg = "Every Pokémon: %d new, with no upgrades."
+			args = [_grant(d, every)]
 		_:
-			var rr: Dictionary = _random_reward(id, d)
+			var rr: Dictionary = _gimme_reward(id, d) if id.begins_with("gimme:") else _random_reward(id, d)
 			msg = String(rr["msg"])
 			args = rr["args"]
 	used[id] = int(Time.get_unix_time_from_system())
 	d["codes_used"] = used
 	return {"ok": true, "msg": msg, "args": args}
+
+
+# "GIMMEALL" -> "gimmeall"; "GIMMEPIKACHU" -> "gimme:25" (the Pokémon whose name matches); anything else -> "".
+static func _gimme_id(n: String) -> String:
+	var rest: String = n.substr(5)
+	if rest == "ALL":
+		return "gimmeall"
+	if rest == "":
+		return ""
+	for p in SV.dex_list:
+		if normalize(String(p["name"])) == rest and SV.smeta.has(str(int(p["dex"]))):
+			return "gimme:%d" % int(p["dex"])
+	return ""
+
+
+# One gacha-style roll for that Pokémon: the gacha's shiny chance, and the gacha's refund for a duplicate.
+static func _gimme_reward(id: String, d: Dictionary, rng: RandomNumberGenerator = null) -> Dictionary:
+	var dex: int = int(id.substr(6))
+	var p: Dictionary = SV.dex_by[dex]
+	if rng == null:
+		rng = RandomNumberGenerator.new()
+		rng.randomize()
+	var key := str(dex)
+	var can_shiny: bool = bool(SV.smeta[key].get("sh", 0))
+	var shiny: bool = can_shiny and rng.randf() < SV.SHINY_PULL
+	var own = (d["owned"] as Dictionary).get(key, null)
+	var shiny_owned: bool = own != null and bool(own.get("shiny", false))
+	var was_new: bool = own == null
+	var nm: String = String(p["name"])
+	var rarity: int = clampi(int(p.get("rarity", 1)), 1, SV.REFUND.size())
+	if shiny and shiny_owned:
+		shiny = false   # nothing new to give
+	if was_new:
+		d["owned"][key] = {"n": 1, "shiny": shiny}
+	elif shiny:
+		d["owned"][key]["shiny"] = true
+	if shiny:
+		d["stats"]["shinies"] = int(d["stats"].get("shinies", 0)) + 1
+		return {"msg": "Shiny %s joins you!" if was_new else "%s turned shiny!", "args": [nm], "dex": dex, "shiny": true, "new": was_new}
+	if was_new:
+		return {"msg": "%s joins you!", "args": [nm], "dex": dex, "shiny": false, "new": true}
+	var refund: int = int(SV.REFUND[rarity - 1])
+	d["coins"] = int(d["coins"]) + refund
+	return {"msg": "You already have %s: %d coins instead.", "args": [nm, refund], "dex": dex, "shiny": false, "new": false}
 
 
 # "rleg:3" = a random legendary of generation 3 (0 = any generation); "rshiny", "rshinyleg" and "rmega" work the same way.
