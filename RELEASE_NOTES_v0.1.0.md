@@ -1,5 +1,12 @@
 # Megarift Survivors v0.1.0 — pre-release (test build)
 
+## Changes in 0.1.0-alpha.8
+- **Kyurem:** DNA Splicers, a unique level-up card from minute 30, fuses Kyurem into Black Kyurem (+40% damage) or White Kyurem (+25% damage, -15% cooldowns), both with +20% HP. Kyurem now starts with its own move, Glaciate (a freezing wind). When Glaciate evolves it becomes Glaciate+, or Black Kyurem's Freeze Shock (a colossal electrified lance that paralyses) or White Kyurem's Ice Burn (a vast blaze of white fire that burns). New Black and White Kyurem sprites.
+- **Effects:** rings, hit arcs and beams now come out from under the Pokémon instead of covering it.
+- **Performance:** limits on live rings, beams and hit arcs, lighter big rings and beams, bullets redraw only when they animate, and a cap on floating damage numbers.
+- **Pokémon list:** opens on your partner's page with the partner highlighted; LB / RB step through the region tabs.
+- **HUD:** the revive hearts no longer overlap each other or the ability name.
+
 ## Changes in 0.1.0-alpha.7
 - Random redeem codes: new codes give a random legendary (any generation or a chosen one), a random shiny, a shiny legendary or a Mega-capable Pokémon. They prefer something you don't have yet and pay coins when nothing new is left.
 - Run in progress: if you left a run saved, the menu reminds you when it opens and when you press Play: resume it or give it up.

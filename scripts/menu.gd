@@ -1301,7 +1301,12 @@ func _leave() -> void:
 		_show("main")
 
 
+var dex_jump := false   # opening the Pokémon list: show the page with the partner and highlight it
+
+
 func _show(name: String) -> void:
+	if name == "dex" and cur != "dex":
+		dex_jump = true
 	if name == "up" and cur != "up":
 		up_dex = int(SV.d["selected"])
 	_close_up_picker()
@@ -1684,6 +1689,17 @@ func _input(event: InputEvent) -> void:
 				tab_sel.grab_focus()
 			get_viewport().set_input_as_handled()
 			return
+	if event is InputEventJoypadButton and event.pressed and cur == "dex" and (event.button_index == PAD.btn("prev") or event.button_index == PAD.btn("next")):
+		# LB / RB step through the region tabs (All, then Kanto ... Paldea), wrapping around
+		var rd := -1 if event.button_index == PAD.btn("prev") else 1
+		dex_gen = posmod(dex_gen + rd, 10)
+		dex_page = 0
+		_refresh_dex()
+		if focus_first != null and is_instance_valid(focus_first):
+			_gf(focus_first)
+		Aud.sfx("click")
+		get_viewport().set_input_as_handled()
+		return
 	if event is InputEventJoypadButton and event.pressed and cur == "gacha" and not (gacha_result != null and gacha_result.visible):
 		if event.button_index == PAD.btn("prev") or event.button_index == PAD.btn("next"):
 			var d := -1 if event.button_index == PAD.btn("prev") else 1
@@ -4214,6 +4230,17 @@ func _mega_badge(dx: int) -> Control:
 
 
 func _refresh_dex() -> void:
+	var jump: bool = dex_jump
+	dex_jump = false
+	if jump:
+		var sel0: int = int(SV.d["selected"])
+		if dex_gen != 0 and SV.dex_by.has(sel0) and int(SV.dex_by[sel0]["gen"]) != dex_gen:
+			dex_gen = 0   # the partner is not in this region tab: show everything
+		var l0: Array = _dex_filtered()
+		for i0 in range(l0.size()):
+			if int(l0[i0]["dex"]) == sel0:
+				dex_page = i0 / _per_page()
+				break
 	var list: Array = _dex_filtered()
 	dex_grid.columns = _dex_cols()
 	var pages: int = maxi(1, ceili(float(list.size()) / float(_per_page())))
@@ -4279,6 +4306,9 @@ func _refresh_dex() -> void:
 	dex_page_lbl.text = L.t("Page %d / %d  (%d)") % [dex_page + 1, pages, list.size()]
 	if not SV.dex_by.has(dex_sel):
 		dex_sel = int(SV.d["selected"])
+	if jump and dex_cards.has(int(SV.d["selected"])):
+		dex_sel = int(SV.d["selected"])
+		first = dex_cards[dex_sel]   # the partner is highlighted when the list opens
 	_dex_detail()
 	focus_first = first
 

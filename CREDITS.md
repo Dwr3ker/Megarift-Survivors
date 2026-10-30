@@ -221,3 +221,5 @@ Este es un proyecto de fan sin ánimo de lucro.
 - Arceus (dark) (id 149302): baronessfaron
 - Arceus (steel) (id 149315): baronessfaron
 - Arceus (fairy) (id 149317): Emboarger, baronessfaron
+- Black Kyurem (id 164601): Top_Kec
+- White Kyurem (id 164602): Top_Kec

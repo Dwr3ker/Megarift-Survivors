@@ -79,6 +79,8 @@ const MOVE := {
 	"substitute": {"proj": "star"}, "aerial-ace": {"proj": "wind"},
 	"flame-wheel": {"proj": "fire", "aura": "fire"}, "bubble-beam": {"proj": "bubble"},
 	"hex": {"beam": "shadow", "proj": "shadow"},
+	"glaciate": {"proj": "wind", "pal": "ice"},
+	"freeze-shock": {"beam": "lightning", "pal": "electric"}, "ice-burn-white": {"beam": "fire", "pal": "ice"},
 }
 const TYPE_SHAPE := {
 	"fire": "fire", "water": "drop", "grass": "leaf", "electric": "bolt", "psychic": "ring", "ice": "shard",

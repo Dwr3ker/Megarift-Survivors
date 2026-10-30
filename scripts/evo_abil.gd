@@ -24,6 +24,10 @@ const SIG := {
 	"dragon-energy": ["bloom", {"r": 110, "k": 0.4}],
 	"outrage": ["spin", {"n": 6, "k": 1.0}],
 	"dragon-rage": ["comet", {"k": 2.6}],
+	# ---- Hielo (Kyurem)
+	"glaciate": ["tornado", {"n": 3, "r": 90, "k": 0.8}],
+	"freeze-shock": ["crossbeam", {"k": 1.3}],
+	"ice-burn-white": ["rift", {"n": 5, "k": 1.2}],
 	# ---- Hada
 	"fleur-cannon": ["pillars", {"n": 6, "r": 44, "k": 1.2}],
 	"play-rough": ["yank", {"n": 4, "k": 1.4}],

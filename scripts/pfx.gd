@@ -12,6 +12,15 @@ var sprs: Array = []
 var rings: Array = []
 var slashes: Array = []
 var beams: Array = []
+# Rings, hit arcs and beams are ground effects: they go to this second layer, which is drawn UNDER the Pokémon and the
+# enemies (it lives below the y-sorted world), so attacks come out from under the sprite instead of covering it.
+var under = null
+# Hard limits on how many of these can be alive at once (a swarm of overlapping effects used to cost a frame each).
+const MAX_RINGS := 40
+const MAX_BEAMS := 36
+const MAX_SLASHES := 36
+const RING_DOTS := 150   # most dots one ring is drawn with
+const SLASH_STEPS := 110
 
 
 # v5.2.1: menos particulas en todo el juego para evitar lag (el nivel Alta ya no es el 100% de antes).
@@ -32,6 +41,8 @@ func clear() -> void:
 	rings.clear()
 	slashes.clear()
 	beams.clear()
+	if under != null:
+		under.clear()
 
 
 static func snap(v: float) -> float:
@@ -103,7 +114,10 @@ func trail(kind: String, pal: String, pos: Vector2, vel: Vector2) -> void:
 
 
 func ring(pos: Vector2, r0: float, r1: float, color: Color, life: float = 0.3, width: float = 3.0) -> void:
-	rings.append({"p": pos, "r0": r0, "r1": r1, "c": color, "life": life, "t": 0.0, "w": width})
+	var tg = under if under != null else self
+	if tg.rings.size() >= MAX_RINGS:
+		tg.rings.remove_at(0)
+	tg.rings.append({"p": pos, "r0": r0, "r1": r1, "c": color, "life": life, "t": 0.0, "w": width})
 
 
 # Golpe cuerpo a cuerpo. vis = VFX.for_move(...)
@@ -111,7 +125,10 @@ func slash(pos: Vector2, angle: float, radius: float, arc: float, vis: Dictionar
 	var pal: String = String(vis.get("pal", "normal"))
 	var melee: String = String(vis.get("melee", ""))
 	var life := 0.3 if melee == "vine" else 0.22
-	slashes.append({"p": pos, "ang": angle, "r": radius, "arc": arc, "pal": pal, "t": 0.0, "life": life, "vine": melee == "vine", "seed": randf() * 100.0})
+	var tg = under if under != null else self
+	if tg.slashes.size() >= MAX_SLASHES:
+		tg.slashes.remove_at(0)
+	tg.slashes.append({"p": pos, "ang": angle, "r": radius, "arc": arc, "pal": pal, "t": 0.0, "life": life, "vine": melee == "vine", "seed": randf() * 100.0})
 	var m: Vector2 = pos + Vector2.from_angle(angle) * radius * 0.7
 	match melee:
 		"impact":
@@ -136,7 +153,10 @@ func slash(pos: Vector2, angle: float, radius: float, arc: float, vis: Dictionar
 # Rayo recto. vis.beam = forma que viaja por el o "lightning".
 func beam(pos: Vector2, angle: float, length: float, width: float, vis: Dictionary) -> void:
 	var pal: String = String(vis.get("pal", "normal"))
-	beams.append({"p": pos, "ang": angle, "len": length, "w": width, "pal": pal, "shape": String(vis.get("beam", "")), "t": 0.0, "life": 0.2, "seed": randf() * 100.0})
+	var tg = under if under != null else self
+	if tg.beams.size() >= MAX_BEAMS:
+		tg.beams.remove_at(0)
+	tg.beams.append({"p": pos, "ang": angle, "len": length, "w": width, "pal": pal, "shape": String(vis.get("beam", "")), "t": 0.0, "life": 0.2, "seed": randf() * 100.0})
 	var d := Vector2.from_angle(angle)
 	sp("impact", pal, pos + d * 10.0, {"life": 0.12, "scale": 1.0})
 	sp("impact", pal, pos + d * length, {"life": 0.18, "scale": 1.5})
@@ -196,7 +216,7 @@ func _draw() -> void:
 	for r in rings:
 		var k: float = float(r["t"]) / float(r["life"])
 		var rad: float = lerpf(float(r["r0"]), float(r["r1"]), k)
-		var n: int = maxi(10, int(ceil(rad * TAU / (PX * 2.0))))
+		var n: int = mini(RING_DOTS, maxi(10, int(ceil(rad * TAU / (PX * 2.0)))))
 		var size: float = PX * 2.0 if float(r["w"]) >= 4.0 else PX
 		var pos: Vector2 = r["p"]
 		var col: Color = r["c"]
@@ -221,7 +241,7 @@ func _draw_beam(b: Dictionary, now: float) -> void:
 	var width: float = float(b["w"])
 	var seed_v: float = float(b["seed"])
 	var al: float = step(k)
-	var seg: float = PX * 2.0
+	var seg: float = PX * 2.0 if beams.size() <= 5 else PX * 4.0   # with many beams alive, draw them with coarser blocks
 	draw_set_transform(pos, ang, Vector2.ONE)
 	if String(b["shape"]) == "lightning":
 		var py := 0.0
@@ -271,7 +291,7 @@ func _draw_slash(s: Dictionary, now: float) -> void:
 	var half: float = minf(arc, TAU) / 2.0
 	var radius: float = float(s["r"])
 	var r: float = radius * (0.72 + 0.28 * (1.0 - k))
-	var n: int = maxi(8, int(ceil(r * half * 2.0 / PX)))
+	var n: int = mini(SLASH_STEPS, maxi(8, int(ceil(r * half * 2.0 / PX))))
 	var al: float = step(k)
 	if bool(s["vine"]):
 		al *= 0.55          # el arco queda de fondo; el latigo es el protagonista

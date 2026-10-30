@@ -38,6 +38,11 @@ const ENTRIES := [
 			"Rifts: the first check is at 90 s and then every 30 s, with a 20% chance that grows 5% with every miss (max 50%). There is no longer a time limit: they keep appearing until Eternatus.",
 		],
 		"fixes": [
+			"Kyurem: DNA Splicers, a unique level-up card from minute 30, fuses Kyurem into Black Kyurem (+40% damage) or White Kyurem (+25% damage, -15% cooldowns), both with +20% HP. Kyurem now starts with its own move, Glaciate, a freezing wind. When Glaciate evolves it becomes Glaciate+, or Black Kyurem's Freeze Shock (a colossal electrified lance that paralyses) or White Kyurem's Ice Burn (a vast blaze of white fire that burns).",
+			"Effects: rings, hit arcs and beams now come out from under the Pokémon instead of covering it.",
+			"Performance: fewer draw calls with lots of effects: limits on live rings, beams and hit arcs, lighter big rings and beams, bullets redraw only when they animate, and a cap on floating damage numbers.",
+			"Run HUD: the revive hearts no longer overlap each other or the ability name.",
+			"Pokémon list: it opens on the page with your partner, highlighted. With a gamepad, LB and RB step through the region tabs (All, Kanto … Paldea).",
 			"Random redeem codes: new codes give a random legendary (any generation or a chosen one), a random shiny, a shiny legendary or a Mega-capable Pokémon. They prefer something you don't have yet and pay coins when nothing new is left.",
 			"Run in progress: if you left a run saved, the menu reminds you when it opens and when you press Play: resume it or give it up.",
 			"Keyboard options for PC: Settings > Controls > Keyboard lets you rebind Options, Build summary, move cycling, Z-Move, Dynamax, Dash, Team swap and moves 1-6.",

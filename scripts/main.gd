@@ -16,6 +16,7 @@ const MG = preload("res://scripts/mega.gd")
 const RAR = preload("res://scripts/rarity.gd")
 const WL = preload("res://scripts/wildleg.gd")
 const FM = preload("res://scripts/forme.gd")
+const KYU = preload("res://scripts/kyurem.gd")
 const ETX = preload("res://scripts/eternamax.gd")
 const DM = preload("res://scripts/doom.gd")
 const CAL = preload("res://scripts/calamity.gd")
@@ -271,6 +272,7 @@ var mega_done := false
 var plate := "normal"    # Arceus: tipo de la placa actual (plates.gd)
 var plate_t := -1000000.0   # run_time de la ultima placa
 var forme := ""          # Deoxys: forma actual ("", attack, defense, speed); ver forme.gd
+var kyurem := ""         # Kyurem: "", black or white (DNA Splicers); see kyurem.gd
 var forme_t := -1000000.0   # run_time del ultimo cambio de forma
 var dyn_cd := 0.0
 var dyn_req := false
@@ -375,6 +377,7 @@ var gfx: Node2D
 var world: Node2D
 var fx: Node2D
 var pfx: Node2D
+var pfx_low: Node2D
 var player: Player
 var cam: Camera2D
 var jd = null
@@ -595,6 +598,10 @@ func _ready() -> void:
 	pfx = PFX.new()
 	pfx.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	fx.add_child(pfx)
+	pfx_low = PFX.new()   # rings, hit arcs and beams: drawn under the Pokémon (the layer is below the y-sorted world)
+	pfx_low.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	gfx.add_child(pfx_low)
+	pfx.under = pfx_low
 	ffx = FFX.new()
 	ffx.main = self
 	fx.add_child(ffx)
@@ -665,6 +672,7 @@ func _ready() -> void:
 	Actor.flash_k = 1.0 if shake_on else 0.35
 	quality = int(SV.setting("quality"))
 	pfx.setup([1.0, 1.0, 0.65, 0.35][clampi(quality, 0, 3)])
+	pfx_low.setup([1.0, 1.0, 0.65, 0.35][clampi(quality, 0, 3)])
 	var sel_dex: int = SV.run_dex
 	var st: Dictionary = _dex_by[sel_dex]
 	player = Player.new()
@@ -2035,7 +2043,7 @@ func _atk() -> float:
 		k *= 1.4
 	if _has_item("lifeorb"):
 		k *= 1.3   # antes, con las dos a la vez (Doble equipaje) la Vidasfera no sumaba daño pero seguía quitando vida
-	return base_atk * pow(1.10, _lvf("atk")) * (1.0 + _buff_mul("atk")) * k * (1.5 if _pw("fury") else 1.0) * (1.5 if wp_t > 0.0 else 1.0) * _rk("atk") * (1.0 + 0.003 * float(reap_kills)) * (1.0 + _abn("dmg") + _moxie() + (_abn("defiant") if defiant_t > 0.0 else 0.0)) * (DYN.DMG_K if _dyn_on() else 1.0) * (MG.ATK_K * DM.mega_atk_k(eter_kills) if _mega_on() else 1.0) * (FM.ATK_K if forme == "attack" else 1.0) * (1.0 + MOM_PER * mom)
+	return base_atk * pow(1.10, _lvf("atk")) * (1.0 + _buff_mul("atk")) * k * (1.5 if _pw("fury") else 1.0) * (1.5 if wp_t > 0.0 else 1.0) * _rk("atk") * (1.0 + 0.003 * float(reap_kills)) * (1.0 + _abn("dmg") + _moxie() + (_abn("defiant") if defiant_t > 0.0 else 0.0)) * (DYN.DMG_K if _dyn_on() else 1.0) * (MG.ATK_K * DM.mega_atk_k(eter_kills) if _mega_on() else 1.0) * (FM.ATK_K if forme == "attack" else 1.0) * KYU.atk_k(self) * (1.0 + MOM_PER * mom)
 
 
 func _spd() -> float:
@@ -2051,7 +2059,7 @@ func _cd_mul() -> float:
 
 func _cd_mul_raw() -> float:
 	var k: float = 0.8 if _has_item("quickclaw") else 1.0
-	return pow(0.92, _lvf("cd")) * k * float(perks["cd"]) * (0.65 if _pw("frenzy") else 1.0) * _rk("cd") * (1.0 - _abn("cd")) / (DYN.STAT_K if _dyn_on() else 1.0) * (MG.CD_K if _mega_on() else 1.0) * (kec.cd_mul() if kec != null else 1.0)
+	return pow(0.92, _lvf("cd")) * k * float(perks["cd"]) * (0.65 if _pw("frenzy") else 1.0) * _rk("cd") * (1.0 - _abn("cd")) / (DYN.STAT_K if _dyn_on() else 1.0) * (MG.CD_K if _mega_on() else 1.0) * KYU.cd_k(self) * (kec.cd_mul() if kec != null else 1.0)
 
 
 func _reduction() -> float:
@@ -2294,6 +2302,11 @@ func _evo_infos(m: Dictionary) -> Array:
 		var needs: String = String(e[1])
 		out.append({"name": String(e[0]), "needs": needs, "need_name": String(MD.NEED_NAME[needs]), "text": String(MD.EVO_MODS[kind]["t"]) + (L.t(" · %d%% chance to burn") % roundi(float(MD.EVO_EXTRA[id]["burnp"]) * 100.0) if MD.EVO_EXTRA.has(id) and MD.EVO_EXTRA[id].has("burnp") else ""),
 			"ready": true, "alt": false})
+		if id == "glaciate" and kyurem != "":   # a fused Kyurem's Glaciate evolves into Freeze Shock / Ice Burn
+			var ki: Dictionary = KYU.evo_info(self)
+			if not ki.is_empty():
+				out[0]["name"] = ki["name"]
+				out[0]["text"] = ki["text"]
 	if MD.EVO_ALT.has(id):
 		var a: Array = MD.EVO_ALT[id]
 		var n2: String = String(a[1])
@@ -2307,6 +2320,14 @@ func _evolve(m: Dictionary, alt: bool = false) -> void:
 		return
 	if _ch_on():
 		ch_m["evolves"] = int(ch_m["evolves"]) + 1
+	if id == "glaciate" and kyurem != "":
+		var kn: Dictionary = KYU.evolve_into(self, m)
+		if not kn.is_empty():
+			PG.event("evolve", {"move": id})
+			_ring(player.position, 8.0, 120.0, Color("#bfe9ff"), 0.8)
+			evfx.evolve_burst(kn)
+			shake = 6.0
+			return
 	if alt and MD.EVO_ALT.has(id):
 		var a: Array = MD.EVO_ALT[id]
 		_apply_mods(m, a[3])
@@ -8292,6 +8313,10 @@ func _offer() -> Array:
 		var fc: Dictionary = FM.card(self)
 		if not fc.is_empty():
 			picked.append(fc)
+	if picked.is_empty() and randf() < KYU.CHANCE:   # Kyurem: DNA Splicers (kyurem.gd), carta unica desde el minuto 30
+		var kc: Dictionary = KYU.card(self)
+		if not kc.is_empty():
+			picked.append(kc)
 	if picked.is_empty() and randf() < ZC.CHANCE:   # Cristal Z (zcrystal.gd): desbloquea el Movimiento Z en la partida
 		var zcc: Dictionary = ZC.card(self)
 		if not zcc.is_empty():
@@ -8828,6 +8853,16 @@ func _on_card_chosen(idx: int) -> void:
 		PL.apply(self, String(c["ptype"]))
 		pending_levels = maxi(0, pending_levels - 1)
 		Aud.sfx("confirm")
+		cards.hide_cards()
+		choosing = false
+		return
+	if cat == "kyurem":   # first the unique card, then the form is chosen
+		Aud.sfx("select")
+		cards.show_cards(KYU.picks(self), L.t("Choose a form"), L.t("DNA Splicers!"), false)
+		return
+	if cat == "kyurempick":
+		KYU.apply(self, id)
+		pending_levels = maxi(0, pending_levels - 1)
 		cards.hide_cards()
 		choosing = false
 		return
@@ -9636,6 +9671,8 @@ func _update_weather(delta: float) -> void:
 
 func add_text(pos: Vector2, text: String, color: Color, size: int = 18) -> void:
 	if not dmg_on and (text.is_valid_int() or (text.begins_with("-") and text.substr(1).is_valid_int())):
+		return
+	if Floater.alive >= Floater.MAX_ALIVE and size < 22:
 		return
 	var f := Floater.new()
 	f.text = L.t(text)
@@ -10743,11 +10780,18 @@ class Bullet extends Node2D:
 	var burst := 0
 	var bm: Dictionary = {}
 
+	var _fr := -1
+
 	func _init() -> void:
 		texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 
+	# Movement is just the node's position, so the bullet is only redrawn when its animation frame changes
+	# (or while it turns / orbits and its angle changes). With hundreds of bullets that saves most of the draw work.
 	func _process(_d: float) -> void:
-		queue_redraw()
+		var fr: int = int(age * 12.0)
+		if fr != _fr or orb or homing > 0.0 or turn != 0.0 or back or life - age < 0.3:
+			_fr = fr
+			queue_redraw()
 
 	func _draw() -> void:
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2(1.0, 0.42))
@@ -11485,11 +11529,19 @@ class Cards extends Node2D:
 # Numero de dano flotante
 # ---------------------------------------------------------------
 class Floater extends Node2D:
+	static var alive := 0   # live damage numbers: new small ones are skipped past MAX_ALIVE so a swarm does not flood the screen
+	const MAX_ALIVE := 60
 	var text := ""
 	var color := Color.WHITE
 	var life := 0.7
 	var age := 0.0
 	var size := 18
+
+	func _enter_tree() -> void:
+		alive += 1
+
+	func _exit_tree() -> void:
+		alive -= 1
 
 	func _process(delta: float) -> void:
 		age += delta
@@ -13031,10 +13083,12 @@ class Hud extends Node2D:
 		draw_rect(Rect2(o + Vector2(bx0, 58.0), Vector2(lw, 18.0)), UIS.INK)
 		draw_rect(Rect2(o + Vector2(bx0, 58.0), Vector2(3.0, 18.0)), UIS.WAVE)
 		_ds(font, o + Vector2(bx0 + 8.0, 72.0), lvt, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 15, UIS.WAVE)
+		# revive hearts: spaced by their real drawn width so they never overlap each other or the ability name
+		var hw: float = float(IC.tex("revive", 1).get_width() * IC.scale_for("revive", 18.0)) + 4.0
 		if ab_name != "":
-			_ds(font, o + Vector2(bx0 + lw + 8.0, 72.0), ab_name, HORIZONTAL_ALIGNMENT_LEFT, pw - bx0 - lw - 18.0, 14, UIS.MUTED)
+			_ds(font, o + Vector2(bx0 + lw + 8.0, 72.0), ab_name, HORIZONTAL_ALIGNMENT_LEFT, maxf(20.0, pw - bx0 - lw - 18.0 - float(revives) * hw), 14, UIS.MUTED)
 		for ri in range(revives):
-			IC.draw_in(self, "revive", o + Vector2(pw - 20.0 - float(ri) * 22.0, 67.0), 18.0)
+			IC.draw_in(self, "revive", o + Vector2(pw - 10.0 - hw * 0.5 - float(ri) * hw, 67.0), 18.0)
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		if down:
 			var bw: float = 300.0

@@ -347,6 +347,8 @@ static func start_move_of(dex: int) -> String:
 static func natural_start_of(dex: int) -> String:
 	if dex == 493:   # Arceus empieza con Sentencia (Doofcraft)
 		return "judgment"
+	if dex == 646:   # Kyurem empieza con Gelogenia (Glaciate), su movimiento propio
+		return "glaciate"
 	if starter_by.has(dex):
 		return String(starter_by[dex]["start"])
 	var MDd = load("res://scripts/moves_data.gd")
