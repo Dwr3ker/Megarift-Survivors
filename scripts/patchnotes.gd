@@ -39,6 +39,7 @@ const ENTRIES := [
 			"Rifts: the first check is at 90 s and then every 30 s, with a 20% chance that grows 5% with every miss (max 50%). There is no longer a time limit: they keep appearing until Eternatus.",
 		],
 		"fixes": [
+			"Controller in the Pokémon list: the left face button (X on Xbox, Square on PlayStation, Y on Nintendo) makes the highlighted Pokémon your partner, so you no longer have to navigate down to Choose. Confirm on a text box (like the search box) now opens the on-screen keyboard, and Confirm or Back closes it.",
 			"Save and resume: a resumed run keeps the permanent upgrades (and the Adaptive difficulty and Mono-type settings) it was saved with, so you can no longer leave a run, buy upgrades and come back stronger.",
 			"The Poké Ball on a Pokémon's page now shows its rarity: a different ball from Common to Legendary.",
 			"Kecleon shop with a controller: Confirm now buys the highlighted item and Back / Start close the shop on any button layout (Xbox, PlayStation, Nintendo or a custom map); the shop opens on the first item you can afford and says Not enough coins when you press Confirm on one you can't; Android's Back button closes the shop instead of pausing behind it.",

@@ -1644,6 +1644,23 @@ func _input(event: InputEvent) -> void:
 		elif PAD.stick_event(event):
 			get_viewport().set_input_as_handled()
 		return
+	# Text boxes with a controller: Confirm opens the on-screen keyboard; Confirm or Back closes it again
+	if event is InputEventJoypadButton and event.pressed:
+		var fk: Control = get_viewport().gui_get_focus_owner()
+		if is_instance_valid(kb_le):
+			if event.button_index == PAD.btn("confirm") or PAD.is_cancel(event):
+				_kb_close()
+				get_viewport().set_input_as_handled()
+				return
+		elif fk is LineEdit and event.button_index == PAD.btn("confirm") and listening == "" and screens.has(cur) and screens[cur].is_ancestor_of(fk):
+			_kb_open(fk)
+			get_viewport().set_input_as_handled()
+			return
+		# Pokémon list: the left face button (X on Xbox, Square on PlayStation, Y on Nintendo) makes the highlighted Pokémon your partner
+		if cur == "dex" and event.button_index == JOY_BUTTON_X and listening == "" and not (dex_pick_party or dex_pick_team or dex_pick_coop) and not (fk is LineEdit) and not _popup_open():
+			_choose_partner(_dex_target())
+			get_viewport().set_input_as_handled()
+			return
 	# En la lista de modos el stick solo mueve arriba/abajo: un empuje lateral sin querer ya no mete el cursor en los modificadores.
 	var sf: Control = get_viewport().gui_get_focus_owner()
 	PAD.vertical_only = cur == "modes" and sf != null and mode_tiles.values().has(sf)
@@ -4526,11 +4543,67 @@ func _dex_detail() -> void:
 			sel_b = _btn("✔ Is your partner", func(): pass, Vector2(0, 54))
 			sel_b.disabled = true
 		else:
-			sel_b = _btn("Choose", func(): SV.d["selected"] = dx; SV.save(); toast(L.t("Partner: %s") % _name_of(dx)); _refresh_dex(), Vector2(0, 54))
+			sel_b = _btn("Choose", func(): _choose_partner(dx), Vector2(0, 54))
+			if not Input.get_connected_joypads().is_empty():   # hint: the left face button (X / Square / Y) does the same from anywhere in the list
+				sel_b.icon = PADI.tex(JOY_BUTTON_X)
+				sel_b.expand_icon = true
+				sel_b.add_theme_constant_override("icon_max_width", 32)
 		sel_b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		sel_b.add_theme_font_size_override("font_size", 24)
 		dex_foot.add_child(sel_b)
 	_dex_mark()
+
+
+# Makes this Pokémon the partner (the Choose button, and the X / Square / Y shortcut with a controller).
+func _choose_partner(dx: int) -> void:
+	if not SV.owns(dx) or dx == int(SV.d["selected"]):
+		return
+	SV.d["selected"] = dx
+	SV.save()
+	toast(L.t("Partner: %s") % _name_of(dx))
+	Aud.sfx("confirm")
+	dex_sel = dx
+	_refresh_dex()
+	if dex_cards.has(dx):
+		_gf(dex_cards[dx])   # the list was rebuilt: keep the highlight on the new partner
+
+
+# The Pokémon whose card has the focus (or the one whose details are open).
+func _dex_target() -> int:
+	var f: Control = get_viewport().gui_get_focus_owner()
+	for k in dex_cards:
+		if dex_cards[k] == f:
+			return int(k)
+	return dex_sel
+
+
+# On-screen keyboard for a text box, opened with the controller's Confirm (touch opens it on its own).
+var kb_le: LineEdit = null
+
+
+func _kb_open(le: LineEdit) -> void:
+	kb_le = le
+	le.edit()
+	le.caret_column = le.text.length()
+	if DisplayServer.has_feature(DisplayServer.FEATURE_VIRTUAL_KEYBOARD):
+		DisplayServer.virtual_keyboard_show(le.text, le.get_global_rect(), DisplayServer.KEYBOARD_TYPE_DEFAULT, le.max_length, le.caret_column, le.caret_column)
+	if not le.text_submitted.is_connected(_kb_submitted):
+		le.text_submitted.connect(_kb_submitted)
+
+
+func _kb_submitted(_t: String) -> void:
+	_kb_close()
+
+
+func _kb_close() -> void:
+	DisplayServer.virtual_keyboard_hide()
+	var le: LineEdit = kb_le
+	kb_le = null
+	if is_instance_valid(le):
+		le.unedit()
+		le.release_focus()
+		if focus_first != null and is_instance_valid(focus_first) and focus_first.is_visible_in_tree():
+			_gf(focus_first)
 
 
 # ---------------------------------------------------------------

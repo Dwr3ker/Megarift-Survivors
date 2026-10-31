@@ -1,5 +1,8 @@
 # Megarift Survivors v0.1.0 — pre-release (test build)
 
+## Changes in 0.1.0-alpha.10
+- Controller in the Pokémon list: the left face button (X on Xbox, Square on PlayStation, Y on Nintendo) makes the highlighted Pokémon your partner, so you no longer have to navigate down to Choose. Confirm on a text box (like the search box) now opens the on-screen keyboard, and Confirm or Back closes it.
+
 ## Changes in 0.1.0-alpha.9
 - **Redeem codes:** GIMMEALL (every Pokémon, no upgrades) and GIMME followed by a Pokémon's name (that Pokémon with the gacha shiny chance); plus random legendary, shiny and Mega codes.
 - **Features PDF:** docs/Megarift-Survivors-features.pdf, rebuilt from the README on every commit.

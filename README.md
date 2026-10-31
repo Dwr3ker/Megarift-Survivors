@@ -52,8 +52,9 @@ Current version: **0.1.0 (pre-release alpha builds, latest `v0.1.0-alpha.8`)** �
 | Build summary | Tab | pause button | View / Select |
 | Options (pause) | Esc / P | pause button | Menu / Start |
 | Team swap (Team Mode) | R | — | right stick click |
+| Choose partner (Pokémon list) | Choose button | Choose button | X / Square / Y |
 
-The gamepad layout (Xbox, PlayStation, Nintendo) and every gamepad button and keyboard key can be changed in **Settings → Controls**. In the Pokémon list, LB / RB step through the regions.
+The gamepad layout (Xbox, PlayStation, Nintendo) and every gamepad button and keyboard key can be changed in **Settings → Controls**. In the Pokémon list, LB / RB step through the regions and the left face button (X / Square / Y) makes the highlighted Pokémon your partner; Confirm on a text box opens the on-screen keyboard.
 
 ## Install / build
 
@@ -74,7 +75,7 @@ The in-game **update check** looks at `Dwr3ker/Megarift-Survivors` (`REPO` in `s
 
 ## Tests
 
-The feature work is covered by headless Godot scripts (one per system, 34 in total), in `tools/tests/`:
+The feature work is covered by headless Godot scripts (one per system, 35 in total), in `tools/tests/`:
 
 ```
 godot --headless --path . --script res://tools/tests/mega_run_test.gd
