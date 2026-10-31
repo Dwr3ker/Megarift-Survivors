@@ -7,6 +7,7 @@ const SV = preload("res://scripts/save_data.gd")
 const Aud = preload("res://scripts/audio.gd")
 const PG = preload("res://scripts/progress.gd")
 const CH = preload("res://scripts/challenges.gd")
+const DLY = preload("res://scripts/daily.gd")
 const L = preload("res://scripts/lang.gd")
 const MD = preload("res://scripts/moves_data.gd")
 const FUS = preload("res://scripts/fusions.gd")
@@ -1661,6 +1662,13 @@ func _input(event: InputEvent) -> void:
 			_choose_partner(_dex_target())
 			get_viewport().set_input_as_handled()
 			return
+		# ...and the top face button (Y on Xbox, Triangle on PlayStation, X on Nintendo) marks it as a favorite
+		if cur == "dex" and event.button_index == JOY_BUTTON_Y and listening == "" and not (fk is LineEdit) and not _popup_open():
+			var fdx: int = _dex_target()
+			if fdx > 0 and SV.owns(fdx):
+				_fav_toggle(fdx)
+			get_viewport().set_input_as_handled()
+			return
 	# En la lista de modos el stick solo mueve arriba/abajo: un empuje lateral sin querer ya no mete el cursor en los modificadores.
 	var sf: Control = get_viewport().gui_get_focus_owner()
 	PAD.vertical_only = cur == "modes" and sf != null and mode_tiles.values().has(sf)
@@ -2347,7 +2355,7 @@ const MOD_INFO := {
 # id, nombre, icono, grupo, reglas
 const MODE_LIST := [
 	["normal", "Normal run", "flag", "Classic", ["Survive as enemies keep coming.", "Level up and choose moves and items.", "Defeat the bosses that appear every few minutes.", "At the end you earn Pokécoins and sometimes tickets.", "Lasts 60 minutes: Arceus arrives at minute 30 and Eternatus at 60."]],
-	["daily", "Daily Challenge", "m_daily", "Classic", ["Today's Pokémon and rule change every day and are the same for everyone.", "Try to beat your best time of the day.", "+25% coins."]],
+	["daily", "Daily Challenge", "m_daily", "Classic", ["Every day is one of three formats, the same for everyone: Medal Rift, Draft Day or Gauntlet.", "Earn Bronze, Silver and Gold medals: 1 ticket, 3 tickets and a purple ticket, once per day.", "A medal every day builds a streak: bonus coins, and a purple ticket every 7th day.", "Unlimited tries: your best of the day counts. +25% coins."]],
 	["rush", "Boss Rush", "m_rush", "Classic", ["Only bosses and legendaries, one after another.", "Each boss is stronger than the last.", "Your record counts how many bosses you defeat."]],
 	["tower", "The Tower", "m_tower", "Classic", ["60 floors, each with a fixed boss and a big boss every 5.", "Between floors you choose rest or risk pacts.", "Every 5 floors you earn a permanent relic.", "No Z-Moves or Dynamax."]],
 	["rifts", "Rift Time Attack", "m_clock", "Classic", ["8 minutes: rifts open non-stop.", "Win as many fights as you can.", "+25% coins."]],
@@ -2899,7 +2907,7 @@ var _warmed: Dictionary = {}
 # Carga en segundo plano las hojas de sprites que usan las vistas previas, para que al cambiar de modo
 # no haya un tirón (y la música no se corte) la primera vez que se ve cada uno.
 func _warm_previews() -> void:
-	var ds: Array = [int(SV.d["selected"]), SV.daily_dex(SV.daily_seed()), int(SV.d.get("coop_dex", 133)), 133, 248, 19, 16, 41, 10, 21, 74, 25, 150, 144, 145, 146]
+	var ds: Array = [int(SV.d["selected"]), SV.daily_dex(SV.daily_seed())] + DLY.setup(SV.daily_seed())["picks"].map(func(p): return int(p["dex"])) + [int(SV.d.get("coop_dex", 133)), 133, 248, 19, 16, 41, 10, 21, 74, 25, 150, 144, 145, 146]
 	for x in SV.team_list():
 		ds.append(int(x))
 	for d in ds:
@@ -2983,20 +2991,61 @@ func _modes_select(id: String) -> void:
 				_modes_select("normal"), Vector2(0, 46)))
 		"daily":
 			var ds: int = SV.daily_seed()
-			var dd: Dictionary = SV.d.get("daily", {})
-			var best: int = int(dd.get("best", 0)) if int(dd.get("date", 0)) == ds else 0
-			var dm: String = SV.daily_mod(ds)
-			mp_stat.text = L.t("Today: %s with the rule “%s” (same for everyone). +25%% coins.") % [_name_of(SV.daily_dex(ds)), L.t(String(MOD_INFO[dm][0]))] + "  " + (L.t("Your best time today: %s") % ("%d:%02d" % [best / 60, best % 60]) if best > 0 else L.t("You haven't played it today."))
+			var dst: Dictionary = DLY.state(ds)
+			var dfmt: String = DLY.format_of(ds)
+			var dsetup: Dictionary = DLY.setup(ds)
+			var dpk: Dictionary = DLY.current_pick(ds)
+			var ddex: int = int(dpk["dex"])
+			var rule_names: Array = []
+			for mid in dpk["mods"]:
+				rule_names.append(L.t(String(MOD_INFO[String(mid)][0])))
+			var lines: Array = [L.t("Today: %s") % L.t(String(DLY.NAMES[dfmt]))]
+			match dfmt:
+				"medals":
+					lines.append(L.t("%s with the rules %s.") % [_name_of(ddex), " + ".join(rule_names)])
+				"draft":
+					lines.append(L.t("Choose 1 of 3 Pokémon below; each brings its own rule."))
+				"gauntlet":
+					lines.append(L.t("%s. A new rule every 5 minutes: %s. Survive 20 minutes to clear it.") % [_name_of(ddex), " → ".join(rule_names)])
+			if dfmt == "gauntlet":
+				lines.append(L.t("Medals: Bronze at 5:00, Silver at 10:00, Gold at 20:00."))
+			else:
+				lines.append(L.t("Medals: Bronze %d, Silver %d, Gold %d points (defeats + 300 per boss + 5 per second).") % DLY.TARGETS)
+			var dbest: int = int(dst["best"])
+			var dmed: int = int(dst["medal"])
+			if dbest > 0:
+				var bs: String = ("%d:%02d" % [dbest / 60, dbest % 60]) if dfmt == "gauntlet" else str(dbest)
+				lines.append(L.t("Your best today: %s") % bs + ((" · " + L.t("%s medal") % L.t(String(DLY.MEDAL_NAMES[dmed]))) if dmed > 0 else ""))
+			else:
+				lines.append(L.t("You haven't played it today."))
+			var stk: int = DLY.streak_now(ds)
+			if stk > 0:
+				lines.append(L.t("Streak: %d days (a purple ticket every 7th day)") % stk)
+			mp_stat.text = "  ".join(lines)
+			if dfmt == "draft":
+				var picks: Array = dsetup["picks"]
+				var pbs: Dictionary = dst.get("picks", {})
+				for pi in range(picks.size()):
+					var pp: Dictionary = picks[pi]
+					var pmod: String = String(pp["mods"][0])
+					var pbest: int = int(pbs.get(str(pi), 0))
+					var ptxt: String = "%s · %s" % [_name_of(int(pp["dex"])), L.t(String(MOD_INFO[pmod][0]))] + (("  (" + L.t("best %d") % pbest + ")") if pbest > 0 else "")
+					var pidx: int = pi
+					var pb := _btn(ptxt, func():
+						DLY.pick = pidx
+						_modes_select("daily"), Vector2(0, 46))
+					_gold_btn(pb, pi == clampi(DLY.pick, 0, picks.size() - 1))
+					mp_opts.add_child(pb)
 			var td: Dictionary = Time.get_date_dict_from_system()
-			info["dex"] = SV.daily_dex(ds)
-			info["overlay"] = SV.daily_dex(ds)
-			var dmv: String = SV.natural_start_of(SV.daily_dex(ds))
+			info["dex"] = ddex
+			info["overlay"] = ddex
+			var dmv: String = SV.natural_start_of(ddex)
 			if not ResourceLoader.exists("res://assets/previews/daily_%s.ogv" % dmv):
-				dmv = String(MD.START.get(String(SV.dex_by[SV.daily_dex(ds)]["types"][0]), "tackle"))
+				dmv = String(MD.START.get(String(SV.dex_by[ddex]["types"][0]), "tackle"))
 			info["vid"] = "daily_" + dmv
 			info["day"] = str(int(td["day"]))
 			info["month"] = ["", "ENE", "FEB", "MAR", "ABR", "MAY", "JUN", "JUL", "AGO", "SEP", "OCT", "NOV", "DIC"][int(td["month"])]
-			info["rule"] = L.t(String(MOD_INFO[dm][0]))
+			info["rule"] = String(rule_names[0])
 			pm = "daily"
 		"rush":
 			mp_stat.text = L.t("Record: %d bosses") % int(SV.d.get("rush_best", 0))
@@ -3788,6 +3837,29 @@ func _icon_tex(dex: int, shiny: bool) -> Texture2D:
 	return at
 
 
+# Same first frame, cropped to the Pokémon's visible pixels (plus a small margin) so it fills a list card.
+# Sprite frames carry a lot of empty space; the crop rectangle is worked out once per sprite and cached.
+static var _crop_cache: Dictionary = {}
+func _icon_tex_tight(dex: int, shiny: bool) -> Texture2D:
+	var at: AtlasTexture = _icon_tex(dex, shiny) as AtlasTexture
+	if at == null:
+		return null
+	var key := "%d:%s" % [dex, shiny]
+	if not _crop_cache.has(key):
+		var r := Rect2i(at.region)
+		var img: Image = at.atlas.get_image()
+		var used := Rect2i()
+		if img != null:
+			if img.is_compressed():
+				img.decompress()
+			used = img.get_region(r).get_used_rect()
+		if used.size.x <= 0 or used.size.y <= 0:
+			used = Rect2i(Vector2i.ZERO, r.size)
+		_crop_cache[key] = Rect2(Vector2(r.position + used.position), Vector2(used.size)).grow(2.0).intersection(Rect2(r))
+	at.region = _crop_cache[key]
+	return at
+
+
 # ---------------------------------------------------------------
 # Coleccion de Pokemon
 # ---------------------------------------------------------------
@@ -4167,13 +4239,16 @@ func _dex_card(p: Dictionary, owned: bool) -> Button:
 	# sprite
 	var tr := TextureRect.new()
 	tr.set_anchors_preset(Control.PRESET_FULL_RECT)
-	tr.offset_top = 16.0 * ck
+	tr.offset_top = 18.0 * ck
 	tr.offset_bottom = -32.0 * ck
+	tr.offset_left = 14.0 * ck
+	tr.offset_right = -14.0 * ck
 	tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	tr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST   # crisp pixels when scaled up
 	tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var shn: bool = owned and SV.shiny_wanted(dx)
-	tr.texture = _icon_tex(dx, shn)
+	tr.texture = _icon_tex_tight(dx, shn)
 	if not show:
 		tr.modulate = Color(0, 0, 0, 0.5)
 	b.add_child(tr)
@@ -4212,12 +4287,12 @@ func _dex_card(p: Dictionary, owned: bool) -> Button:
 		sh.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		b.add_child(sh)
 	if owned:
-		var hb := _heart_btn(dx, 14.0)
+		var hb := _heart_btn(dx, 18.0)   # inset from the edge so the card's clipping never cuts it
 		hb.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-		hb.offset_left = -26.0
-		hb.offset_right = -2.0
-		hb.offset_top = 1.0
-		hb.offset_bottom = 25.0
+		hb.offset_left = -34.0
+		hb.offset_right = -8.0
+		hb.offset_top = 3.0
+		hb.offset_bottom = 29.0
 		b.add_child(hb)
 		dex_hearts[dx] = hb
 		if dx == int(SV.d["selected"]):
@@ -5424,6 +5499,17 @@ func _refresh_gacha() -> void:
 	for b in [b1, b10, bt]:
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		brow.add_child(b)
+	# Max pull: every gold ticket in batches of 10, or every purple ticket (×10 each), in one go
+	var mx: int = int(SV.d["tickets"]) / 10
+	var mp: int = int(SV.d.get("tickets10", 0))
+	var mrow := HBoxContainer.new()
+	mrow.add_theme_constant_override("separation", 8)
+	brow.add_child(mrow)
+	var bmx := _cost_btn(L.t("Max pull ×%d") % (mx * 10), str(mx * 10), "", "ticket", func(): _confirm_max_pull("t1"), Vector2(0, 44), mx >= 1, false, true)
+	var bmp := _cost_btn(L.t("Max purple ×%d") % (mp * 10), str(mp), "", "ticket10", func(): _confirm_max_pull("t10"), Vector2(0, 44), mp >= 1, false, true)
+	for b in [bmx, bmp]:
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		mrow.add_child(b)
 	var pity: int = int(SV.d["pity"].get(str(gacha_region), 0))
 	var pcard := PanelContainer.new()
 	pcard.add_theme_stylebox_override("panel", UIS.frame(UIS.PANEL, UIS.EDGE))
@@ -5440,6 +5526,9 @@ func _refresh_gacha() -> void:
 	pbar.custom_minimum_size = Vector2(0, 18)
 	pbar.add_theme_stylebox_override("fill", _sb(UIS.GOLD, Color.TRANSPARENT, 0))
 	pv.add_child(pbar)
+	# completion bonus: the more of the region you own, the likelier the missing ones and shinies
+	pv.add_child(_label(L.t("Completion %d%%: missing Pokémon ×%.1f · shiny %.1f%%") % [roundi(SV.region_completion(gacha_region) * 100.0),
+		SV.missing_mul(gacha_region), SV.shiny_pull(gacha_region) * 100.0], 18, Color("#7fe8ff")))
 	if first == null:
 		first = b1
 	# --- panel de probabilidades
@@ -5478,7 +5567,7 @@ func _refresh_gacha() -> void:
 	var sn := _label("Shiny", 20)
 	sn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	sr.add_child(sn)
-	var s32 := _label("1%", 20, Color("#fff7d6"))
+	var s32 := _label(String.num(SV.shiny_pull(gacha_region) * 100.0, 1) + "%", 20, Color("#fff7d6"))   # rises with region completion
 	s32.autowrap_mode = TextServer.AUTOWRAP_OFF
 	sr.add_child(s32)
 	ov.add_child(sr)
@@ -5514,6 +5603,7 @@ func _refresh_gacha() -> void:
 	rules.add_child(_label(L.t("· Purple ×10 ticket: the last pull has a %d%% chance to be legendary (otherwise Very Rare or better) and the Z-Crystal chance rises to %d%%.") % [roundi(SV.PURPLE_LEGEND_P * 100.0), roundi(SV.Z_CRYSTAL_P_PURPLE * 100.0)], 16, Color("#d9a8ff")))
 	rules.add_child(_label(L.t("· After %d pulls without a legendary on a banner, the next one is.") % SV.PITY_5, 16, Color("#f2e9d8")))
 	rules.add_child(_label(L.t("· Duplicates give PokéCoins. Shinies don't repeat."), 16, Color("#f2e9d8")))
+	rules.add_child(_label(L.t("· The more of a banner you own, the likelier its missing Pokémon (up to ×%d) and shinies (from %d%% up to %d%% at 100%%).") % [roundi(1.0 + SV.MISSING_BOOST), roundi(SV.SHINY_PULL * 100.0), roundi(SV.SHINY_PULL_DONE * 100.0)], 16, Color("#7fe8ff")))
 	rules.add_child(_label(L.t("· Tickets are earned by playing: some Pokémon drop them when they fall, and bosses and chests sometimes give ×10 tickets."), 16, Color("#f2e9d8")))
 	focus_first = first
 
@@ -5531,6 +5621,136 @@ func _do_pull(n: int, use: String) -> void:
 	SV.save()
 	_update_top()
 	_play_slots(results)
+
+
+# Max pull asks first: it can spend a long stash of tickets in one tap. Focus starts on Cancel so a double tap is safe.
+func _confirm_max_pull(use: String) -> void:
+	var gold: bool = use == "t1"
+	var batches: int = int(SV.d["tickets"]) / 10 if gold else int(SV.d.get("tickets10", 0))
+	if batches <= 0:
+		toast(L.t("Not enough tickets: earn them by playing"))
+		return
+	_clear(gacha_result)
+	var c := CenterContainer.new()
+	c.set_anchors_preset(Control.PRESET_FULL_RECT)
+	gacha_result.add_child(c)
+	var pc := PanelContainer.new()
+	c.add_child(pc)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 14)
+	pc.add_child(v)
+	v.add_child(_label("Max pull", 30, C_GOLD))
+	var q: String = L.t("Spend %d gold tickets for %d pulls?") % [batches * 10, batches * 10] if gold \
+		else L.t("Spend %d purple tickets for %d pulls?") % [batches, batches * 10]
+	v.add_child(_label(q, 22))
+	v.add_child(_label(L.t("Pulls can't be undone."), 16, Color("#b4aed6")))
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 12)
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	v.add_child(row)
+	var yes := _btn(L.t("Confirm"), func(): gacha_result.visible = false; _do_max_pull(use), Vector2(220, 54))
+	var no := _btn_close("Cancel", func(): gacha_result.visible = false; _refresh_gacha(), Vector2(220, 54))
+	row.add_child(yes)
+	row.add_child(no)
+	gacha_result.visible = true
+	_gf(no)
+
+
+# Max pull: spends every ticket of one kind in ×10 batches (each batch keeps its own Very Rare guarantee and Z-Crystal roll).
+func _do_max_pull(use: String) -> void:
+	var batches: int = int(SV.d["tickets"]) / 10 if use == "t1" else int(SV.d.get("tickets10", 0))
+	if batches <= 0:
+		toast(L.t("Not enough tickets: earn them by playing"))
+		return
+	var results: Array = []
+	var crystals: Array = []
+	for i in range(batches):
+		var got: Array = SV.pull(gacha_region, 10, use)
+		if got.is_empty():
+			break
+		results.append_array(got)
+		if SV.last_crystal != "":
+			crystals.append(SV.last_crystal)
+	SV.save()
+	_update_top()
+	var best := 1
+	var anyshiny := false
+	for r in results:
+		best = maxi(best, clampi(int(r.get("rarity", 1)), 1, 5))
+		anyshiny = anyshiny or bool(r["shiny"])
+	Aud.sfx("burst%d" % best)
+	if anyshiny:
+		Aud.sfx("shinyGet")
+	_show_batch(results, crystals)
+
+
+# Summary for a Max pull: totals per rarity, then only the new Pokémon and shinies (a 70-card grid would not fit).
+func _show_batch(results: Array, crystals: Array) -> void:
+	_clear(gacha_result)
+	var c := CenterContainer.new()
+	c.set_anchors_preset(Control.PRESET_FULL_RECT)
+	gacha_result.add_child(c)
+	var pc := PanelContainer.new()
+	c.add_child(pc)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 8)
+	pc.add_child(v)
+	var n_new := 0
+	var n_shiny := 0
+	var coins := 0
+	var by_rar: Array = [0, 0, 0, 0, 0]
+	var keep: Array = []
+	for r in results:
+		by_rar[clampi(int(r["rarity"]), 1, 5) - 1] += 1
+		coins += int(r["refund"])
+		if bool(r["new"]):
+			n_new += 1
+		if bool(r["shiny"]):
+			n_shiny += 1
+		if bool(r["new"]) or bool(r["shiny"]):
+			keep.append(r)
+	v.add_child(_label(L.t("%d pulls!") % results.size(), 32, C_GOLD))
+	v.add_child(_label(L.t("New: %d · Shiny: %d · Duplicates: +%d coins") % [n_new, n_shiny, coins], 20, Color("#f2e9d8")))
+	var rrow := HBoxContainer.new()
+	rrow.add_theme_constant_override("separation", 14)
+	rrow.alignment = BoxContainer.ALIGNMENT_CENTER
+	v.add_child(rrow)
+	for j in range(4, -1, -1):
+		rrow.add_child(_icon_label(String(["ball", "ball2", "ball3", "ball4", "ballLux"][j]), "×%d" % int(by_rar[j]), 18, Color("#b4aed6"), 24.0))
+	if keep.is_empty():
+		v.add_child(_label(L.t("Nothing new this time: every Pokémon was a duplicate."), 18, Color("#b4aed6")))
+	else:
+		var sc := ScrollContainer.new()
+		sc.custom_minimum_size = Vector2(880, mini(3, ceili(float(keep.size()) / 8.0)) * 128)
+		sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+		v.add_child(sc)
+		var grid := GridContainer.new()
+		grid.columns = 8
+		sc.add_child(grid)
+		for r in keep:
+			var cell := VBoxContainer.new()
+			cell.custom_minimum_size = Vector2(106, 0)
+			grid.add_child(cell)
+			var pv := Preview.new()
+			pv.custom_minimum_size = Vector2(106, 80)
+			cell.add_child(pv)
+			pv.setup(int(r["dex"]), bool(r["shiny"]), 2.2)
+			var nm := _label(L.t(String(r["name"])) + (" ✨" if bool(r["shiny"]) else ""), 14)
+			nm.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			cell.add_child(nm)
+			var tl := _label("NEW!" if bool(r["new"]) else "Shiny", 13, Color("#6fd08a") if bool(r["new"]) else Color("#ffd65c"))
+			tl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			cell.add_child(tl)
+	for zc in crystals:
+		var zrow := _icon_label("zc:" + String(zc), L.t("Z-Crystal found! You unlock: %s") % L.t(String(ZM.DEF[String(zc)]["name"])), 18, Color("#ffd65c"), 32.0)
+		zrow.alignment = BoxContainer.ALIGNMENT_CENTER
+		v.add_child(zrow)
+	if not crystals.is_empty():
+		Aud.sfx("legend")
+	var ok := _btn_close("Accept", func(): gacha_result.visible = false; _refresh_gacha(), Vector2(0, 54))
+	v.add_child(ok)
+	gacha_result.visible = true
+	_gf(ok)
 
 
 # Tragaperras animada (como el original); al terminar muestra la lista de premios.

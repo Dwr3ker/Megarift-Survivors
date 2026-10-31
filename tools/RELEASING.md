@@ -15,8 +15,8 @@ The script reads `%USERPROFILE%\Android\release\keystore-credentials.txt` (lines
 Needs Godot 4.4.x (the executable on the PATH, in `$env:GODOT`, or passed with `-Godot`) + export templates, JDK 17 and the Android SDK (build-tools 35.0.1, platform 35), as in the README.
 
 ## Before every release
-1. Bump `config/version` (project.godot) and **increase** `version/code` (export_presets.cfg) — Android refuses to install a lower code over a higher one.
-2. Add a new top entry to `scripts/patchnotes.gd` (Spanish text) and its English lines to `data/lang_en.json`; write `RELEASE_NOTES_v<version>.md`.
+1. Bump `config/version` (project.godot, for example `0.1.1` or `0.1.1-alpha.1`) and **increase** `version/code` (export_presets.cfg) — Android refuses to install a lower code over a higher one.
+2. Add a new top entry to `scripts/patchnotes.gd` (English text, `ver` = the same `config/version`, one entry for every alpha) and its translations to every `data/lang_<code>.json`; add the build's section to `RELEASE_NOTES_v<version>.md`. `tools/tests/release_test.gd` checks the entry exists and is translated.
 3. Run the tests (`tools/tests/*_test.gd`, see README; run them from the project folder) and check `RESULT: PASS` for each.
 4. Build, then verify the result:
    ```
@@ -35,6 +35,6 @@ Needs Godot 4.4.x (the executable on the PATH, in `$env:GODOT`, or passed with `
 - **Play Store:** not planned (the project is distributed through GitHub releases).
 
 ## Publishing a release on GitHub
-- **Pre-release (test builds, current stage):** create a release with a tag like `v0.1.0-alpha.1`, tick **"Set as a pre-release"**, attach the signed `.apk` and paste `RELEASE_NOTES_v<version>.md`. Testers download and install it by hand. GitHub's "latest release" API, which the in-game update check uses, **ignores pre-releases and drafts**, so test builds are never offered as updates in the app.
-- **Stable release (later):** the same, without the pre-release box. The tag number must be higher than the installed `config/version` (for example `v0.2.0` over `0.1.0`); players on older versions then see the update notice with a download button. The tag's numbers decide; suffixes such as `-alpha.1` are ignored in the comparison.
+- **Pre-release (test builds, current stage):** create a release with a tag like `v0.1.0-alpha.1`, tick **"Set as a pre-release"**, attach the signed `.apk` and paste `RELEASE_NOTES_v<version>.md`. The tag must equal `v` + `config/version`. Also attach the Windows `-windows.zip`. The in-game update check reads the release list (pre-releases included, drafts skipped) and offers the highest version to anyone on an older build: the `.apk` on Android, the `-windows.zip` on Windows. The alpha builds up to alpha.10 can't recognise newer versions and must install 0.1.0 by hand.
+- **Stable release (later):** the same, without the pre-release box. The tag number must be higher than the installed `config/version` (for example `v0.2.0` over `0.1.0`); players on older versions then see the update notice with a download button. Numbers are compared first; with the same number an alpha is older than the final release and a higher alpha is newer (`0.1.1-alpha.1` < `0.1.1-alpha.2` < `0.1.1`).
 - The repository must be **public** for downloads and the update check to work without signing in. While it is private, only you can download its releases.

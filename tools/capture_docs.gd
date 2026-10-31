@@ -73,6 +73,10 @@ func _init() -> void:
 	real_run = FileAccess.get_file_as_string(RS.PATH) if had_run else ""   # your saved run is put back at the end
 	RS.clear()
 	await _frames(5)
+	if OS.get_cmdline_user_args().has("--new-only"):   # only the alpha.11 screens: `... --script res://tools/capture_docs.gd -- --new-only`
+		await _shop_and_gacha()
+		_finish()
+		return
 
 	# ---------- menus ----------
 	var menu = (load("res://scenes/menu.tscn") as PackedScene).instantiate()
@@ -113,7 +117,7 @@ func _init() -> void:
 	await _frames(12)
 	await _shot("evolution_card")
 	m._on_card_chosen(0)
-	await _frames(70)
+	await _frames(240)   # the evolution scene runs about 4 s
 	await _shot("evolved_charmeleon")
 	await _end(m)
 
@@ -260,6 +264,83 @@ func _init() -> void:
 	await _shot("resume_reminder")
 	menu2.queue_free()
 	await _frames(3)
+	await _shop_and_gacha()
+	_finish()
+
+
+# ---------- alpha.11: item Skip card, Kecleon shop with a reservation, gacha completion bonus ----------
+func _shop_and_gacha() -> void:
+	var m = await _run(6)
+	m.item = ""
+	m._offer_item()
+	m.cards.age = 5.0
+	await _frames(15)
+	await _shot("item_skip_card")
+	m.cards.hide_cards()
+	m.choosing = false
+	m.coins = 640
+	m.kec.reserved = "chrono"   # a shiny-Kecleon item, so it shows as the 4th card next to the golden offers
+	m.kec.reserve_paid = m.kec.reserve_cost("chrono")
+	m.kec.spawn(func(_p): return true, "gold")
+	m.kec.open_ui()
+	await _frames(15)
+	await _shot("kecleon_shop_reserve")
+	m.kec.close_ui()
+	await _end(m)
+	# evolution scene: white silhouettes swapping, then the reveal
+	m = await _run(4)
+	m.player.level = 16
+	m.pending_levels = 1
+	m._open_cards()
+	m.cards.age = 5.0
+	await _frames(12)
+	m._on_card_chosen(0)
+	var cine = m.evo_cine
+	for st in [[1.4, "evolution_scene_morph"], [3.2, "evolution_scene_reveal"]]:
+		while is_instance_valid(cine) and float(cine.t) < float(st[0]):
+			await process_frame
+		await _shot(String(st[1]))
+	await _end(m)
+	# buff badges beside the Pokémon: ATK x3, SPD x1, DEF x5
+	m = await _run(25)
+	for st in [["atk", 3], ["spd", 1], ["def", 5]]:
+		var bf: Dictionary = m.player.buffs[String(st[0])]
+		bf["t"] = 8.0
+		bf["amount"] = 0.1
+		bf["ts"] = []
+		for j in range(int(st[1])):
+			bf["ts"].append(7.5 - float(j))
+		bf["n"] = int(st[1])
+	await _frames(30)
+	await _shot("buff_badges", Rect2i(440, 200, 400, 300))
+	await _end(m)
+	# gacha: drop about 40% of Kanto so the completion line shows a partial bonus
+	var saved_owned: Dictionary = SV.d["owned"].duplicate(true)
+	var i := 0
+	for p in SV.region_pool(1):
+		if i % 5 < 2:
+			SV.d["owned"].erase(str(int(p["dex"])))
+		i += 1
+	var menu = (load("res://scenes/menu.tscn") as PackedScene).instantiate()
+	root.add_child(menu)
+	await _frames(40)
+	menu.gacha_region = 1
+	menu._show("gacha")
+	await _frames(20)
+	await _shot("gacha_completion_bonus")
+	SV.d["tickets"] = 56   # Max pull: 5 batches of 10, 6 tickets left over
+	menu._confirm_max_pull("t1")
+	await _frames(10)
+	await _shot("gacha_max_pull_confirm")
+	menu._do_max_pull("t1")
+	await _frames(20)
+	await _shot("gacha_max_pull")
+	menu.queue_free()
+	await _frames(3)
+	SV.d["owned"] = saved_owned
+
+
+func _finish() -> void:
 	RS.clear()
 	if had_run:
 		var rf := FileAccess.open(RS.PATH, FileAccess.WRITE)

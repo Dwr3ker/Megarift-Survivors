@@ -4,7 +4,11 @@ extends RefCounted
 # Los efectos se conectan a las funciones de estadisticas ya existentes en main.gd (no hay pipelines paralelos).
 
 const PAD = preload("res://scripts/pad.gd")
+const IC = preload("res://scripts/icons.gd")
+const UIS = preload("res://scripts/ui_style.gd")
 const REROLL := [50, 100, 175, 275, 400, 550]
+const RESERVE_PCT := 0.3      # reserva: pagas el 30% ahora y el siguiente Kecleon trae el objeto por el resto
+const RES_COL := "#f6b52b"
 const VISIT_TIME := 75.0
 const MIN_SEP := 520.0
 const SEAL_FLOOR := 0.6
@@ -95,9 +99,14 @@ var royal_got := 0
 var dice_ready := false
 var infinity_id := ""
 var _busy_hit := false
+var reserved := ""            # objeto reservado (sobrevive a la marcha de Kecleon)
+var reserve_paid := 0
+var just_reserved := false
 # interfaz
 var ui = null
-var ui_btns: Array = []
+var ui_btns: Array = []       # 0-2: ofertas, 3: objeto reservado
+var ui_res_btns: Array = []
+var ui_parts: Array = []      # per card: {"box", "icon", "tag", "name", "desc", "price"}
 var ui_info = null
 var ui_coins = null
 var ui_reroll = null
@@ -165,14 +174,14 @@ func pick_offers(v: String, avoid: Array = []) -> Array:
 	var pool: Array = pool_of(v)
 	var fresh: Array = []
 	for id in pool:
-		if not avoid.has(id):
+		if not avoid.has(id) and id != reserved:
 			fresh.append(id)
 	fresh.shuffle()
 	var out: Array = fresh.slice(0, 3)
 	if out.size() < 3:   # no hay suficientes alternativas: se completan con las anteriores
 		var rest: Array = []
 		for id in pool:
-			if not out.has(id):
+			if not out.has(id) and id != reserved:
 				rest.append(id)
 		rest.shuffle()
 		for id in rest:
@@ -186,16 +195,86 @@ func pick_offers(v: String, avoid: Array = []) -> Array:
 func buy(id: String) -> String:
 	if bought:
 		return "ya"
-	if not offers.has(id) or not eligible(id):
+	var is_res: bool = reserved != "" and id == reserved
+	if not (offers.has(id) or is_res) or not eligible(id):
 		return "invalido"
-	var p: int = price(id)
+	var p: int = reserved_price() if is_res else price(id)
 	if m.coins < p:
 		return "fondos"
 	m.coins -= p
 	bought = true
+	if is_res:
+		reserved = ""
+		reserve_paid = 0
 	_apply(id)
 	log.append(["buy", variant, id, p])
 	return ""
+
+
+# ------------------------------------------------------------------ reserva
+func reserve_cost(id: String) -> int:
+	return int(ceil(float(price(id)) * RESERVE_PCT))
+
+
+# Lo que falta por pagar del objeto reservado (el Sello de Mercader tambien rebaja este resto).
+func reserved_price() -> int:
+	return maxi(0, price(reserved) - reserve_paid)
+
+
+# Reservar gasta la compra de esta visita: Kecleon se marcha y el siguiente trae el objeto.
+func reserve(id: String) -> String:
+	if bought:
+		return "ya"
+	if reserved != "":
+		return "reservado"
+	if not offers.has(id) or not eligible(id):
+		return "invalido"
+	var p: int = reserve_cost(id)
+	if m.coins < p:
+		return "fondos"
+	m.coins -= p
+	bought = true
+	just_reserved = true
+	reserved = id
+	reserve_paid = p
+	m.Aud.sfx("coin")
+	m.add_text(m.player.position + Vector2(0, -m.player.body_h - 20.0), m.L.t("Reserved: %s") % m.L.t(String(ITEMS[id][0])), Color(RES_COL), 20)
+	log.append(["reserve", variant, id, p])
+	return ""
+
+
+# Al llegar un Kecleon: si el objeto reservado ya no se puede entregar, devuelve lo pagado.
+func _check_reserved() -> void:
+	if reserved == "" or eligible(reserved):
+		return
+	m.coins += reserve_paid
+	m._say(m.L.t("Your reserved %s can't be delivered: %d coins refunded") % [m.L.t(String(ITEMS[reserved][0])), reserve_paid], 3.5)
+	log.append(["refund", reserved, reserve_paid])
+	reserved = ""
+	reserve_paid = 0
+
+
+# Estado para el guardado a mitad de partida (run_save.gd).
+func save_state() -> Dictionary:
+	return {"kc": kc.duplicate(), "reroll_n": reroll_n, "seen": seen.duplicate(), "reserved": reserved, "reserve_paid": reserve_paid,
+		"dice_ready": dice_ready, "crown_done": crown_done, "crown_n": crown_n, "royal_got": royal_got, "infinity_id": infinity_id,
+		"phoenix_used": phoenix_used}
+
+
+func load_state(s: Dictionary) -> void:
+	kc = (s.get("kc", {}) as Dictionary).duplicate()
+	reroll_n = int(s.get("reroll_n", 0))
+	seen = (s.get("seen", {}) as Dictionary).duplicate()
+	reserved = String(s.get("reserved", ""))
+	if reserved != "" and not valid(reserved):
+		reserved = ""
+	reserve_paid = int(s.get("reserve_paid", 0)) if reserved != "" else 0
+	dice_ready = bool(s.get("dice_ready", false))
+	crown_done = bool(s.get("crown_done", false))
+	crown_n = int(s.get("crown_n", 0))
+	royal_got = int(s.get("royal_got", 0))
+	infinity_id = String(s.get("infinity_id", ""))
+	phoenix_used = bool(s.get("phoenix_used", false))
 
 
 func _apply(id: String) -> void:
@@ -531,9 +610,11 @@ func spawn(pos_ok: Callable, force: String = "") -> bool:
 	_attach_sprite(mer, v)
 	active = mer
 	variant = v
+	_check_reserved()
 	offers = pick_offers(v)
 	bought = false
 	rerolled = false
+	just_reserved = false
 	seen[v] = true
 	m.Aud.sfx("rift")
 	m._say(m.L.t("A %s has arrived!") % m.L.t(String(VAR[v]["name"])), 3.0)
@@ -571,7 +652,7 @@ func open_ui() -> void:
 	m.add_child(layer)
 	ui = layer
 	var dim := ColorRect.new()
-	dim.color = Color(0.02, 0.04, 0.12, 0.62)
+	dim.color = Color(UIS.INK, 0.72)
 	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
 	layer.add_child(dim)
 	var root := CenterContainer.new()
@@ -582,44 +663,89 @@ func open_ui() -> void:
 	root.theme = kth
 	layer.add_child(root)
 	var panel := PanelContainer.new()
-	var sb := StyleBoxFlat.new()
 	var col := Color(String(VAR[variant]["col"]))
-	sb.bg_color = Color("#27489a")
-	sb.border_color = Color("#f4f8ff")
-	sb.set_border_width_all(3)
-	sb.set_corner_radius_all(14)
-	sb.set_content_margin_all(18)
-	sb.shadow_color = Color("#0b1838")
-	sb.shadow_size = 6
+	# the menus' pixel frame (ink outline, accent band, dark fill), banded in this Kecleon's colour
+	var sb: StyleBox = UIS.frame(UIS.PANEL, col.darkened(0.25)).duplicate()
+	sb.content_margin_left = 22
+	sb.content_margin_right = 22
+	sb.content_margin_top = 18
+	sb.content_margin_bottom = 18
 	panel.add_theme_stylebox_override("panel", sb)
 	root.add_child(panel)
 	var vb := VBoxContainer.new()
 	vb.add_theme_constant_override("separation", 12)
 	panel.add_child(vb)
+	# cabecera: nombre de la variante a la izquierda, monedas a la derecha
+	var head := HBoxContainer.new()
+	head.add_theme_constant_override("separation", 24)
+	vb.add_child(head)
 	var title := Label.new()
 	title.text = m.L.t(String(VAR[variant]["name"]))
 	title.add_theme_font_size_override("font_size", 40)
 	title.add_theme_color_override("font_color", col)
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	vb.add_child(title)
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	head.add_child(title)
+	var coin_ic := TextureRect.new()
+	coin_ic.texture = IC.tex("coin", 3)
+	coin_ic.stretch_mode = TextureRect.STRETCH_KEEP_CENTERED
+	coin_ic.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	head.add_child(coin_ic)
 	ui_coins = Label.new()
-	ui_coins.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	ui_coins.add_theme_font_size_override("font_size", 22)
-	vb.add_child(ui_coins)
+	ui_coins.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	ui_coins.add_theme_font_size_override("font_size", 26)
+	ui_coins.add_theme_color_override("font_color", UIS.GOLD)
+	head.add_child(ui_coins)
+	# tiempo que le queda a Kecleon (el reloj de la partida esta parado con la tienda abierta)
+	var trow := HBoxContainer.new()
+	trow.add_theme_constant_override("separation", 12)
+	vb.add_child(trow)
+	var bar := ProgressBar.new()
+	bar.show_percentage = false
+	bar.custom_minimum_size = Vector2(0, 14)
+	bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	bar.max_value = VISIT_TIME
+	bar.value = clampf(active.ttl, 0.0, VISIT_TIME)
+	var bbg := UIS.box(UIS.INK, UIS.EDGE, 2, false)
+	bbg.set_content_margin_all(0)
+	var bfill := UIS.box(col, Color.TRANSPARENT, 0, false)
+	bfill.set_content_margin_all(0)
+	bar.add_theme_stylebox_override("background", bbg)
+	bar.add_theme_stylebox_override("fill", bfill)
+	trow.add_child(bar)
+	var tl := Label.new()
+	tl.text = m.L.t("Leaves in %ds") % ceili(maxf(active.ttl, 0.0))
+	tl.add_theme_font_size_override("font_size", 18)
+	tl.add_theme_color_override("font_color", UIS.MUTED)
+	trow.add_child(tl)
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 12)
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	vb.add_child(row)
 	ui_btns = []
-	for i in range(3):
+	ui_res_btns = []
+	ui_parts = []
+	for i in range(4):
+		var colv := VBoxContainer.new()
+		colv.add_theme_constant_override("separation", 6)
+		row.add_child(colv)
 		var b := Button.new()
-		b.custom_minimum_size = Vector2(230, 190)
-		b.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		b.add_theme_font_size_override("font_size", 20)
-		_style_btn(b, false)
+		b.custom_minimum_size = Vector2(230, 280)
+		b.size_flags_vertical = Control.SIZE_EXPAND_FILL   # same height for every card, so the Reserve buttons line up
+		_style_card(b, Color(RES_COL) if i == 3 else col)
 		b.pressed.connect(_on_buy.bind(i))
-		row.add_child(b)
+		colv.add_child(b)
 		ui_btns.append(b)
+		ui_parts.append(_card_layout(b))
+		if i < 3:
+			var rb := Button.new()
+			rb.custom_minimum_size = Vector2(230, 44)
+			rb.add_theme_font_size_override("font_size", 17)
+			_style_btn(rb, false)
+			rb.pressed.connect(_on_reserve.bind(i))
+			colv.add_child(rb)
+			ui_res_btns.append(rb)
+		# the reserved card has no Reserve button: it fills its whole column, down to the line of the Reserve buttons
 	ui_info = Label.new()
 	ui_info.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	ui_info.add_theme_font_size_override("font_size", 18)
@@ -650,7 +776,7 @@ func open_ui() -> void:
 func _focus_first_buy(close: Button = null) -> void:
 	for b in ui_btns:
 		var bb: Button = b
-		if bb.visible and not bb.disabled:
+		if bb.is_visible_in_tree() and not bb.disabled:
 			bb.grab_focus()
 			return
 	if close != null:
@@ -662,31 +788,67 @@ func _focus_first_buy(close: Button = null) -> void:
 func _refresh_ui() -> void:
 	if ui == null:
 		return
-	ui_coins.text = "%s: %d" % [m.L.t("Coins"), m.coins]
-	for i in range(3):
+	ui_coins.text = str(m.coins)
+	for i in range(4):
 		var b: Button = ui_btns[i]
-		if i < offers.size():
-			var id: String = String(offers[i])
-			var it: Array = ITEMS[id]
-			b.visible = true
-			b.text = "%s\n\n%s\n\n%d  (%d/%d)" % [m.L.t(String(it[0])), m.L.t(String(it[3])), price(id), n(id), int(it[2])]
-			b.disabled = bought or m.coins < price(id)
-		else:
-			b.visible = false
+		var id: String = ""
+		if i < 3 and i < offers.size():
+			id = String(offers[i])
+		elif i == 3 and reserved != "" and not just_reserved:
+			id = reserved
+		b.get_parent().visible = id != ""
+		if id == "":
+			continue
+		var it: Array = ITEMS[id]
+		var cost: int = reserved_price() if i == 3 else price(id)
+		var pt: Dictionary = ui_parts[i]
+		(pt["icon"] as TextureRect).texture = IC.tex("kec:" + id, 4)
+		(pt["tag"] as Label).text = m.L.t("RESERVED") if i == 3 else m.L.t("Owned %d/%d") % [n(id), int(it[2])]
+		(pt["tag"] as Label).add_theme_color_override("font_color", UIS.GOLD if i == 3 else UIS.MUTED)
+		(pt["name"] as Label).text = m.L.t(String(it[0]))
+		(pt["desc"] as Label).text = m.L.t(String(it[3]))
+		(pt["price"] as Label).text = "%d %s" % [cost, m.L.t("coins")]
+		b.disabled = bought or m.coins < cost
+		(pt["box"] as Control).modulate = Color(1, 1, 1, 0.5 if b.disabled else 1.0)
+		if i < 3:
+			var rb: Button = ui_res_btns[i]
+			rb.text = "%s  (%d)" % [m.L.t("Reserve"), reserve_cost(id)]
+			rb.disabled = bought or reserved != "" or m.coins < reserve_cost(id)
 	ui_reroll.text = "%s  (%d)" % [m.L.t("Reroll offers"), reroll_price()]
 	ui_reroll.disabled = bought or rerolled or m.coins < reroll_price()
-	if bought:
+	if just_reserved:
+		ui_info.text = m.L.t("Reserved! The next Kecleon will bring it.")
+	elif bought:
 		ui_info.text = m.L.t("Thanks for your purchase!")
+	elif reserved != "":
+		ui_info.text = m.L.t("Your reserved item is here. One reservation at a time.")
 	elif rerolled:
 		ui_info.text = m.L.t("Only one reroll per visit")
 	else:
-		ui_info.text = m.L.t("You can buy only one item per visit")
+		ui_info.text = m.L.t("One purchase per visit. Reserve: pay 30% now, the next Kecleon brings it.")
 
 
 func _on_buy(i: int) -> void:
+	var id: String = ""
+	if i == 3:
+		id = reserved
+	elif i < offers.size():
+		id = String(offers[i])
+	if id == "":
+		return
+	var r: String = buy(id)
+	if r == "":
+		_refresh_ui()
+		close_ui_later()
+	elif r == "fondos":
+		m.Aud.sfx("hit")
+	_refresh_ui()
+
+
+func _on_reserve(i: int) -> void:
 	if i >= offers.size():
 		return
-	var r: String = buy(String(offers[i]))
+	var r: String = reserve(String(offers[i]))
 	if r == "":
 		_refresh_ui()
 		close_ui_later()
@@ -700,38 +862,97 @@ func _on_reroll() -> void:
 	if r == "":
 		m.Aud.sfx("coin")
 	_refresh_ui()
-	if not ui_btns.is_empty() and (ui_btns[0] as Button).visible:
+	if not ui_btns.is_empty() and (ui_btns[0] as Button).is_visible_in_tree():
 		(ui_btns[0] as Button).grab_focus()
 
 
-static func _sbx(bg: Color, border: Color, bw: int) -> StyleBoxFlat:
-	var s := StyleBoxFlat.new()
-	s.bg_color = bg
-	s.border_color = border
-	s.set_border_width_all(bw)
-	s.set_corner_radius_all(12)
-	s.content_margin_left = 14
-	s.content_margin_right = 14
-	s.content_margin_top = 8
-	s.content_margin_bottom = 8
-	s.shadow_color = Color("#0b1838")
-	s.shadow_size = 3
+# Square box in the menus' palette (ui_style.gd), with an optional soft drop shadow.
+static func _sbx(bg: Color, border: Color, bw: int, shadow: bool = true) -> StyleBoxFlat:
+	var s := UIS.box(bg, border, bw, false)
+	if shadow:
+		s.shadow_color = Color(0, 0, 0, 0.5)
+		s.shadow_size = 5
+		s.shadow_offset = Vector2(0, 3)
 	return s
 
 
-# Mismo estilo de boton que el menu de pausa (azul / dorado)
-func _style_btn(b: Button, gold: bool) -> void:
-	var bg: Color = Color("#f6b52b") if gold else Color("#2b4f9e")
-	var bgh: Color = Color("#ffcf55") if gold else Color("#3a64bf")
-	var fc: Color = Color("#3d2a00") if gold else Color.WHITE
-	b.add_theme_stylebox_override("normal", _sbx(bg, Color.WHITE, 3))
-	b.add_theme_stylebox_override("hover", _sbx(bgh, Color.WHITE, 3))
-	b.add_theme_stylebox_override("pressed", _sbx(bg.darkened(0.2), Color.WHITE, 3))
-	b.add_theme_stylebox_override("focus", _sbx(bgh, Color("#fff2a0") if gold else Color("#ffd23f"), 5))
-	b.add_theme_stylebox_override("disabled", _sbx(Color("#1c2c5c"), Color("#6f7fae"), 3))
+# Offer card in the menus' look (like the Pokémon list cards): dark fill tinted with the Kecleon's colour,
+# a colour stripe along the top, cyan glow on hover, gold ring on focus.
+func _style_card(b: Button, col: Color) -> void:
+	var base: Color = UIS.BG.lerp(col, 0.07)
+	b.add_theme_stylebox_override("normal", _sbx(base, UIS.EDGE, 2))
+	var hov := _sbx(base.lerp(UIS.WAVE, 0.16), UIS.WAVE, 3, false)
+	hov.shadow_color = Color(UIS.WAVE, 0.45)
+	hov.shadow_size = 10
+	b.add_theme_stylebox_override("hover", hov)
+	b.add_theme_stylebox_override("pressed", _sbx(UIS.INK, UIS.GOLD, 3))
+	b.add_theme_stylebox_override("focus", _sbx(base.lightened(0.08), UIS.GOLD, 4))
+	b.add_theme_stylebox_override("disabled", _sbx(UIS.INK, UIS.EDGE.darkened(0.35), 2, false))
 	for c in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color"]:
-		b.add_theme_color_override(c, fc)
-	b.add_theme_color_override("font_disabled_color", Color("#8d9bc7"))
+		b.add_theme_color_override(c, UIS.TEXT)
+	b.add_theme_color_override("font_disabled_color", UIS.MUTED.darkened(0.25))
+	var stripe := ColorRect.new()
+	stripe.color = col
+	stripe.anchor_right = 1.0
+	stripe.offset_left = 2.0
+	stripe.offset_right = -2.0
+	stripe.offset_top = 2.0
+	stripe.offset_bottom = 8.0
+	stripe.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	b.add_child(stripe)
+
+
+# Card contents laid out top-down inside the button (icon, tag, name, description, price at the bottom),
+# so every card lines up the same however long its text is.
+func _card_layout(b: Button) -> Dictionary:
+	var mc := MarginContainer.new()
+	mc.set_anchors_preset(Control.PRESET_FULL_RECT)
+	mc.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	mc.add_theme_constant_override("margin_left", 12)
+	mc.add_theme_constant_override("margin_right", 12)
+	mc.add_theme_constant_override("margin_top", 16)
+	mc.add_theme_constant_override("margin_bottom", 12)
+	b.add_child(mc)
+	var vb := VBoxContainer.new()
+	vb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vb.add_theme_constant_override("separation", 4)
+	mc.add_child(vb)
+	var icon := TextureRect.new()
+	icon.custom_minimum_size = Vector2(0, 68)
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_CENTERED
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vb.add_child(icon)
+	var out := {"box": mc, "icon": icon}
+	for k in [["tag", 15, UIS.MUTED], ["name", 19, UIS.TITLE], ["desc", 16, UIS.TEXT], ["price", 18, UIS.GOLD]]:
+		var l := Label.new()
+		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		l.add_theme_font_size_override("font_size", int(k[1]))
+		l.add_theme_color_override("font_color", k[2])
+		l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		if String(k[0]) == "desc":
+			l.size_flags_vertical = Control.SIZE_EXPAND_FILL   # pushes the price to the bottom of the card
+			l.custom_minimum_size = Vector2(0, 8)
+		vb.add_child(l)
+		out[String(k[0])] = l
+	return out
+
+
+# Buttons in the menus' look: dark panel buttons, or the gold accent for the main action (Reroll).
+func _style_btn(b: Button, gold: bool) -> void:
+	var bg: Color = UIS.PANEL.lerp(UIS.GOLD, 0.22) if gold else UIS.BG
+	var edge: Color = UIS.GOLD if gold else UIS.EDGE
+	b.add_theme_stylebox_override("normal", _sbx(bg, edge, 3))
+	var hov := _sbx(bg.lerp(UIS.WAVE, 0.16), UIS.WAVE, 3, false)
+	hov.shadow_color = Color(UIS.WAVE, 0.45)
+	hov.shadow_size = 10
+	b.add_theme_stylebox_override("hover", hov)
+	b.add_theme_stylebox_override("pressed", _sbx(UIS.INK, UIS.GOLD, 3))
+	b.add_theme_stylebox_override("focus", _sbx(bg.lightened(0.1), UIS.GOLD, 4))
+	b.add_theme_stylebox_override("disabled", _sbx(UIS.INK, UIS.EDGE.darkened(0.35), 2, false))
+	for c in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color"]:
+		b.add_theme_color_override(c, UIS.TITLE if gold else UIS.TEXT)
+	b.add_theme_color_override("font_disabled_color", UIS.MUTED.darkened(0.25))
 
 
 func close_ui_later() -> void:
@@ -754,6 +975,8 @@ func close_ui() -> void:
 		ui.queue_free()
 	ui = null
 	ui_btns = []
+	ui_res_btns = []
+	ui_parts = []
 	m.shop_open = false
 
 
@@ -763,7 +986,7 @@ func ui_input(event: InputEvent) -> bool:
 		return false
 	if event is InputEventKey and event.pressed and not event.echo:
 		match event.keycode:
-			KEY_1, KEY_2, KEY_3:
+			KEY_1, KEY_2, KEY_3, KEY_4:
 				_on_buy(int(event.keycode) - KEY_1)
 				return true
 			KEY_R:
@@ -796,7 +1019,12 @@ func _press_focused() -> void:
 	if b.disabled:
 		m.Aud.sfx("hit")   # cannot afford it: say so instead of doing nothing
 		if ui_info != null:
-			ui_info.text = m.L.t("Not enough coins") if not bought else m.L.t("Thanks for your purchase!")
+			if bought:
+				ui_info.text = m.L.t("Thanks for your purchase!")
+			elif ui_res_btns.has(b) and reserved != "":
+				ui_info.text = m.L.t("You already have a reservation")
+			else:
+				ui_info.text = m.L.t("Not enough coins")
 		return
 	b.pressed.emit()
 

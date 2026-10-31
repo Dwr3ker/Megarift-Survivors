@@ -10,7 +10,9 @@ const L = preload("res://scripts/lang.gd")
 const PAD = preload("res://scripts/pad.gd")
 
 # Repositorio de esta edicion. Al abrir el menu se pregunta a GitHub (una sola peticion HTTPS, sin enviar datos) cual es la ultima release y,
-# si es mas nueva que esta version, se ofrece descargarla. Las releases se publican con el tag v<version> (p. ej. v0.1.1). La API "latest" de GitHub ignora las pre-releases: una version de pruebas publicada como pre-release no se ofrece aqui y se instala a mano.
+# si es mas nueva que esta version, se ofrece descargarla. Las releases se publican con el tag v<version> (p. ej. v0.1.0-alpha.12).
+# Se lee la lista de releases (no "latest", que ignora las pre-releases): las alphas de prueba se publican como pre-release
+# y tambien deben avisar. Una alpha es anterior a su version final: 0.1.0-alpha.11 < 0.1.0-alpha.12 < 0.1.0.
 # Con REPO vacio no se hace ninguna peticion de red.
 const REPO := "Dwr3ker/Megarift-Survivors"
 const FALLBACK_VERSION := "0.1.0"
@@ -34,7 +36,7 @@ func start() -> void:
 	req.timeout = 8.0
 	add_child(req)
 	req.request_completed.connect(_done)
-	var err: int = req.request("https://api.github.com/repos/%s/releases/latest" % REPO, ["User-Agent: MegariftSurvivors", "Accept: application/vnd.github+json"])
+	var err: int = req.request("https://api.github.com/repos/%s/releases?per_page=20" % REPO, ["User-Agent: MegariftSurvivors", "Accept: application/vnd.github+json"])
 	if err != OK:
 		queue_free()
 
@@ -51,6 +53,14 @@ static func ver_parts(s: String) -> Array:
 	return out
 
 
+# Pre-release number: "0.1.0-alpha.11" -> 11; a final release (no suffix) -> -1.
+static func pre_num(s: String) -> int:
+	var rx := RegEx.new()
+	rx.compile("-[A-Za-z]+\\.?(\\d+)")
+	var m := rx.search(s)
+	return int(m.get_string(1)) if m != null else -1
+
+
 static func is_newer(tag: String, current: String) -> bool:
 	var a: Array = ver_parts(tag)
 	var b: Array = ver_parts(current)
@@ -61,15 +71,47 @@ static func is_newer(tag: String, current: String) -> bool:
 		var y: int = int(b[i]) if i < b.size() else 0
 		if x != y:
 			return x > y
-	return false
+	# same number: a final release beats any alpha of it, and a later alpha beats an earlier one
+	var pa: int = pre_num(tag)
+	var pb: int = pre_num(current)
+	if pa == pb:
+		return false
+	if pa < 0:
+		return true
+	if pb < 0:
+		return false
+	return pa > pb
+
+
+# The newest published (not draft) release in GitHub's list, alphas included; {} if none.
+static func newest(list: Array) -> Dictionary:
+	var best := {}
+	for r in list:
+		if not (r is Dictionary) or bool(r.get("draft", false)):
+			continue
+		if best.is_empty() or is_newer(String(r.get("tag_name", "")), String(best.get("tag_name", ""))):
+			best = r
+	return best
+
+
+# The file to download for this platform: the APK on Android, the Windows zip on PC; else the release page.
+static func asset_url(rel: Dictionary, page: String) -> String:
+	var want: String = ".apk" if OS.get_name() == "Android" else ("-windows.zip" if OS.get_name() == "Windows" else "")
+	if want == "":
+		return page
+	for a in rel.get("assets", []):
+		if a is Dictionary and String(a.get("name", "")).to_lower().ends_with(want):
+			return String(a.get("browser_download_url", page))
+	return page
 
 
 func _done(result: int, code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
 	if result != HTTPRequest.RESULT_SUCCESS or code != 200:
 		queue_free()
 		return
-	var j = JSON.parse_string(body.get_string_from_utf8())
-	if not (j is Dictionary):
+	var parsed = JSON.parse_string(body.get_string_from_utf8())
+	var j: Dictionary = newest(parsed) if parsed is Array else (parsed if parsed is Dictionary else {})
+	if j.is_empty():
 		queue_free()
 		return
 	var tag: String = String(j.get("tag_name", ""))
@@ -77,11 +119,7 @@ func _done(result: int, code: int, _headers: PackedStringArray, body: PackedByte
 		queue_free()
 		return
 	var page: String = String(j.get("html_url", "https://github.com/%s/releases" % REPO))
-	var url: String = page
-	for a in j.get("assets", []):
-		if a is Dictionary and String(a.get("name", "")).to_lower().ends_with(".apk"):
-			url = String(a.get("browser_download_url", page))
-			break
+	var url: String = asset_url(j, page)
 	found.emit({"cur": APP_VERSION, "tag": tag, "name": String(j.get("name", tag)), "url": url, "page": page})
 	queue_free()
 

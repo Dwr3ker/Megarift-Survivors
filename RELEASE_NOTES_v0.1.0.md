@@ -1,4 +1,17 @@
-# Megarift Survivors v0.1.0 — pre-release (test build)
+# Megarift Survivors v0.1.0
+
+## Changes in 0.1.0 (first release, after alpha.10)
+- **Daily Challenge rework:** every day is one of three formats, the same for everyone: Medal Rift (one Pokémon, two rules, score points), Draft Day (choose 1 of 3 Pokémon, each with its own rule) or Gauntlet (a new rule every 5 minutes; survive 20 minutes). Bronze / Silver / Gold medals pay 1 ticket, 3 tickets and a purple ticket once a day; a streak of days with a medal pays bonus coins and a purple ticket every 7th day.
+- **Evolution scene:** evolving plays like the main games (world pauses, white silhouettes swap faster and faster, a flash, the new Pokémon fades in).
+- **Kecleon shop redesign:** card layout with icons, prices, owned count and a stay timer; **Reserve** an item for 30% and the next Kecleon brings it for the rest.
+- **Gacha:** Max pull (all gold tickets in batches of 10, or all purple tickets, after a confirmation, with a summary), and a completion bonus (missing Pokémon up to ×3, shiny chance from 1% up to 5%).
+- **Buff badges** beside your Pokémon with one arrow per stack and a time ring.
+- **Items:** they cycle before repeating, the third chest in a row without an item always has one, and the item screen has a Skip card when you carry nothing.
+- **Pokémon list:** bigger Pokémon and favorite hearts; the top face button toggles a favorite.
+- **Update notice:** finds alpha builds on GitHub and offers the APK on Android or the Windows zip on PC. Alpha builds up to alpha.10 can't see it: install 0.1.0 by hand once, and later updates will be offered in the game.
+- **What's new** now has an entry for every alpha, and the version label reads 0.1.0.
+- Auto effects quality recovers when the game runs smoothly again.
+- Fix: Save and quit now keeps Kecleon purchases.
 
 ## Changes in 0.1.0-alpha.10
 - Controller in the Pokémon list: the left face button (X on Xbox, Square on PlayStation, Y on Nintendo) makes the highlighted Pokémon your partner, so you no longer have to navigate down to Choose. Confirm on a text box (like the search box) now opens the on-screen keyboard, and Confirm or Back closes it.
@@ -58,7 +71,7 @@
 - **Known issue:** a crash about 30 seconds into a run was reported on a phone and a handheld and could not be reproduced on PC. This build is meant to capture the cause.
 
 
-> **This is an early test build of a new project.** Version numbering starts at 0.1.0 (the 5.x numbers belong to the original Android port). Expect rough edges and untuned balance.
+> **This is the first release of a new project.** Version numbering starts at 0.1.0 (the 5.x numbers belong to the original Android port). Expect rough edges and untuned balance.
 
 Released 2026-10-27. Formerly "Pokémon Survivors — Doofcraft-style edition". A fork of [JayElDragon's Godot port](https://github.com/JayElDragon/poke-survivor) (v5.4) of **PokéSurvivor by JPTER78**, adding the systems and balance that make the independent rewrite [pokesurvivor.doofcraft.com](https://pokesurvivor.doofcraft.com) feel different. Everything is still **offline**: no ads, purchases or accounts. The only network request is the update check described below.
 

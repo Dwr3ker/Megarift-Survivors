@@ -52,6 +52,8 @@ const ARENA = preload("res://scripts/arena.gd")
 const FUS = preload("res://scripts/fusions.gd")
 const FFX = preload("res://scripts/fusion_fx.gd")
 const EVFX = preload("res://scripts/evo_fx.gd")
+const EVC = preload("res://scripts/evo_cine.gd")
+const DLY = preload("res://scripts/daily.gd")
 const EVAB = preload("res://scripts/evo_abil.gd")
 const TXS = preload("res://scripts/textscale.gd")
 const TW = preload("res://scripts/tileworld.gd")
@@ -509,6 +511,9 @@ var ret_last := 0
 var unfreeze_count := 0
 var pause_ui: CanvasLayer
 var mini: Node2D
+var daily_fmt := ""     # Daily Challenge format of the day (daily.gd): medals / draft / gauntlet
+var daily_stage := 0    # Gauntlet: stages already reached (a new rule every 5 minutes)
+var evo_cine = null     # games-style evolution scene (evo_cine.gd); the world is frozen while it plays
 var zoom_punch := 0.0   # brief camera push-in (Z-Move cinematic, Dynamax); decays by itself
 var cam_zoom := 1.65  # campo de vision: ajustable en la pausa (100-200 %), se guarda en Ajustes
 var settings_open := false
@@ -542,6 +547,7 @@ var lowhp_hap_t := 0.0   # cuenta atras del latido haptico con la vida baja
 var quality := 0
 var q_auto := 1.0
 var q_bad_t := 0.0
+var q_good_t := 0.0
 var world_seed := 0
 var menu_mode := false   # fondo del menu: solo trampas, sin cofres, altares ni fuentes (como el juego original)
 var chunks := {}
@@ -631,8 +637,9 @@ func _ready() -> void:
 	PG.off = mode == "party"
 	if mode == "daily":
 		SV.run_seed = SV.daily_seed()
-		mods = [SV.daily_mod(SV.run_seed)]
-		SV.run_dex = SV.daily_dex(SV.run_seed)
+		daily_fmt = DLY.format_of(SV.run_seed)
+		mods = DLY.start_mods(SV.run_seed)
+		SV.run_dex = int(DLY.current_pick(SV.run_seed)["dex"])
 		seed(SV.run_seed)   # mismo mundo y mismos sorteos iniciales para todos hoy
 	elif mode == "party":
 		SV.run_dex = SV.party_dex
@@ -694,6 +701,10 @@ func _ready() -> void:
 	sh_aura.m = self
 	sh_aura.z_index = 2
 	player.add_child(sh_aura)
+	var bbadges := BuffBadges.new()
+	bbadges.m = self
+	bbadges.z_index = 3
+	player.add_child(bbadges)
 	if SV.shiny_wanted(sel_dex):
 		player.set_shiny()
 	player.max_hp = float(st["hp"]) + float(perks["hp"])
@@ -1143,13 +1154,27 @@ func _finish_run() -> void:
 		return
 	var extra := ""
 	if mode == "daily":
-		var dd: Dictionary = SV.d.get("daily", {})
+		var dd: Dictionary = SV.d.get("daily", {})   # best time of the day (kept for the achievements and old saves)
 		if int(dd.get("date", 0)) != SV.run_seed:
 			dd = {"date": SV.run_seed, "best": 0}
-		var prev_best: int = int(dd["best"])
-		dd["best"] = maxi(prev_best, int(run_time))
+		dd["best"] = maxi(int(dd["best"]), int(run_time))
 		SV.d["daily"] = dd
-		extra = " · " + L.t("Daily Challenge") + ((" · " + L.t("Best score of the day!")) if int(run_time) > prev_best else "")
+		var dr: Dictionary = DLY.record(SV.run_seed, kills, run_bosses, run_time)
+		extra = " · " + L.t(String(DLY.NAMES[daily_fmt]))
+		extra += " · " + (L.t("Survived %s") % ("%d:%02d" % [int(dr["score"]) / 60, int(dr["score"]) % 60]) if daily_fmt == "gauntlet" else L.t("%d points") % int(dr["score"]))
+		if int(dr["medal"]) > 0:
+			extra += " · " + L.t("%s medal") % L.t(String(DLY.MEDAL_NAMES[int(dr["medal"])]))
+		if bool(dr["new_best"]):
+			extra += " · " + L.t("Best score of the day!")
+		var paid: Array = []
+		if int(dr["tickets"]) > 0:
+			paid.append(L.t("+%d tickets") % int(dr["tickets"]))
+		if int(dr["tickets10"]) > 0:
+			paid.append(L.t("+%d purple tickets") % int(dr["tickets10"]))
+		if int(dr["coins"]) > 0:
+			paid.append(L.t("streak day %d: +%d coins") % [int(dr["streak"]), int(dr["coins"])])
+		if not paid.is_empty():
+			extra += " · " + ", ".join(paid)
 	elif mode == "rush":
 		var rb: int = int(SV.d.get("rush_best", 0))
 		SV.d["rush_best"] = maxi(rb, run_bosses)
@@ -1377,8 +1402,17 @@ func _process(delta: float) -> void:
 			if q_bad_t > 2.0:
 				q_auto = maxf(0.1, q_auto * 0.6)
 				q_bad_t = 0.0
+			q_good_t = 0.0
 		else:
 			q_bad_t = 0.0
+			# Vuelve a subir los efectos cuando el rendimiento se recupera.
+			if q_auto < 1.0 and Engine.get_frames_per_second() >= 55:
+				q_good_t += delta
+				if q_good_t > 6.0:
+					q_auto = minf(1.0, q_auto / 0.6)
+					q_good_t = 0.0
+			else:
+				q_good_t = 0.0
 	var fcap := _fx_cap()
 	if fx.get_child_count() > fcap:
 		var over: int = fx.get_child_count() - fcap
@@ -1433,6 +1467,11 @@ func _process(delta: float) -> void:
 			_finish_run()
 			Aud.music("")
 			Aud.sfx("gameover")
+	elif evo_cine != null and not paused:
+		if is_instance_valid(evo_cine) and not evo_cine.done:
+			evo_cine.tick(delta)
+		else:
+			evo_cine = null
 	elif z_state == "cine" and not paused:
 		_z_cine(delta)
 	elif jd.cinematic() and not paused:
@@ -1441,6 +1480,8 @@ func _process(delta: float) -> void:
 		run_time += delta * time_k
 		if mode == "chal":
 			_ch_tick(delta)
+		elif mode == "daily" and daily_fmt == "gauntlet":
+			_gauntlet_tick()
 		if mode == "rifts" and run_time >= RIFTS_LIMIT and arena == null and not timeup:
 			timeup = true
 			hud.timeup = true
@@ -1995,6 +2036,32 @@ func _mega_start() -> void:
 	mega_done = true
 	mega = MG.new()
 	mega.start(self)
+
+
+# Daily Gauntlet: every 5 minutes the next rule of the day joins the run; surviving 20 minutes clears it (Gold).
+func _gauntlet_tick() -> void:
+	var stages: Array = DLY.current_pick(SV.run_seed)["mods"]
+	var want: int = mini(stages.size() - 1, int(run_time / DLY.STAGE_T))
+	while daily_stage < want:
+		daily_stage += 1
+		var mid: String = String(stages[daily_stage])
+		if not mods.has(mid):
+			mods.append(mid)
+		_say(L.t("Stage %d: %s!") % [daily_stage + 1, L.t(String(DLY.MOD_NAME.get(mid, mid)))], 3.0)
+		Aud.sfx("legend")
+		shake = maxf(shake, 4.0)
+	if daily_stage < DLY.STAGES and run_time >= DLY.GAUNTLET_GOLD:
+		daily_stage = DLY.STAGES   # announced once
+		_say(L.t("Gauntlet cleared! Gold medal"), 3.5)
+		Aud.sfx("bossDown")
+
+
+# Pokémon evolution from a level-up card: plays the evolution scene, which applies EVL.apply at its flash.
+func _evo_begin(dex: int) -> void:
+	if evo_cine != null and is_instance_valid(evo_cine):
+		evo_cine.finish()
+	evo_cine = EVC.new()
+	evo_cine.start(self, dex)
 
 
 func _z_start() -> void:
@@ -4815,7 +4882,7 @@ func _ch_finish(ok: bool) -> void:
 func _mode_label() -> String:
 	match mode:
 		"daily":
-			return L.t("Daily Challenge")
+			return L.t("Daily Challenge") + (" · " + L.t(String(DLY.NAMES[daily_fmt])) if DLY.NAMES.has(daily_fmt) else "")
 		"rush":
 			return L.t("Boss Rush")
 		"party":
@@ -7663,10 +7730,18 @@ func try_ball(pos: Vector2, chance: float, force: bool = false) -> bool:
 	return true
 
 
+var item_seen: Array = []      # item ids already offered in the current cycle
+var chests_no_item := 0        # chests opened since the last item; the third one always has an item
+
+
 func _chest_roll(pos: Vector2, off: Vector2) -> void:
 	pos += off
 	try_ball(pos + Vector2(14.0, 0.0), 0.12)
 	var r: float = kec.chest_roll_adjust(randf())
+	if chests_no_item >= 2:
+		r = 0.75   # pity: lands in the item branch
+	else:
+		chests_no_item += 1
 	if r < 0.40:
 		for i in range(10):
 			_spawn_orb(pos, "coin", 5.0)
@@ -7681,7 +7756,8 @@ func _chest_roll(pos: Vector2, off: Vector2) -> void:
 		for i in range(5):
 			_spawn_orb(pos, "xpBig", per)
 		add_text(pos + Vector2(0.0, -30.0), L.t("Experience chest!"), Color("#7fe0ff"), 22)
-	elif item == "" or r < 0.88:
+	elif item == "" or r < 0.88 or chests_no_item >= 2:
+		chests_no_item = 0
 		_spawn_orb(pos, "item", 0.0)
 		add_text(pos + Vector2(0.0, -30.0), L.t("An item!"), Color("#ff8ad8"), 22)
 	else:
@@ -8890,7 +8966,7 @@ func _on_card_chosen(idx: int) -> void:
 	if cat == "evolve":   # one possible form: evolve at once; several (Eevee...): choose
 		var evt: Array = EVL._available(self, int(_cur_dex()))
 		if evt.size() == 1:
-			EVL.apply(self, int(evt[0]))
+			_evo_begin(int(evt[0]))
 			pending_levels = maxi(0, pending_levels - 1)
 			cards.hide_cards()
 			choosing = false
@@ -8899,7 +8975,7 @@ func _on_card_chosen(idx: int) -> void:
 		cards.show_cards(EVL.picks(self), L.t("Choose an evolution"), L.t("Evolution!"), false)
 		return
 	if cat == "evolvepick":
-		EVL.apply(self, int(id))
+		_evo_begin(int(id))
 		pending_levels = maxi(0, pending_levels - 1)
 		cards.hide_cards()
 		choosing = false
@@ -9011,7 +9087,16 @@ func _offer_item() -> void:
 			pool2.append(it2)
 	if not pool2.is_empty():
 		pool = pool2
-	var nw: Dictionary = pool[randi() % pool.size()]
+	# Items cycle: every item is offered once before any repeats.
+	var fresh: Array = []
+	for it3 in pool:
+		if not item_seen.has(String(it3["id"])):
+			fresh.append(it3)
+	if fresh.is_empty():
+		item_seen.clear()
+		fresh = pool
+	var nw: Dictionary = fresh[randi() % fresh.size()]
+	item_seen.append(String(nw["id"]))
 	var full: bool = item != "" and (not two or item2 != "") and (not three or item3 != "")
 	if bool(SV.d.get("item_lock", false)) and full and String(nw["id"]) != "rarecandy":
 		add_text(player.position + Vector2(0.0, -player.body_h - 8.0), L.t("Item ignored (lock on)"), Color("#8fa3c4"), 16)
@@ -9027,6 +9112,8 @@ func _offer_item() -> void:
 					cur_desc = String(it["desc"])
 			picks.append({"cat": "itemkeep", "id": item, "key": "keep", "w": 1.0,
 				"title": _item_name(), "desc": cur_desc, "icon": item, "tag": "Keep yours", "color": Color("#8fa3c4")})
+		else:
+			picks.append(_skip_item_card())
 		choosing = true
 		cards.show_cards(picks, L.t("You can only carry one: choose which to keep"), L.t("You found an item"), false)
 		_item_ui(String(nw["id"]))
@@ -9059,11 +9146,19 @@ func _offer_item() -> void:
 	if item != "":
 		picks.append({"cat": "itemkeep", "id": item, "key": "keep", "w": 1.0, "title": "Keep yours",
 			"desc": L.t("You keep your current items."), "icon": item, "tag": "No changes", "color": Color("#8fa3c4")})
+	else:
+		picks.append(_skip_item_card())
 	choosing = true
 	cards.show_cards(picks, L.t("You can carry three items") if three else L.t("You can carry two items"), L.t("You found an item"), false)
 	_item_ui(String(nw["id"]))
 	if slots.size() >= 2 and String(nw["id"]) != "rarecandy":
 		cards.item_new = {"id": String(nw["id"]), "name": L.t(String(nw["name"])), "desc": L.t(String(nw["desc"]))}
+
+
+# Shown when you hold nothing, so an offered item can be declined (the "itemkeep" handler just closes the screen).
+func _skip_item_card() -> Dictionary:
+	return {"cat": "itemkeep", "id": "", "key": "keep", "w": 1.0, "title": "Skip", "desc": L.t("You don't take the item."),
+		"icon": "star", "tag": "No item", "color": Color("#8fa3c4")}
 
 
 func _item_ui(new_id: String) -> void:
@@ -10136,6 +10231,82 @@ class ShieldAura extends Node2D:
 			var sz: float = 2.0 + 2.5 * tw
 			ci.draw_line(p - Vector2(sz, 0), p + Vector2(sz, 0), Color(1, 1, 1, 0.9 * tw * warn), 1.5)
 			ci.draw_line(p - Vector2(0, sz), p + Vector2(0, sz), Color(1, 1, 1, 0.9 * tw * warn), 1.5)
+
+
+# Insignias de potenciadores junto al Pokemon (como las flechas de subida de estadistica de los juegos):
+# una por buff activo, con su icono, un chevron por acumulacion y un aro con el tiempo que le queda.
+class BuffBadges extends Node2D:
+	const ORDER := ["atk", "spd", "def", "regen"]
+	const COL := {"atk": Color("#ff5f4a"), "spd": Color("#4fc8ff"), "def": Color("#ffd23f"), "regen": Color("#6fe08a")}
+	var m = null
+	var t := 0.0
+	var last_n := {}
+	var pop := {}   # stat -> 0..1, brief bounce when a stack is added
+
+	func _process(d: float) -> void:
+		var any := false
+		if m != null and not m.player.dead:
+			for k in ORDER:
+				var n: int = int(m.player.buffs[k]["n"])
+				if n > int(last_n.get(k, 0)):
+					pop[k] = 1.0
+				last_n[k] = n
+				pop[k] = maxf(0.0, float(pop.get(k, 0.0)) - d * 3.0)
+				any = any or n > 0
+		if any != visible:
+			visible = any
+		if any:
+			t += d
+			queue_redraw()
+
+	func _draw() -> void:
+		var p = m.player
+		var x: float = maxf(p.radius, p.body_h * 0.45) + 16.0
+		var y: float = -p.body_h * 0.9
+		for k in ORDER:
+			var b: Dictionary = p.buffs[k]
+			var n: int = int(b["n"])
+			if n <= 0:
+				continue
+			var col: Color = COL[k]
+			var ts: Array = b["ts"]
+			var left := 0.0
+			for v in ts:
+				left = maxf(left, float(v))
+			var frac: float = clampf(left / maxf(0.01, float(b["t"])), 0.0, 1.0)
+			var blink: float = 0.45 + 0.55 * absf(sin(t * 10.0)) if left < 1.5 else 1.0   # about to run out
+			var r: float = 8.0 * (1.0 + 0.35 * float(pop.get(k, 0.0)))
+			var c := Vector2(x, y)
+			draw_circle(c, r + 2.0, Color(0, 0, 0, 0.55 * blink))
+			draw_circle(c, r, Color(col.r * 0.35, col.g * 0.35, col.b * 0.35, 0.9 * blink))
+			draw_arc(c, r + 1.0, -PI / 2.0, -PI / 2.0 + TAU * frac, 20, Color(col.r, col.g, col.b, blink), 2.0)
+			_icon(k, c, col, blink)
+			# one rising chevron per stack (up to 5, then a number)
+			var cx: float = x + r + 6.0
+			var rise: float = fmod(t * 6.0, 3.0)
+			for i in range(mini(n, 5)):
+				var px: float = cx + float(i) * 7.0
+				var py: float = y + 3.0 - (rise if i == mini(n, 5) - 1 else 0.0) * 0.5
+				draw_polyline(PackedVector2Array([Vector2(px - 3.0, py), Vector2(px, py - 4.0), Vector2(px + 3.0, py)]), Color(0, 0, 0, 0.6 * blink), 3.5)
+				draw_polyline(PackedVector2Array([Vector2(px - 3.0, py), Vector2(px, py - 4.0), Vector2(px + 3.0, py)]), Color(col.r, col.g, col.b, blink), 2.0)
+			if n > 5:
+				draw_string(ThemeDB.fallback_font, Vector2(cx + 35.0, y + 4.0), "x%d" % n, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 11, Color(col.r, col.g, col.b, blink))
+			y += 24.0
+
+	func _icon(k: String, c: Vector2, col: Color, a: float) -> void:
+		var w := Color(1, 1, 1, a)
+		match k:
+			"atk":   # sword
+				draw_line(c + Vector2(-3.5, 3.5), c + Vector2(3.5, -3.5), w, 2.0)
+				draw_line(c + Vector2(-4.5, 0.5), c + Vector2(-0.5, 4.5), Color(col.r, col.g, col.b, a), 2.0)
+			"spd":   # double chevron forward
+				for o in [-2.5, 1.5]:
+					draw_polyline(PackedVector2Array([c + Vector2(o - 1.5, -3.5), c + Vector2(o + 1.5, 0.0), c + Vector2(o - 1.5, 3.5)]), w, 1.6)
+			"def":   # shield
+				draw_colored_polygon(PackedVector2Array([c + Vector2(-4.0, -4.0), c + Vector2(4.0, -4.0), c + Vector2(4.0, 0.5), c + Vector2(0.0, 4.5), c + Vector2(-4.0, 0.5)]), w)
+			"regen":   # plus
+				draw_rect(Rect2(c + Vector2(-1.2, -4.0), Vector2(2.4, 8.0)), w)
+				draw_rect(Rect2(c + Vector2(-4.0, -1.2), Vector2(8.0, 2.4)), w)
 
 
 # Gotas de veneno que "sudan" por el cuerpo del enemigo envenenado y resbalan hacia abajo

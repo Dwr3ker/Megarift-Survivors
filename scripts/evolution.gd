@@ -128,7 +128,8 @@ static func picks(main) -> Array:
 
 # ---------------------------------------------------------------- applying it
 # Rebuilds the body and the numbers for species `dex`. `restore` (resuming a saved run) only rebuilds the body.
-static func apply(main, dex: int, restore: bool = false) -> void:
+# `say` = false when the evolution scene (evo_cine.gd) shows its own message.
+static func apply(main, dex: int, restore: bool = false, say: bool = true) -> void:
 	if not main._dex_by.has(dex) or not main._smeta.has(str(dex)):
 		return
 	var p = main.player
@@ -166,8 +167,9 @@ static func apply(main, dex: int, restore: bool = false) -> void:
 	main._ring(p.position, 10.0, 320.0, col, 0.7, 6.0)
 	main._ring(p.position, 10.0, 200.0, Color.WHITE, 0.5, 4.0)
 	main.pfx.burst(p.position, col, 30, 260.0)
-	main.add_text(p.position + Vector2(0.0, -p.body_h - 24.0), L.t(String(st["name"])), col, 28)
-	main._say(L.t("%s evolved into %s!") % [L.t(String(old["name"])), L.t(String(st["name"]))], 3.4)
+	if say:
+		main.add_text(p.position + Vector2(0.0, -p.body_h - 24.0), L.t(String(st["name"])), col, 28)
+		main._say(L.t("%s evolved into %s!") % [L.t(String(old["name"])), L.t(String(st["name"]))], 3.4)
 
 
 # Seasoned bonus: refreshes the damage / speed multipliers and keeps max HP in step with the player's level

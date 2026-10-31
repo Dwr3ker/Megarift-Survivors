@@ -60,6 +60,8 @@ const REGIONS := ["Kanto", "Johto", "Hoenn", "Sinnoh", "Unova", "Kalos", "Alola"
 const RARITY_W := [40.0, 30.0, 18.0, 9.0, 3.0]
 const RARITY_NAME := ["Common", "Uncommon", "Rare", "Very rare", "Legendary"]
 const SHINY_PULL := 0.01
+const SHINY_PULL_DONE := 0.05   # shiny chance on a fully completed region; scales up from SHINY_PULL with completion
+const MISSING_BOOST := 2.0      # a Pokemon you don't own weighs 1 + MISSING_BOOST x completion inside its rarity
 const PULL_RATES := [45.0, 30.0, 17.0, 6.5, 1.5]
 const PITY_5 := 90   # v5.2: antes 70 (la proteccion de mala suerte era demasiado fuerte)
 const REFUND := [15, 30, 60, 120, 300]
@@ -586,6 +588,40 @@ static func region_pool(region: int) -> Array:
 	return out
 
 
+# Share of the region's Pokemon you own (0..1).
+static func region_completion(region: int) -> float:
+	var all: Array = region_pool(region)
+	if all.is_empty():
+		return 0.0
+	var have := 0
+	for p in all:
+		if owns(int(p["dex"])):
+			have += 1
+	return float(have) / float(all.size())
+
+
+# The more of a region you own, the likelier its missing Pokemon and shinies become.
+static func shiny_pull(region: int) -> float:
+	return lerpf(SHINY_PULL, SHINY_PULL_DONE, region_completion(region))
+
+
+static func missing_mul(region: int) -> float:
+	return 1.0 + MISSING_BOOST * region_completion(region)
+
+
+# Weighted pick inside a rarity pool: Pokemon you don't own weigh `mul`, owned ones 1.
+static func _pick_weighted(list: Array, mul: float) -> Dictionary:
+	var tot := 0.0
+	for p in list:
+		tot += 1.0 if owns(int(p["dex"])) else mul
+	var x: float = randf() * tot
+	for p in list:
+		x -= 1.0 if owns(int(p["dex"])) else mul
+		if x <= 0.0:
+			return p
+	return list[list.size() - 1]
+
+
 static func can_pull(n: int, use: String) -> bool:
 	if n == 10 and use == "t10":
 		return int(d.get("tickets10", 0)) >= 1
@@ -640,6 +676,9 @@ static func pull(region: int, n: int = 1, use: String = "t1") -> Array:
 	if not d["pity"].has(key):
 		d["pity"][key] = 0
 	var out: Array = []
+	# completion-based odds, fixed for the whole pull so a x10 is not skewed by its own first results
+	var miss_mul: float = missing_mul(region)
+	var sh_p: float = shiny_pull(region)
 	for i in range(n):
 		d["pity"][key] = int(d["pity"][key]) + 1
 		var want: int
@@ -659,9 +698,9 @@ static func pull(region: int, n: int = 1, use: String = "t1") -> Array:
 		var rarity: int = int(list[0]["rarity"])
 		if rarity == 5:
 			d["pity"][key] = 0
-		var sp: Dictionary = list[randi() % list.size()]
+		var sp: Dictionary = _pick_weighted(list, miss_mul)
 		var dex: int = int(sp["dex"])
-		var shiny: bool = randf() < SHINY_PULL and bool(smeta[str(dex)].get("sh", 0))
+		var shiny: bool = randf() < sh_p and bool(smeta[str(dex)].get("sh", 0))
 		var shiny_owned: bool = owns(dex) and bool(d["owned"][str(dex)]["shiny"])
 		if shiny and shiny_owned:
 			var missing: Array = []

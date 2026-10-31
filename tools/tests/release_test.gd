@@ -18,7 +18,15 @@ func _init() -> void:
 	check("v0.1.1 is newer than 0.1.0", UPD.is_newer("v0.1.1", "0.1.0"))
 	check("v0.2.0 is newer than 0.1.9", UPD.is_newer("v0.2.0", "0.1.9"))
 	check("v0.1.0 is not newer than 0.1.0", not UPD.is_newer("v0.1.0", "0.1.0"))
-	check("a pre-release suffix does not change the comparison", UPD.is_newer("v0.2.0-alpha.1", "0.1.0") and not UPD.is_newer("v0.1.0-alpha.1", "0.1.0"))
+	check("an alpha is older than its final release", UPD.is_newer("v0.2.0-alpha.1", "0.1.0") and not UPD.is_newer("v0.1.0-alpha.1", "0.1.0") and UPD.is_newer("v0.1.0", "0.1.0-alpha.11"))
+	check("a later alpha is newer, the same or an earlier one is not", UPD.is_newer("v0.1.0-alpha.12", "0.1.0-alpha.11") and UPD.is_newer("v0.1.0-alpha.10", "0.1.0-alpha.9") and not UPD.is_newer("v0.1.0-alpha.11", "0.1.0-alpha.11") and not UPD.is_newer("v0.1.0-alpha.10", "0.1.0-alpha.11"))
+	# GitHub's release list (pre-releases included, newest not always first): the highest version wins, drafts are skipped
+	var rels: Array = [{"tag_name": "v0.1.0-alpha.9", "draft": false}, {"tag_name": "v0.1.1-alpha.3", "draft": true}, {"tag_name": "v0.1.1-alpha.2", "draft": false, "html_url": "page",
+		"assets": [{"name": "megarift-survivors-0.1.1-alpha.2.apk", "browser_download_url": "apk"}, {"name": "megarift-survivors-0.1.1-alpha.2-windows.zip", "browser_download_url": "zip"}]}]
+	var nw: Dictionary = UPD.newest(rels)
+	check("the update check finds the newest published build, alphas included", String(nw.get("tag_name", "")) == "v0.1.1-alpha.2" and UPD.is_newer(String(nw["tag_name"]), UPD.APP_VERSION))
+	check("alpha builds see this release as an update", UPD.is_newer("v" + UPD.APP_VERSION, "0.1.0-alpha.10"))
+	check("it offers this platform's download", UPD.asset_url(nw, "page") == ("zip" if OS.get_name() == "Windows" else ("apk" if OS.get_name() == "Android" else "page")))
 	# no outbound link may point at the original port author's repository or donation page
 	var bad: Array = []
 	var rx := RegEx.new()
@@ -31,15 +39,24 @@ func _init() -> void:
 				bad.append(f.get_file() + " -> " + url)
 	check("no link to the original authors' repos or donation page", bad.is_empty(), str(bad))
 	var e: Dictionary = PN.ENTRIES[0]
-	check("newest patch-notes entry is 0.1.0", String(e["ver"]) == "0.1.0" and String(e["date"]) == "2026-10-27")
-	check("only this version's entry is listed (no inherited history)", PN.ENTRIES.size() == 1)
-	check("entry has 20 new items and 2 changes", (e["new"] as Array).size() == 20 and (e["changes"] as Array).size() == 2)
-	# every line must have a Spanish translation (the English text is the translation key)
+	check("newest patch-notes entry is this version", String(e["ver"]) == UPD.APP_VERSION, String(e["ver"]))
+	var vers: Array = []
+	for en in PN.ENTRIES:
+		vers.append(String(en["ver"]))
+	var every := true
+	for n in range(1, 11):   # the ten test builds before 0.1.0
+		every = every and vers.has("0.1.0-alpha.%d" % n)
+	check("What's new has 0.1.0 and every alpha before it, newest first", every and vers.size() == 11 and vers[0] == "0.1.0" and vers[vers.size() - 1] == "0.1.0-alpha.1", str(vers))
+	# every line of every entry has a Spanish translation, and the newest entry is translated in every language
+	# (the English text is the translation key; entries up to alpha.10 were only ever translated to Spanish)
+	for code in ["es", "es_419", "fr", "it", "ja", "pt_BR", "pt_PT", "ru", "vi", "zh_CN", "zh_HK"]:
+		var dl = JSON.parse_string(FileAccess.open("res://data/lang_%s.json" % code, FileAccess.READ).get_as_text())
+		var missing: Array = []
+		for en in (PN.ENTRIES if code == "es" else [PN.ENTRIES[0]]):
+			for k in [en["title"]] + en["new"] + en["changes"] + en["fixes"]:
+				if not dl.has(String(k)): missing.append(String(k).substr(0, 40))
+		check("all patch-notes lines translated (%s)" % code, missing.is_empty(), str(missing))
 	var es = JSON.parse_string(FileAccess.open("res://data/lang_es.json", FileAccess.READ).get_as_text())
-	var missing: Array = []
-	for k in [e["title"]] + e["new"] + e["changes"]:
-		if not es.has(String(k)): missing.append(String(k).substr(0, 40))
-	check("all patch-notes lines translated to Spanish", missing.is_empty(), str(missing))
 	check("version label string translated", es.has("Doofcraft-style edition"))
 	# the screen shows for a player with saved runs on the first launch of the new version
 	SV.d["notes_seen"] = "5.4"
@@ -77,7 +94,7 @@ func _init() -> void:
 	for c in menu.news_box.get_children():
 		if c is Label: news_txt += c.text + "
 "
-	check("What's new screen lists only v0.1.0", "v0.1.0" in news_txt and not ("v5." in news_txt) and not ("v4." in news_txt) and not ("v2." in news_txt), news_txt.substr(0, 60).replace("
+	check("What's new screen shows this version (no inherited 5.x history)", ("v" + UPD.APP_VERSION) in news_txt and not ("v5." in news_txt) and not ("v4." in news_txt) and not ("v2." in news_txt), news_txt.substr(0, 60).replace("
 ", " | "))
 	check("project name is Megarift Survivors", String(ProjectSettings.get_setting("application/config/name")) == "Megarift Survivors")
 	SV.d = _guard

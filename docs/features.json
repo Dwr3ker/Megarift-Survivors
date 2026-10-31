@@ -36,7 +36,31 @@
   "screens/boss_hp_bar.jpg"
  ],
  "Item swap screen": [
-  "screens/item_swap_screen.jpg"
+  "screens/item_swap_screen.jpg",
+  "screens/item_skip_card.jpg"
+ ],
+ "Daily Challenge": [
+  "screens/daily_challenge.jpg"
+ ],
+ "Evolution scene": [
+  "screens/evolution_scene_morph.jpg",
+  "screens/evolution_scene_reveal.jpg"
+ ],
+ "Buff badges": [
+  "screens/buff_badges.jpg"
+ ],
+ "Max pull": [
+  "screens/gacha_max_pull_confirm.jpg",
+  "screens/gacha_max_pull.jpg"
+ ],
+ "Favorites with a controller": [
+  "screens/pokemon_list_favorites.jpg"
+ ],
+ "Kecleon shop": [
+  "screens/kecleon_shop_reserve.jpg"
+ ],
+ "Gacha completion bonus": [
+  "screens/gacha_completion_bonus.jpg"
  ],
  "Effects under the Pokémon": [
   "screens/black_kyurem_freeze_shock.jpg"
