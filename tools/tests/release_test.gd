@@ -12,7 +12,7 @@ func _init() -> void:
 	var UPD = load("res://scripts/updater.gd")
 	var PN = load("res://scripts/patchnotes.gd")
 	var L = load("res://scripts/lang.gd")
-	check("in-game version is 0.1.0", UPD.APP_VERSION == "0.1.0", UPD.APP_VERSION)
+	check("in-game version is 0.1.1", UPD.APP_VERSION == "0.1.1", UPD.APP_VERSION)
 	check("updater targets this project's repository", UPD.REPO == "Dwr3ker/Megarift-Survivors", UPD.REPO)
 	# version comparison (pure logic, no network): a newer tag is offered, the same or older is not
 	check("v0.1.1 is newer than 0.1.0", UPD.is_newer("v0.1.1", "0.1.0"))
@@ -21,11 +21,11 @@ func _init() -> void:
 	check("an alpha is older than its final release", UPD.is_newer("v0.2.0-alpha.1", "0.1.0") and not UPD.is_newer("v0.1.0-alpha.1", "0.1.0") and UPD.is_newer("v0.1.0", "0.1.0-alpha.11"))
 	check("a later alpha is newer, the same or an earlier one is not", UPD.is_newer("v0.1.0-alpha.12", "0.1.0-alpha.11") and UPD.is_newer("v0.1.0-alpha.10", "0.1.0-alpha.9") and not UPD.is_newer("v0.1.0-alpha.11", "0.1.0-alpha.11") and not UPD.is_newer("v0.1.0-alpha.10", "0.1.0-alpha.11"))
 	# GitHub's release list (pre-releases included, newest not always first): the highest version wins, drafts are skipped
-	var rels: Array = [{"tag_name": "v0.1.0-alpha.9", "draft": false}, {"tag_name": "v0.1.1-alpha.3", "draft": true}, {"tag_name": "v0.1.1-alpha.2", "draft": false, "html_url": "page",
-		"assets": [{"name": "megarift-survivors-0.1.1-alpha.2.apk", "browser_download_url": "apk"}, {"name": "megarift-survivors-0.1.1-alpha.2-windows.zip", "browser_download_url": "zip"}]}]
+	var rels: Array = [{"tag_name": "v0.1.0-alpha.9", "draft": false}, {"tag_name": "v0.1.2-alpha.3", "draft": true}, {"tag_name": "v0.1.2-alpha.2", "draft": false, "html_url": "page",
+		"assets": [{"name": "megarift-survivors-0.1.2-alpha.2.apk", "browser_download_url": "apk"}, {"name": "megarift-survivors-0.1.2-alpha.2-windows.zip", "browser_download_url": "zip"}]}]
 	var nw: Dictionary = UPD.newest(rels)
-	check("the update check finds the newest published build, alphas included", String(nw.get("tag_name", "")) == "v0.1.1-alpha.2" and UPD.is_newer(String(nw["tag_name"]), UPD.APP_VERSION))
-	check("alpha builds see this release as an update", UPD.is_newer("v" + UPD.APP_VERSION, "0.1.0-alpha.10"))
+	check("the update check finds the newest published build, alphas included", String(nw.get("tag_name", "")) == "v0.1.2-alpha.2" and UPD.is_newer(String(nw["tag_name"]), UPD.APP_VERSION))
+	check("older builds see this release as an update", UPD.is_newer("v" + UPD.APP_VERSION, "0.1.0-alpha.10") and UPD.is_newer("v" + UPD.APP_VERSION, "0.1.0"))
 	check("it offers this platform's download", UPD.asset_url(nw, "page") == ("zip" if OS.get_name() == "Windows" else ("apk" if OS.get_name() == "Android" else "page")))
 	# no outbound link may point at the original port author's repository or donation page
 	var bad: Array = []
@@ -46,7 +46,7 @@ func _init() -> void:
 	var every := true
 	for n in range(1, 11):   # the ten test builds before 0.1.0
 		every = every and vers.has("0.1.0-alpha.%d" % n)
-	check("What's new has 0.1.0 and every alpha before it, newest first", every and vers.size() == 11 and vers[0] == "0.1.0" and vers[vers.size() - 1] == "0.1.0-alpha.1", str(vers))
+	check("What's new has this version, 0.1.0 and every alpha before it, newest first", every and vers.size() == 12 and vers[0] == UPD.APP_VERSION and vers[1] == "0.1.0" and vers[vers.size() - 1] == "0.1.0-alpha.1", str(vers))
 	# every line of every entry has a Spanish translation, and the newest entry is translated in every language
 	# (the English text is the translation key; entries up to alpha.10 were only ever translated to Spanish)
 	for code in ["es", "es_419", "fr", "it", "ja", "pt_BR", "pt_PT", "ru", "vi", "zh_CN", "zh_HK"]:

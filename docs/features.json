@@ -72,5 +72,23 @@
  "Customisation": [
   "screens/hud_layout_editor.jpg",
   "screens/settings_controls.jpg"
+ ],
+ "Legend Shards and Legend Pick": [
+  "screens/gacha_legend_shards.jpg",
+  "screens/legend_pick.jpg"
+ ],
+ "Move previews": [
+  "screens/move_previews.jpg",
+  "screens/move_previews_2.jpg"
+ ],
+ "IVs and natures": [
+  "screens/ivs_and_nature.jpg",
+  "screens/iv_training.jpg",
+  "screens/nature_mint.jpg"
+ ],
+ "Region maps": [
+  "screens/region_map_picker.jpg",
+  "screens/region_map_hoenn.jpg",
+  "screens/region_map_kalos.jpg"
  ]
 }

@@ -8,6 +8,7 @@ const Aud = preload("res://scripts/audio.gd")
 const PG = preload("res://scripts/progress.gd")
 const CH = preload("res://scripts/challenges.gd")
 const DLY = preload("res://scripts/daily.gd")
+const IVS = preload("res://scripts/ivs.gd")
 const L = preload("res://scripts/lang.gd")
 const MD = preload("res://scripts/moves_data.gd")
 const FUS = preload("res://scripts/fusions.gd")
@@ -2405,6 +2406,7 @@ func _resume_run() -> void:
 		return
 	SV.run_mode = String(snap["mode"])
 	SV.run_hyper = bool(snap["hyper"])
+	SV.run_region = int(snap.get("region", 0))
 	SV.run_dex = int(snap["dex"])
 	SV.run_mods = Array(snap["mods"]).duplicate()
 	SV.resume_snap = snap
@@ -2465,18 +2467,199 @@ func _ongoing_prompt(then: Callable = Callable()) -> void:
 	ov.set_meta("cancel_ok", then.is_valid())
 
 
-func _start_mode(mode: String) -> void:
+func _start_mode(mode: String, region_ok: bool = false) -> void:
 	if RS.exists() and not is_instance_valid(run_prompt):
 		_ongoing_prompt(func(): _start_mode(mode))   # a saved run is waiting: resume it or give it up before starting another
 		return
+	if mode == "normal" and not region_ok:
+		_region_picker()   # a Normal run first asks for the map
+		return
+	if mode == "normal" and not SV.region_unlocked(int(SV.d.get("region", 0))):
+		SV.d["region"] = 0
 	if not mode.begins_with("chal"):
 		SV.d["last_mode"] = mode
 	SV.run_mode = mode
 	SV.run_hyper = mode == "normal" and bool(SV.d.get("hyper", false))   # Hyper solo en la partida normal
+	SV.run_region = int(SV.d.get("region", 0)) if mode == "normal" else 0   # region map (Normal run only)
 	SV.run_dex = int(SV.d["selected"])
 	SV.run_type = String(SV.d.get("mode_type", "fire"))
 	SV.save()
 	get_tree().change_scene_to_file("res://scenes/main.tscn")
+
+
+# Training (Pokémon page): vitamins raise one IV by IVS.VIT_STEP for IVS.VIT_COST coins.
+func _iv_train_ui(dx: int) -> void:
+	_clear(gacha_result)
+	var c := CenterContainer.new()
+	c.set_anchors_preset(Control.PRESET_FULL_RECT)
+	gacha_result.add_child(c)
+	var pc := PanelContainer.new()
+	pc.add_theme_stylebox_override("panel", UIS.frame(UIS.PANEL, UIS.EDGE))
+	c.add_child(pc)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 10)
+	pc.add_child(v)
+	v.add_child(_label(L.t("Train %s") % _name_of(dx), 28, C_GOLD))
+	v.add_child(_label(L.t("Each vitamin raises one IV by %d (up to 31) for %d coins. You have %d coins.") % [IVS.VIT_STEP, IVS.VIT_COST, int(SV.d["coins"])], 17, UIS.TEXT))
+	var ivs: Array = IVS.info(dx)["iv"]
+	var first: Button = null
+	for i in range(3):
+		var stat: String = String(IVS.STATS[i])
+		var cur: int = int(ivs[i])
+		var nxt: int = mini(IVS.IV_MAX, cur + IVS.VIT_STEP)
+		var txt: String = L.t("%s: %s IV %d → %d (%d coins)") % [L.t(String(IVS.VITAMIN[stat])), L.t(String(IVS.STAT_NAME[stat])), cur, nxt, IVS.VIT_COST] if cur < IVS.IV_MAX \
+			else L.t("%s: %s IV is already 31") % [L.t(String(IVS.VITAMIN[stat])), L.t(String(IVS.STAT_NAME[stat]))]
+		var b := _btn(txt, func():
+			var r: String = IVS.train(dx, stat)
+			if r == "coins":
+				toast(L.t("Not enough coins"))
+			elif r == "":
+				Aud.sfx("levelup")
+				_update_top()
+				_dex_detail()
+				_iv_train_ui(dx), Vector2(560, 48))
+		b.disabled = cur >= IVS.IV_MAX or int(SV.d["coins"]) < IVS.VIT_COST
+		v.add_child(b)
+		if first == null and not b.disabled:
+			first = b
+	var close := _btn_close("Close", func(): gacha_result.visible = false, Vector2(220, 50))
+	v.add_child(close)
+	gacha_result.visible = true
+	_gf(first if first != null else close)
+
+
+# Mint (Pokémon page): pick any nature for IVS.MINT_COST coins.
+func _mint_ui(dx: int) -> void:
+	_clear(gacha_result)
+	var c := CenterContainer.new()
+	c.set_anchors_preset(Control.PRESET_FULL_RECT)
+	gacha_result.add_child(c)
+	var pc := PanelContainer.new()
+	pc.add_theme_stylebox_override("panel", UIS.frame(UIS.PANEL, UIS.EDGE))
+	c.add_child(pc)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 10)
+	pc.add_child(v)
+	v.add_child(_label(L.t("Natures of %s") % _name_of(dx), 28, C_GOLD))
+	var curn: String = String(IVS.info(dx)["nat"])
+	v.add_child(_label(L.t("Now: %s. Natures it already had (from duplicates or a Mint) are free to switch to; a Mint unlocks a new one for %d coins. You have %d coins.") % [IVS.nature_text(dx, L), IVS.MINT_COST, int(SV.d["coins"])], 17, UIS.TEXT))
+	var grid := GridContainer.new()
+	grid.columns = 3
+	grid.add_theme_constant_override("h_separation", 8)
+	grid.add_theme_constant_override("v_separation", 8)
+	v.add_child(grid)
+	var first: Button = null
+	for n in IVS.NATURES:
+		var nn: String = String(n)
+		var have_n: bool = IVS.has_nature(dx, nn)
+		var cost_t: String = L.t("Current") if nn == curn else (L.t("Free") if have_n else L.t("%d coins") % IVS.MINT_COST)
+		var b := _btn("%s · %s\n%s" % [L.t(nn), cost_t, IVS.effect_text(nn, L)], func():
+			var r: String = IVS.set_nature(dx, nn)
+			if r == "coins":
+				toast(L.t("Not enough coins"))
+			elif r == "":
+				Aud.sfx("confirm")
+				_update_top()
+				_dex_detail()
+				gacha_result.visible = false, Vector2(230, 58))
+		b.add_theme_font_size_override("font_size", 16)
+		b.disabled = nn == curn or (not have_n and int(SV.d["coins"]) < IVS.MINT_COST)
+		_gold_btn(b, nn == curn or have_n)
+		grid.add_child(b)
+		if first == null and not b.disabled:
+			first = b
+	var close := _btn_close("Close", func(): gacha_result.visible = false, Vector2(220, 50))
+	v.add_child(close)
+	gacha_result.visible = true
+	_gf(first if first != null else close)
+
+
+# Region picker (after Play on a Normal run): every region with a snapshot of how it looks, its biomes and Pokémon.
+# Kanto is open; each next region unlocks by surviving 30 minutes (reaching Arceus) on the previous one. "Every region" is the classic run.
+const REGION_BIOMES := {1: ["Eternal Meadow", "Crystal Cave"], 2: ["Hive Forest", "Eternal Glacier"], 3: ["Sea Grotto", "Igneous Volcano"],
+	4: ["Eternal Glacier", "Ancient Quarry"], 5: ["Dark Alley", "Red Desert"], 6: ["Enchanted Forest", "Steel Fortress"],
+	7: ["Emerald Jungle", "Sea Grotto"], 8: ["Dragon Sanctuary", "Ancient Dojo"], 9: ["Red Desert", "Sky Peak"]}
+
+
+func _region_picker() -> void:
+	_clear(gacha_result)
+	var c := CenterContainer.new()
+	c.set_anchors_preset(Control.PRESET_FULL_RECT)
+	gacha_result.add_child(c)
+	var pc := PanelContainer.new()
+	pc.add_theme_stylebox_override("panel", UIS.frame(UIS.PANEL, UIS.EDGE))
+	c.add_child(pc)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 10)
+	pc.add_child(v)
+	v.add_child(_label("Choose a region", 30, C_GOLD))
+	var grid := GridContainer.new()
+	grid.columns = 5
+	grid.add_theme_constant_override("h_separation", 10)
+	grid.add_theme_constant_override("v_separation", 10)
+	v.add_child(grid)
+	var cur: int = int(SV.d.get("region", 0))
+	var focus_b: Button = null
+	for k in range(0, SV.REGIONS.size() + 1):
+		var kk: int = k
+		var open: bool = SV.region_unlocked(k)
+		var b := _btn("", func():
+			SV.d["region"] = kk
+			SV.save()
+			gacha_result.visible = false
+			_start_mode("normal", true), Vector2(220, 196))
+		b.disabled = not open
+		_gold_btn(b, k == cur and open)
+		var bv := VBoxContainer.new()
+		bv.set_anchors_preset(Control.PRESET_FULL_RECT)
+		bv.offset_left = 6
+		bv.offset_right = -6
+		bv.offset_top = 6
+		bv.offset_bottom = -6
+		bv.add_theme_constant_override("separation", 2)
+		bv.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		b.add_child(bv)
+		# the snapshot: a real in-game screenshot of the region (tools/capture_regions.gd)
+		var shot := TextureRect.new()
+		shot.custom_minimum_size = Vector2(0, 112)
+		shot.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		shot.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+		shot.clip_contents = true
+		shot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var path := "res://assets/regions/region_%d.jpg" % k
+		if ResourceLoader.exists(path):
+			shot.texture = load(path)
+		if not open:
+			shot.modulate = Color(0.25, 0.25, 0.3)
+		bv.add_child(shot)
+		var name_s: String = L.t("Every region") if k == 0 else L.t(SV.REGIONS[k - 1])
+		var nl := _label(name_s, 19, UIS.TITLE if open else UIS.MUTED)
+		nl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		nl.autowrap_mode = TextServer.AUTOWRAP_OFF
+		nl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		bv.add_child(nl)
+		var sub := ""
+		if k == 0:
+			sub = L.t("Classic: every region's Pokémon")
+		elif not open:
+			sub = L.t("Locked: survive 30 min on %s") % L.t(SV.REGIONS[k - 2])
+		else:
+			sub = "%s → %s" % [L.t(String(REGION_BIOMES[k][0])), L.t(String(REGION_BIOMES[k][1]))]
+			var best: int = SV.region_best(k)
+			if best > 0:
+				sub += "\n" + L.t("Best: %s") % ("%d:%02d" % [best / 60, best % 60])
+		var sl := _label(sub, 13, UIS.MUTED if open else Color("#ff9c8a"))
+		sl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		sl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		sl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		bv.add_child(sl)
+		grid.add_child(b)
+		if open and (focus_b == null or k == cur):
+			focus_b = b
+	var close := _btn_close("Cancel", func(): gacha_result.visible = false, Vector2(220, 50))
+	v.add_child(close)
+	gacha_result.visible = true
+	_gf(focus_b if focus_b != null else close)
 
 
 # Ilustracion animada del modo (sprites + decoracion). No simula la partida.
@@ -4523,6 +4706,23 @@ func _dex_detail() -> void:
 	sv.add_child(_stat_bar(L.t("HP"), str(int(p["hp"])), float(p["hp"]) / float(dex_stat_max["hp"]), Color("#ff6b7a"), "heart"))
 	sv.add_child(_stat_bar(L.t("Speed"), str(int(p["spd"])), float(p["spd"]) / float(dex_stat_max["spd"]), Color("#6bd66b"), "boot"))
 	sv.add_child(_stat_bar(L.t("Attack"), "x%.2f" % float(p["atk"]), float(p["atk"]) / float(dex_stat_max["atk"]), Color("#ffb86b"), "fist"))
+	if SV.owns(dx):   # this Pokémon's own IVs and nature (ivs.gd): they change its HP, Attack and Speed in a run
+		var ive: Dictionary = IVS.info(dx)
+		var ivs: Array = ive["iv"]
+		var nl2 := _label(L.t("Nature: %s") % IVS.nature_text(dx, L), 17, UIS.GOLD)
+		sv.add_child(nl2)
+		var ivl := _label(L.t("IVs: HP %d · Attack %d · Speed %d (of 31; duplicates can raise them)") % [int(ivs[0]), int(ivs[1]), int(ivs[2])], 16, Color("#7fe8ff"))
+		ivl.tooltip_text = L.t("Each IV is worth -5% to +5% on its stat, and a nature +10% / -5%.")
+		sv.add_child(ivl)
+		var trow := HBoxContainer.new()
+		trow.add_theme_constant_override("separation", 8)
+		var btr := _btn(L.t("Train IVs"), func(): _iv_train_ui(dx), Vector2(0, 40))
+		var bmi := _btn(L.t("Change nature"), func(): _mint_ui(dx), Vector2(0, 40))
+		for tb in [btr, bmi]:
+			tb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			tb.add_theme_font_size_override("font_size", 16)
+			trow.add_child(tb)
+		sv.add_child(trow)
 	var mfm: Dictionary = MG.form_for(dx)
 	if not mfm.is_empty():   # megaevolucion en partida: aviso con el objeto que la activa
 		var mk: String = String(mfm["kind"])
@@ -5470,46 +5670,50 @@ func _refresh_gacha() -> void:
 	var banner := Banner.new()
 	banner.c1 = Color.html(String(bd["c1"]))
 	banner.c2 = Color.html(String(bd["c2"]))
-	banner.custom_minimum_size = Vector2(0, 320)
+	banner.custom_minimum_size = Vector2(0, 270)   # everything on the page fits without scrolling
 	banner.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	left.add_child(banner)
 	var cnt: Vector2i = _region_counts(gacha_region)
 	var tx := VBoxContainer.new()
 	tx.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	tx.offset_left = 22
-	tx.offset_top = 16
-	tx.offset_right = -22
-	tx.add_theme_constant_override("separation", 6)
+	tx.offset_left = 20
+	tx.offset_top = 12
+	tx.offset_right = -20
+	tx.add_theme_constant_override("separation", 2)
 	banner.add_child(tx)
-	var ttl := _label(L.t("%s Mystery") % L.t(SV.REGIONS[gacha_region - 1]), 40, C_GOLD)
+	var ttl := _label(L.t("%s Mystery") % L.t(SV.REGIONS[gacha_region - 1]), 32, C_GOLD)
 	ttl.autowrap_mode = TextServer.AUTOWRAP_OFF
 	tx.add_child(ttl)
-	tx.add_child(_label(L.t("The %d Pokémon of generation %d. The legendaries await!") % [cnt.y, gacha_region], 22))
-	tx.add_child(_label(L.t("You have %d of %d") % [cnt.x, cnt.y], 20, Color("#f2e9d8")))
+	tx.add_child(_label(L.t("The %d Pokémon of generation %d. The legendaries await!") % [cnt.y, gacha_region], 18))
+	tx.add_child(_label(L.t("You have %d of %d") % [cnt.x, cnt.y], 17, Color("#f2e9d8")))
 	banner.add_mon(int(bd["legs"][0]), 3.2, 0.0, 0.36)
 	banner.add_mon(int(bd["star"]), 3.2, 0.34, 0.66)
 	banner.add_mon(int(bd["legs"][1]), 3.2, 0.64, 1.0)
-	# --- botones de tirada
-	var brow := VBoxContainer.new()
-	brow.add_theme_constant_override("separation", 8)
+	# --- botones de tirada: two rows of three (single pulls, then Max pulls and Legend Pick)
+	var brow := GridContainer.new()
+	brow.columns = 3
+	brow.add_theme_constant_override("h_separation", 8)
+	brow.add_theme_constant_override("v_separation", 8)
 	left.add_child(brow)
 	var b1 := _cost_btn(L.t("Pull ×1"), "1", "", "ticket", func(): _do_pull(1, "t1"), Vector2(0, 44), SV.can_pull(1, "t1"), false, true)
 	var b10 := _cost_btn(L.t("Pull ×10"), "10", "", "ticket", func(): _do_pull(10, "t1"), Vector2(0, 44), SV.can_pull(10, "t1"), false, true)
 	var bt := _cost_btn(L.t("Purple ×10 pull"), "1", "", "ticket10", func(): _do_pull(10, "t10"), Vector2(0, 44), SV.can_pull(10, "t10"), false, true)
-	for b in [b1, b10, bt]:
-		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		brow.add_child(b)
 	# Max pull: every gold ticket in batches of 10, or every purple ticket (×10 each), in one go
 	var mx: int = int(SV.d["tickets"]) / 10
 	var mp: int = int(SV.d.get("tickets10", 0))
-	var mrow := HBoxContainer.new()
-	mrow.add_theme_constant_override("separation", 8)
-	brow.add_child(mrow)
 	var bmx := _cost_btn(L.t("Max pull ×%d") % (mx * 10), str(mx * 10), "", "ticket", func(): _confirm_max_pull("t1"), Vector2(0, 44), mx >= 1, false, true)
 	var bmp := _cost_btn(L.t("Max purple ×%d") % (mp * 10), str(mp), "", "ticket10", func(): _confirm_max_pull("t10"), Vector2(0, 44), mp >= 1, false, true)
-	for b in [bmx, bmp]:
+	# Legend Pick: Legend Shards (legendary duplicates, Eternatus) buy any legendary you don't own; the button shows the count
+	var shards: int = int(SV.d.get("lshards", 0))
+	var blp := _cost_btn(L.t("Legend Pick"), "%d/%d" % [shards, SV.SHARD_COST], "", "ballLux", func(): _legend_picker(), Vector2(0, 44),
+		shards >= SV.SHARD_COST and not SV.legend_pickable().is_empty(), false, true)
+	blp.tooltip_text = L.t("1 per legendary duplicate from the gacha and 1 per Eternatus defeat.")
+	for b in [b1, b10, bt, bmx, bmp, blp]:
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		mrow.add_child(b)
+		b.clip_contents = true
+		for lb in b.find_children("*", "Label", true, false):   # three to a row: smaller text so long labels fit
+			(lb as Label).add_theme_font_size_override("font_size", 18)
+		brow.add_child(b)
 	var pity: int = int(SV.d["pity"].get(str(gacha_region), 0))
 	var pcard := PanelContainer.new()
 	pcard.add_theme_stylebox_override("panel", UIS.frame(UIS.PANEL, UIS.EDGE))
@@ -5603,6 +5807,7 @@ func _refresh_gacha() -> void:
 	rules.add_child(_label(L.t("· Purple ×10 ticket: the last pull has a %d%% chance to be legendary (otherwise Very Rare or better) and the Z-Crystal chance rises to %d%%.") % [roundi(SV.PURPLE_LEGEND_P * 100.0), roundi(SV.Z_CRYSTAL_P_PURPLE * 100.0)], 16, Color("#d9a8ff")))
 	rules.add_child(_label(L.t("· After %d pulls without a legendary on a banner, the next one is.") % SV.PITY_5, 16, Color("#f2e9d8")))
 	rules.add_child(_label(L.t("· Duplicates give PokéCoins. Shinies don't repeat."), 16, Color("#f2e9d8")))
+	rules.add_child(_label(L.t("· A legendary duplicate also gives a Legend Shard (so does every Eternatus defeat). %d shards pick any legendary you don't own.") % SV.SHARD_COST, 16, Color("#ffcb3d")))
 	rules.add_child(_label(L.t("· The more of a banner you own, the likelier its missing Pokémon (up to ×%d) and shinies (from %d%% up to %d%% at 100%%).") % [roundi(1.0 + SV.MISSING_BOOST), roundi(SV.SHINY_PULL * 100.0), roundi(SV.SHINY_PULL_DONE * 100.0)], 16, Color("#7fe8ff")))
 	rules.add_child(_label(L.t("· Tickets are earned by playing: some Pokémon drop them when they fall, and bosses and chests sometimes give ×10 tickets."), 16, Color("#f2e9d8")))
 	focus_first = first
@@ -5621,6 +5826,96 @@ func _do_pull(n: int, use: String) -> void:
 	SV.save()
 	_update_top()
 	_play_slots(results)
+
+
+# Legend Pick: a grid of every legendary you don't own; choosing one asks before spending the shards.
+func _legend_picker() -> void:
+	var pool: Array = SV.legend_pickable()
+	if int(SV.d.get("lshards", 0)) < SV.SHARD_COST or pool.is_empty():
+		toast(L.t("You need %d Legend Shards") % SV.SHARD_COST if not pool.is_empty() else L.t("You own every legendary!"))
+		return
+	_clear(gacha_result)
+	var c := CenterContainer.new()
+	c.set_anchors_preset(Control.PRESET_FULL_RECT)
+	gacha_result.add_child(c)
+	var pc := PanelContainer.new()
+	c.add_child(pc)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 10)
+	pc.add_child(v)
+	v.add_child(_label("Legend Pick", 30, C_GOLD))
+	v.add_child(_label(L.t("Choose a legendary you don't own: %d shards (you have %d).") % [SV.SHARD_COST, int(SV.d.get("lshards", 0))], 18, UIS.TEXT))
+	var sc := ScrollContainer.new()
+	sc.custom_minimum_size = Vector2(860, 380)
+	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	sc.follow_focus = true
+	v.add_child(sc)
+	var grid := GridContainer.new()
+	grid.columns = 6
+	grid.add_theme_constant_override("h_separation", 8)
+	grid.add_theme_constant_override("v_separation", 8)
+	sc.add_child(grid)
+	var firstb: Button = null
+	pool.sort_custom(func(a, b): return int(a["dex"]) < int(b["dex"]))
+	for p in pool:
+		var d2: int = int(p["dex"])
+		var b := _btn("", func(): _legend_confirm(d2), Vector2(136, 120))
+		var pv := Preview.new()
+		pv.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		pv.set_anchors_preset(Control.PRESET_FULL_RECT)
+		pv.offset_bottom = -20.0
+		b.add_child(pv)
+		pv.setup(d2, false, 2.0)
+		var nl := _label("#%d %s" % [d2, _name_of(d2)], 13)
+		nl.autowrap_mode = TextServer.AUTOWRAP_OFF
+		nl.clip_text = true
+		nl.set_anchors_preset(Control.PRESET_FULL_RECT)
+		nl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		nl.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
+		nl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		b.add_child(nl)
+		grid.add_child(b)
+		if firstb == null:
+			firstb = b
+	var close := _btn_close("Cancel", func(): gacha_result.visible = false; _refresh_gacha(), Vector2(220, 52))
+	v.add_child(close)
+	gacha_result.visible = true
+	_gf(firstb if firstb != null else close)
+
+
+func _legend_confirm(dex: int) -> void:
+	_clear(gacha_result)
+	var c := CenterContainer.new()
+	c.set_anchors_preset(Control.PRESET_FULL_RECT)
+	gacha_result.add_child(c)
+	var pc := PanelContainer.new()
+	c.add_child(pc)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 14)
+	pc.add_child(v)
+	var pv := Preview.new()
+	pv.custom_minimum_size = Vector2(420, 170)
+	v.add_child(pv)
+	pv.setup(dex, false, 3.2)
+	var q := _label(L.t("Spend %d Legend Shards on %s?") % [SV.SHARD_COST, _name_of(dex)], 22, UIS.TEXT)
+	q.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	v.add_child(q)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 12)
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	v.add_child(row)
+	var yes := _btn(L.t("Confirm"), func():
+		if SV.pick_legend(dex):
+			Aud.sfx("legend")
+			toast(L.t("%s joins your collection!") % _name_of(dex))
+		gacha_result.visible = false
+		_update_top()
+		_refresh_gacha(), Vector2(220, 54))
+	var no := _btn_close("Back", func(): _legend_picker(), Vector2(220, 54))
+	row.add_child(yes)
+	row.add_child(no)
+	gacha_result.visible = true
+	_gf(no)
 
 
 # Max pull asks first: it can spend a long stash of tickets in one tap. Focus starts on Cancel so a double tap is safe.
@@ -5700,8 +5995,10 @@ func _show_batch(results: Array, crystals: Array) -> void:
 	var coins := 0
 	var by_rar: Array = [0, 0, 0, 0, 0]
 	var keep: Array = []
+	var n_shards := 0
 	for r in results:
 		by_rar[clampi(int(r["rarity"]), 1, 5) - 1] += 1
+		n_shards += int(r.get("shard", 0))
 		coins += int(r["refund"])
 		if bool(r["new"]):
 			n_new += 1
@@ -5711,6 +6008,8 @@ func _show_batch(results: Array, crystals: Array) -> void:
 			keep.append(r)
 	v.add_child(_label(L.t("%d pulls!") % results.size(), 32, C_GOLD))
 	v.add_child(_label(L.t("New: %d · Shiny: %d · Duplicates: +%d coins") % [n_new, n_shiny, coins], 20, Color("#f2e9d8")))
+	if n_shards > 0:
+		v.add_child(_label(L.t("+%d Legend Shards") % n_shards, 20, Color("#ffcb3d")))
 	var rrow := HBoxContainer.new()
 	rrow.add_theme_constant_override("separation", 14)
 	rrow.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -5813,6 +6112,10 @@ func _show_pulls(results: Array) -> void:
 		var rl := _icon_label(String(["ball", "ball2", "ball3", "ball4", "ballLux"][rar - 1]), SV.RARITY_NAME[rar - 1], 14, Color("#b4aed6"), 24.0)
 		rl.alignment = BoxContainer.ALIGNMENT_CENTER
 		cell.add_child(rl)
+		if int(r.get("shard", 0)) > 0:
+			var shl := _label(L.t("+1 Legend Shard"), 14, Color("#ffcb3d"))
+			shl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			cell.add_child(shl)
 	if SV.last_crystal != "":
 		var zc: String = SV.last_crystal
 		var zrow := _icon_label("zc:" + zc, L.t("Z-Crystal found! You unlock: %s") % L.t(String(ZM.DEF[zc]["name"])), 20, Color("#ffd65c"), 40.0)

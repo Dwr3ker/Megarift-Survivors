@@ -9,6 +9,24 @@ const UPD = preload("res://scripts/updater.gd")
 
 const ENTRIES := [
 	{
+		"ver": "0.1.1",
+		"date": "2026-11-01",
+		"title": "Megarift Survivors 0.1.1: region maps, IVs and natures, Legend Shards",
+		"new": [
+			"Region maps: after Play on a Normal run you choose Kanto, Johto, Hoenn, Sinnoh, Unova, Kalos, Alola, Galar, Paldea or every region. Each region has its own two biomes and its own wild Pokémon, bosses and legendaries. Kanto is open; each next region unlocks by surviving 30 minutes on the previous one, and players who already beat Eternatus start with every region open.",
+			"IVs and natures: every Pokémon you own has IVs (HP, Attack, Speed) and a nature that change its stats in a run. Duplicates raise its IVs and unlock their own nature; vitamins (HP Up, Protein, Carbos) and Mints are on the Pokémon page.",
+			"Legend Shards: every legendary duplicate from the gacha and every Eternatus defeat gives one, and 5 shards pick any legendary you don't own (Gacha > Legend Pick).",
+			"Move previews: when a level-up card offers a new move, it shows a small looping animation of how the move attacks.",
+		],
+		"changes": [
+			"The Gacha page fits on one screen: the six pull buttons are in two rows of three.",
+			"Item screen: \"Not this run\" replaces \"Never offer again\". The item comes back next run, and items blocked forever by the old button are available again.",
+		],
+		"fixes": [
+			"Pickups are no longer missed: the reach grows with your Pokémon's size, a fast step or a dash can't skip over them, and pulled pickups always keep up with you.",
+		],
+	},
+	{
 		"ver": "0.1.0",
 		"date": "2026-10-31",
 		"title": "Megarift Survivors 0.1.0: daily formats, evolution scene, Kecleon reservations and Max pull",

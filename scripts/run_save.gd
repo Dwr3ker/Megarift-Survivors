@@ -21,7 +21,7 @@ const FIELDS := ["run_time", "kills", "coins", "tickets", "tickets10", "gcoins_r
 	"forme_t", "kyurem", "cur_dex", "evo_dmg", "evo_spd", "evo_steps", "seas_hp_done", "z_type", "z_crystal", "z_used", "z_cd", "dyn_used", "dyn_cd", "dash_k", "mom_max", "doom_winds", "eter_kills", "eter_at",
 	"eter_last", "cal_used", "cal_for", "dir_done", "dir_gap", "dir_warned", "dir_map", "dir_log", "boss_idx", "boss_run", "cast_run",
 	"surge_t", "next_event_t", "thief_t", "thieves", "wl_acc", "mini_last", "mini_chk", "rift_miss", "rift_check", "biome_idx", "world_seed", "balls",
-	"item_seen", "chests_no_item"]
+	"item_seen", "chests_no_item", "lshards_run", "item_block_run"]
 
 
 static func exists() -> bool:
@@ -49,7 +49,7 @@ static func capture(m) -> Dictionary:
 	for k in FIELDS:
 		f[String(k)] = _copy(m.get(String(k)))
 	var p = m.player
-	return {"v": VERSION, "saved": int(Time.get_unix_time_from_system()), "mode": m.mode, "hyper": m.hyper, "dex": SV.run_dex,
+	return {"v": VERSION, "saved": int(Time.get_unix_time_from_system()), "mode": m.mode, "hyper": m.hyper, "region": m.region, "dex": SV.run_dex,
 		"mods": m.mods.duplicate(), "f": f, "mega": m._mega_on(), "kec": m.kec.save_state(),
 		"pup": _copy(SV.d["pup"].get(str(SV.run_dex), {})) if SV.pin_dex < 0 else _copy(SV.pin_pup),   # the upgrades this run is using
 		"set": {"adaptive": bool(SV.run_setting("adaptive", true)), "mono_bonus": bool(SV.run_setting("mono_bonus", false))},

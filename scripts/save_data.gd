@@ -15,6 +15,7 @@ static var starter_by: Dictionary = {}
 static var run_dex := 25
 static var run_mode := "normal"    # normal | daily | rush | party | type | team
 static var run_hyper := false      # Modo Hyper elegido para la partida normal que se va a jugar (no se guarda)
+static var run_region := 0         # Normal run: region map (1 Kanto ... 9 Paldea), 0 = every region
 static var run_mods: Array = []
 # While a saved run is resumed, the Pokémon's permanent upgrades and the balance settings are the ones it had when it was saved:
 # you cannot leave a run, buy upgrades and come back with them. (Set by the menu when it resumes, cleared on the next menu.)
@@ -119,7 +120,7 @@ const GOALS := [
 
 static func default_data() -> Dictionary:
 	return {
-		"v": 1, "created": int(Time.get_unix_time_from_system()), "title": "", "nick": "", "favs": [0, 0, 0], "coins": 600, "tickets": 10, "tickets10": 3, "pity": {}, "legends": {}, "arenas": {}, "lshiny": {}, "owned": {}, "selected": 25, "shiny_on": false,
+		"v": 1, "created": int(Time.get_unix_time_from_system()), "title": "", "nick": "", "favs": [0, 0, 0], "coins": 600, "tickets": 10, "tickets10": 3, "lshards": 0, "regions_migrated": true, "pity": {}, "legends": {}, "arenas": {}, "lshiny": {}, "owned": {}, "selected": 25, "shiny_on": false,
 		"fusions": [], "upgrades": {}, "pup": {}, "claimed": {}, "pban": {}, "pbind": {}, "ptm": {}, "pz": {},
 		"stats": {"runs": 0, "kills": 0, "best_time": 0, "best_level": 1, "bosses": 0, "chests": 0, "pulls": 0, "shinies": 0, "total_time": 0, "coins_total": 0, "defeated_runs": 0, "rifts": 0},
 		"settings": {"master": 80, "music": 70, "sfx": 80, "dmg_numbers": true, "vibration": true, "shake": true, "stick": 1, "stick_fixed": false, "manual_aim": false, "lang": "en", "view": 100, "fov": 165, "pad": 0, "padmap": {}, "mute": false, "quality": 0, "fps": false, "stats_box": true, "stats_mode": 0, "mirror": false, "hud_scale": 100, "colorblind": false, "adaptive": true, "mono_bonus": false, "fx_op": 1, "act_side": 0, "text_sz": 0, "show_map": true},
@@ -361,8 +362,10 @@ static func add_owned(dex: int, shiny: bool = false) -> void:
 		d["owned"][key]["n"] = int(d["owned"][key]["n"]) + 1
 		if shiny:
 			d["owned"][key]["shiny"] = true
+		load("res://scripts/ivs.gd").on_duplicate(dex)   # a duplicate can raise its IVs
 	else:
 		d["owned"][key] = {"n": 1, "shiny": shiny}
+		load("res://scripts/ivs.gd").info(dex)   # a new Pokémon rolls its IVs and nature
 	if shiny:
 		d["stats"]["shinies"] = int(d["stats"]["shinies"]) + 1
 
@@ -622,6 +625,71 @@ static func _pick_weighted(list: Array, mul: float) -> Dictionary:
 	return list[list.size() - 1]
 
 
+# ---- Region maps: Kanto is open; each next region unlocks by surviving REGION_UNLOCK_S (30 min: Arceus) on the previous one ----
+const REGION_UNLOCK_S := 1800
+const REGION_STARTER := [4, 155, 258, 390, 498, 653, 725, 813, 909]   # shown on each region's card
+
+
+static func region_best(k: int) -> int:
+	return int((d.get("region_best", {}) as Dictionary).get(str(k), 0))
+
+
+static func region_unlocked(k: int) -> bool:
+	_migrate_regions()
+	return k <= 1 or region_best(k - 1) >= REGION_UNLOCK_S or (d.get("regions_open", []) as Array).has(k)
+
+
+# Saves from before region maps keep their progress (once): beating Eternatus opens every region, and a run
+# that reached Arceus (30 min) opens Johto, as if Kanto had been cleared. Kept apart from the real best times.
+static func _migrate_regions() -> void:
+	if bool(d.get("regions_migrated", false)):
+		return
+	d["regions_migrated"] = true
+	var st: Dictionary = d.get("stats", {})
+	var open: Array = d.get("regions_open", [])
+	if int(st.get("eternatusKills", 0)) > 0:
+		for k in range(2, REGIONS.size() + 1):
+			if not open.has(k):
+				open.append(k)
+	elif int(st.get("best_time", 0)) >= REGION_UNLOCK_S or int(st.get("hyper_best", 0)) >= REGION_UNLOCK_S / 2:
+		if not open.has(2):
+			open.append(2)
+	d["regions_open"] = open
+
+
+# Records a Normal run on region map `k`; returns the region it just unlocked (0 if none).
+static func region_record(k: int, secs: int) -> int:
+	if k < 1 or k > REGIONS.size():
+		return 0
+	var was: bool = region_unlocked(k + 1)
+	var rb: Dictionary = d.get("region_best", {})
+	rb[str(k)] = maxi(int(rb.get(str(k), 0)), secs)
+	d["region_best"] = rb
+	return k + 1 if k < REGIONS.size() and not was and region_unlocked(k + 1) else 0
+
+
+# ---- Legend Shards: 1 per legendary duplicate and per Eternatus defeat; SHARD_COST picks any legendary you don't own ----
+const SHARD_COST := 5
+
+
+static func legend_pickable() -> Array:
+	var out: Array = []
+	for p in dex_list:
+		if bool(p.get("leg", false)) and smeta.has(str(int(p["dex"]))) and not owns(int(p["dex"])):
+			out.append(p)
+	return out
+
+
+# Spends SHARD_COST shards on legendary `dex`; false if it can't (not enough shards, owned, or not a legendary).
+static func pick_legend(dex: int) -> bool:
+	if int(d.get("lshards", 0)) < SHARD_COST or owns(dex) or not dex_by.has(dex) or not bool(dex_by[dex].get("leg", false)):
+		return false
+	d["lshards"] = int(d["lshards"]) - SHARD_COST
+	add_owned(dex, false)
+	save()
+	return true
+
+
 static func can_pull(n: int, use: String) -> bool:
 	if n == 10 and use == "t10":
 		return int(d.get("tickets10", 0)) >= 1
@@ -716,6 +784,10 @@ static func pull(region: int, n: int = 1, use: String = "t1") -> Array:
 				shiny_owned = owns(dex) and bool(d["owned"][str(dex)]["shiny"])
 		var was_new: bool = not owns(dex)
 		var refund := 0
+		var shard := 0
+		if rarity == 5 and not was_new and not (shiny and not shiny_owned):
+			shard = 1   # a legendary you already had: a Legend Shard on top of the coin refund
+			d["lshards"] = int(d.get("lshards", 0)) + 1
 		if shiny:
 			was_new = not shiny_owned
 			if not was_new:
@@ -725,7 +797,7 @@ static func pull(region: int, n: int = 1, use: String = "t1") -> Array:
 		if refund > 0:
 			d["coins"] = int(d["coins"]) + refund
 		add_owned(dex, shiny and not shiny_owned)
-		out.append({"dex": dex, "new": was_new, "shiny": shiny, "refund": refund, "rarity": rarity, "name": String(sp["name"])})
+		out.append({"dex": dex, "new": was_new, "shiny": shiny, "refund": refund, "rarity": rarity, "name": String(sp["name"]), "shard": shard})
 	d["stats"]["pulls"] = int(d["stats"]["pulls"]) + n
 	# Premio extra: cristal Z de un tipo que aun no tengas (solo en tiradas de 10)
 	var ZM = load("res://scripts/zmove.gd")
@@ -791,6 +863,7 @@ static func finish_run(r: Dictionary) -> Dictionary:
 	d["tickets"] = int(d["tickets"]) + tickets
 	var tickets10: int = int(r.get("tickets10", 0))
 	d["tickets10"] = int(d.get("tickets10", 0)) + tickets10
+	d["lshards"] = int(d.get("lshards", 0)) + int(r.get("lshards", 0))
 	d["gcoins"] = int(d.get("gcoins", 0)) + int(r.get("gcoins", 0))
 	d["gold_coins"] = int(d.get("gold_coins", 0)) + int(r.get("gold_gcoins", 0))
 	if not hyper:

@@ -54,6 +54,7 @@ const FFX = preload("res://scripts/fusion_fx.gd")
 const EVFX = preload("res://scripts/evo_fx.gd")
 const EVC = preload("res://scripts/evo_cine.gd")
 const DLY = preload("res://scripts/daily.gd")
+const IVS = preload("res://scripts/ivs.gd")
 const EVAB = preload("res://scripts/evo_abil.gd")
 const TXS = preload("res://scripts/textscale.gd")
 const TW = preload("res://scripts/tileworld.gd")
@@ -471,6 +472,7 @@ const ETER_PAY_FIRST := {"coins": 1500, "t10": 2, "t": 10}
 const ETER_PAY_AGAIN := {"coins": 1000, "t10": 1, "t": 5}
 var eter_at := 3600.0     # segundo de partida en que toca el siguiente Eternatus
 var eter_kills := 0
+var lshards_run := 0     # Legend Shards earned this run (paid out with the run's other rewards)
 var bc_t := 0.0           # breadcrumb timer (see _process)
 var resumed := false      # this run was put back from a mid-run save (run_save.gd)
 var eter_prompt := false  # pantalla de eleccion pendiente (espera a que no haya otras cartas abiertas)
@@ -654,6 +656,12 @@ func _ready() -> void:
 		biome_off = randi() % ground.count()
 		biome_idx = biome_off
 		ground.set_biome(biome_off, true)
+	elif mode == "normal" and int(SV.run_region) > 0:
+		# region map: the run starts in the region's first biome (and its Pokémon, see _region_filter)
+		region = int(SV.run_region)
+		biome_off = maxi(0, _region_biome(0))
+		biome_idx = biome_off
+		ground.set_biome(biome_off, true)
 	if mode != "daily" and mode != "party" and mode != "rush" and mode != "chal" and not SV.run_mods.is_empty():
 		mods = SV.run_mods.duplicate()
 	if mode == "chal":
@@ -682,6 +690,9 @@ func _ready() -> void:
 	z_type = SV.zm_type_for(_pdex())
 	has_bag = SV.up_level("bag") > 0
 	has_bag3 = has_bag and SV.up_level("bag3") > 0
+	# The old permanent item block list had no way to undo it: clear it once so blocked items come back.
+	if SV.d.has("item_block"):
+		SV.d.erase("item_block")
 	# Veto como en el original: los movimientos vetados se eligen en Mejoras (por Pokemon).
 	bans = 0
 	var _bl: Array = SV.ban_list(SV.run_dex)
@@ -707,7 +718,7 @@ func _ready() -> void:
 	player.add_child(bbadges)
 	if SV.shiny_wanted(sel_dex):
 		player.set_shiny()
-	player.max_hp = float(st["hp"]) + float(perks["hp"])
+	player.max_hp = roundf((float(st["hp"]) + float(perks["hp"])) * IVS.mul(sel_dex, "hp"))   # IVs and nature (ivs.gd)
 	if _has_mod("frail"):
 		player.max_hp = roundf(player.max_hp * 0.5)
 	if mode == "chal" and _ch_rs("one_hp"):
@@ -718,8 +729,8 @@ func _ready() -> void:
 	player.spd = float(st["spd"])
 	player.atk = float(st["atk"])
 	player.types = st["types"]
-	base_spd = player.spd * float(perks["spd"])
-	base_atk = player.atk * float(perks["atk"])
+	base_spd = player.spd * float(perks["spd"]) * IVS.mul(sel_dex, "spd")
+	base_atk = player.atk * float(perks["atk"]) * IVS.mul(sel_dex, "atk")
 	if mode == "team":
 		_setup_team()
 	for sid in STAT_IDS:
@@ -1210,6 +1221,12 @@ func _finish_run() -> void:
 		extra += " · " + L.t("Hyper mode")
 	if eter_kills > 0:
 		extra += " · " + L.t("Eternatus defeated %d times") % eter_kills
+	if lshards_run > 0:
+		extra += " · " + L.t("+%d Legend Shards") % lshards_run
+	if mode == "normal" and region > 0:   # region maps: best time per region; 30 minutes unlocks the next region
+		var newr: int = SV.region_record(region, int(run_time))
+		if newr > 0:
+			extra += " · " + L.t("New region unlocked: %s!") % L.t(SV.REGIONS[newr - 1])
 	var st2: Dictionary = SV.d["stats"]
 	if hyper:
 		st2["hyperRuns"] = int(st2.get("hyperRuns", 0)) + 1
@@ -1246,7 +1263,7 @@ func _finish_run() -> void:
 		for md_id in mods:
 			st2["mb_" + String(md_id)] = maxi(int(st2.get("mb_" + String(md_id), 0)), rmin)
 	SV.finish_run({"judge": js, "time": run_time / time_k, "hyper": hyper, "doom": eter_kills, "kills": kills, "level": player.level, "bosses": run_bosses,
-		"chests": run_chests, "coins": coins, "tickets": tickets, "tickets10": tickets10, "gcoins": gcoins_run, "gold_gcoins": gold_gcoins_run, "dex": SV.run_dex,
+		"chests": run_chests, "coins": coins, "tickets": tickets, "tickets10": tickets10, "lshards": lshards_run, "gcoins": gcoins_run, "gold_gcoins": gold_gcoins_run, "dex": SV.run_dex,
 		"dead": player.dead and not timeup, "moves": mv_list, "items": item_list, "mul": mul, "extra": extra,
 		"other_dmg": int(run_dmg.get("_other", 0.0)), "other_kills": int(run_kills_by.get("_other", 0)),
 		"ally_dmg": int(ally_dmg), "ally_kills": ally_kills, "dmg_total": _run_dmg_total(), "big": int(run_big), "meters": int(run_meters)})
@@ -2755,8 +2772,8 @@ func _swap_team(i: int, auto: bool = false) -> void:
 		mv["t"] = minf(_f(mv, "t"), _f(mv, "cd") * 0.35)
 	player.spd = float(nx["spd"])
 	player.atk = float(nx["atk"])
-	base_spd = player.spd * float(perks["spd"])
-	base_atk = player.atk * float(perks["atk"])
+	base_spd = player.spd * float(perks["spd"]) * IVS.mul(dx, "spd")
+	base_atk = player.atk * float(perks["atk"]) * IVS.mul(dx, "atk")
 	player.invuln = maxf(player.invuln, 1.5 if auto else 1.0)
 	player.flash = 0.5
 	swap_cd = 3.0
@@ -4633,6 +4650,35 @@ func _def_for(p: Dictionary, tier: Dictionary, ti: int) -> Dictionary:
 static var _cand_cache: Dictionary = {}
 
 
+# ---------------------------------------------------------------
+# Region maps (Normal run): the chosen region sets the two biomes of the run and where its Pokémon come from.
+# 1 Kanto ... 9 Paldea = generation; 0 = every region (the classic run).
+# ---------------------------------------------------------------
+const REGION_MAP := {1: ["normal", "cave"], 2: ["bug", "ice"], 3: ["water", "fire"], 4: ["ice", "rock"], 5: ["dark", "ground"],
+	6: ["fairy", "steel"], 7: ["grass", "water"], 8: ["dragon", "fighting"], 9: ["ground", "flying"]}
+var region := 0
+
+
+# Biome index (tileworld.gd) of the region's first (0) or second (1) biome; -1 without a region.
+func _region_biome(i: int) -> int:
+	if region <= 0 or not REGION_MAP.has(region):
+		return -1
+	var key: String = String(REGION_MAP[region][clampi(i, 0, 1)])
+	var base := {"forest": 0, "cave": 1, "volcano": 2}
+	if base.has(key):
+		return int(base[key])
+	var k: int = (ground.theme_keys as Array).find(key)
+	return 3 + k if k >= 0 else 0
+
+
+# Keeps only the region's Pokémon when there are at least `min_n` of them (thin pools fall back to every region).
+func _region_filter(arr: Array, min_n: int) -> Array:
+	if region <= 0:
+		return arr
+	var only: Array = arr.filter(func(p): return int(p.get("gen", 0)) == region)
+	return only if only.size() >= min_n else arr
+
+
 func _candidates(ti: int) -> Array:
 	if _cand_cache.has(ti):
 		return _cand_cache[ti]
@@ -4643,6 +4689,7 @@ func _candidates(ti: int) -> Array:
 	for p in _dex_list:
 		if int(p["rarity"]) < 5 and float(p["bst"]) >= lo and float(p["bst"]) <= hi and _smeta.has(str(int(p["dex"]))):
 			out.append(p)
+	out = _region_filter(out, 4)   # late tiers of small regions only have 4-6 strong Pokémon: keep them unless fewer
 	if mode == "type":
 		var only: Array = []
 		for p in out:
@@ -4961,6 +5008,7 @@ func _roll_run() -> void:
 				continue
 			if float(p["bst"]) >= float(slot["bst"][0]) and float(p["bst"]) <= float(slot["bst"][1]):
 				pool.append(p)
+		pool = _region_filter(pool, 1)   # a region map prefers its own bosses
 		if pool.is_empty():
 			for p in _dex_list:
 				var dx2: int = int(p["dex"])
@@ -5475,6 +5523,8 @@ func _eternatus_win() -> void:
 	coins += int(pay["coins"])
 	tickets += int(pay["t"])
 	tickets10 += int(pay["t10"])
+	lshards_run += 1   # a Legend Shard per Eternatus defeat (spent in the Gacha's Legend Pick)
+	add_text(player.position + Vector2(0.0, -player.body_h - 30.0), L.t("+1 Legend Shard"), Color("#ffcb3d"), 22)
 	eter_prompt = true   # la pantalla de eleccion sale en cuanto no haya otras cartas abiertas
 
 
@@ -5586,7 +5636,12 @@ func _spawn_wildleg(force_dex: int = -1) -> Enemy:
 		if is_instance_valid(q) and not q.dead and _is_wildleg(q):
 			alive[int(q.dex)] = true
 	var pool: Array = []
-	for dx in WILD_LEG:
+	var wl_list: Array = WILD_LEG
+	if region > 0:   # a region map: that region's own legendaries roam
+		var rl: Array = _region_filter(_legend_pool(), 2).map(func(p): return int(p["dex"]))
+		if not rl.is_empty():
+			wl_list = rl
+	for dx in wl_list:
 		if _dex_by.has(dx) and _smeta.has(str(dx)) and not alive.has(dx):
 			pool.append(dx)
 	if force_dex > 0:
@@ -7188,6 +7243,8 @@ func _update_biome() -> void:
 		b = tw_floor - 1
 	if mode == "normal":
 		b = biome_off + (1 if dir_map else 0)   # S63: una sola transicion (04:00, tras el jefe)
+		if region > 0:
+			b = _region_biome(1 if dir_map else 0)
 	if b == biome_idx:
 		return
 	biome_idx = b
@@ -8189,14 +8246,25 @@ func _drop(e) -> void:
 		_spawn_orb(e.position + off, "item", 0.0)
 
 
+var orb_prev_pp := Vector2.INF   # player position last frame (pickups check the whole path walked, not just where you stand)
+
+
 func _update_orbs(delta: float) -> void:
 	var mag_r: float = _magnet()
 	var pr: Vector2 = player.position
+	var pp0: Vector2 = pr if orb_prev_pp == Vector2.INF or orb_prev_pp.distance_to(pr) > 400.0 else orb_prev_pp
+	orb_prev_pp = pr
+	# pickup reach grows with the body (big Pokémon, Megas, Dynamax), never below the old 15 px
+	var reach: float = maxf(18.0, player.radius * 1.2 + 6.0)
+	# pulled pickups always fly faster than you run or dash, so they can't trail behind
+	var run_v: float = (pr - pp0).length() / maxf(delta, 0.001)
 	for i in range(orbs.size() - 1, -1, -1):
 		var o = orbs[i]
 		var to: Vector2 = pr - o.position
 		var d: float = to.length()
-		if d < 15.0:
+		# distance to the segment walked this frame: a fast step or dash can't jump over a pickup at low frame rates
+		var hit_d: float = o.position.distance_to(Geometry2D.get_closest_point_to_segment(o.position, pp0, pr))
+		if hit_d < reach:
 			var kind: String = o.kind
 			var val: float = o.value
 			o.queue_free()
@@ -8204,7 +8272,7 @@ func _update_orbs(delta: float) -> void:
 			_collect(kind, val)
 			continue
 		if o.pulled or d < mag_r:
-			var pull: float = 240.0 + 1400.0 / maxf(d, 1.0)
+			var pull: float = maxf(240.0 + 1400.0 / maxf(d, 1.0), run_v * 1.5)
 			var tv: Vector2 = to / maxf(d, 0.001) * pull
 			o.vel = o.vel.lerp(tv, 1.0 - exp(-7.0 * delta))
 		else:
@@ -9080,7 +9148,7 @@ func _offer_item() -> void:
 	for it in TD.ITEMS:
 		if String(it["id"]) != item and not (two and String(it["id"]) == item2) and not (three and String(it["id"]) == item3) and _item_ok_for(String(it["id"])):
 			pool.append(it)
-	var blocked: Array = SV.d.get("item_block", [])
+	var blocked: Array = item_block_run   # "Not this run": only for the current run (it used to be permanent, with no undo)
 	var pool2: Array = []
 	for it2 in pool:
 		if not blocked.has(String(it2["id"])) or String(it2["id"]) == "rarecandy":
@@ -9176,12 +9244,12 @@ func _on_lock_toggled() -> void:
 	cards.queue_redraw()
 
 
+var item_block_run: Array = []   # items the player chose "Not this run" for (reset every run, kept by Save and quit)
+
+
 func _on_block_pressed() -> void:
-	var bl: Array = SV.d.get("item_block", [])
-	if not bl.has(cards.block_name):
-		bl.append(cards.block_name)
-	SV.d["item_block"] = bl
-	SV.save()
+	if not item_block_run.has(cards.block_name):
+		item_block_run.append(cards.block_name)
 	# El objeto ofrecido se descarta: nos quedamos con lo que ya llevamos.
 	for i in range(cards.items.size()):
 		if String(cards.items[i]["cat"]) == "itemkeep":
@@ -9285,7 +9353,7 @@ func _legend_pool() -> Array:
 
 
 func _pick_legend(capable_only: bool = false) -> Dictionary:
-	var pool: Array = _legend_pool()
+	var pool: Array = _region_filter(_legend_pool(), 3)   # rifts on a region map open onto its legendaries
 	if capable_only:   # Grieta Mega: solo legendarios con forma Mega / Primigenia / Corona
 		var cap: Array = pool.filter(func(q): return MG.is_capable(int(q["dex"])))
 		if not cap.is_empty():
@@ -11473,6 +11541,135 @@ class Cards extends Node2D:
 		sel = posmod(sel + step, items.size())
 		queue_redraw()
 
+	# Looping sketch of how a move attacks, drawn in a small arena on its card: the Pokémon on the left,
+	# three foes on the right, and the move's pattern (by kind) in its type colour. Purely visual.
+	func _move_preview(a: Rect2, kind: String, col: Color, tt: float) -> void:
+		var T := 1.5
+		var k: float = fposmod(tt, T) / T   # 0..1, loops
+		var cy: float = a.get_center().y
+		var p := Vector2(a.position.x + 44.0, cy + 4.0)   # clear of the move icon in the top-left corner
+		var foes: Array = [Vector2(a.end.x - 26.0, cy - 18.0), Vector2(a.end.x - 44.0, cy + 2.0), Vector2(a.end.x - 22.0, cy + 20.0)]
+		var c := Color(col.r, col.g, col.b, 1.0)
+		var soft := Color(col.r, col.g, col.b, 0.35)
+		var hit := {}   # foe index -> flash 0..1
+		match kind:
+			"projectile":
+				for i in range(3):
+					var s: float = fposmod(k * 1.0 - float(i) * 0.22, 1.0)
+					var tgt: Vector2 = foes[i]
+					var pt: Vector2 = p.lerp(tgt, s)
+					draw_line(p.lerp(tgt, maxf(0.0, s - 0.12)), pt, soft, 3.0)
+					draw_circle(pt, 3.5, c)
+					if s > 0.9:
+						hit[i] = 1.0
+			"beam":
+				var on: float = clampf(k * 3.0, 0.0, 1.0) * clampf((1.0 - k) * 3.0, 0.0, 1.0)
+				var end := Vector2(a.end.x - 4.0, cy)
+				draw_line(p, end, Color(col.r, col.g, col.b, 0.35 * on), 12.0)
+				draw_line(p, end, Color(1, 1, 1, 0.85 * on), 3.0)
+				if on > 0.5:
+					hit[1] = 1.0
+			"cone":
+				var w: float = k * 0.9
+				var reach: float = (a.size.x - 30.0) * minf(1.0, k * 1.4)
+				draw_colored_polygon(PackedVector2Array([p, p + Vector2.from_angle(-w) * reach, p + Vector2.from_angle(w) * reach]), Color(col.r, col.g, col.b, 0.45 * (1.0 - k)))
+				if k > 0.55:
+					hit[0] = 1.0
+					hit[1] = 1.0
+			"melee":
+				var sw: float = -1.2 + k * 2.4
+				var rr: float = 30.0
+				draw_arc(p, rr, sw - 0.8, sw, 10, Color(col.r, col.g, col.b, 1.0 - k), 4.0)
+				draw_arc(p, rr - 6.0, sw - 0.6, sw, 10, Color(1, 1, 1, 0.7 * (1.0 - k)), 2.0)
+			"aura":
+				var ar: float = 26.0 + 4.0 * sin(tt * 6.0)
+				draw_circle(p, ar, Color(col.r, col.g, col.b, 0.18))
+				draw_arc(p, ar, 0.0, TAU, 24, c, 2.0)
+			"nova":
+				var nr: float = 6.0 + k * (a.size.y * 0.9)
+				draw_arc(p, nr, 0.0, TAU, 28, Color(col.r, col.g, col.b, 1.0 - k), 3.0)
+				draw_arc(p, nr * 0.7, 0.0, TAU, 28, Color(1, 1, 1, 0.5 * (1.0 - k)), 2.0)
+			"dash":
+				var dx: float = sin(k * PI) * (a.size.x - 70.0)
+				for g in range(3):
+					draw_circle(p + Vector2(dx - float(g) * 10.0, 0.0), 6.0, Color(col.r, col.g, col.b, 0.35 - float(g) * 0.1))
+				p = p + Vector2(dx, 0.0)
+				if k > 0.35 and k < 0.65:
+					hit[1] = 1.0
+			"buff":
+				draw_circle(p, 12.0 + 3.0 * sin(tt * 8.0), Color(col.r, col.g, col.b, 0.3))
+				for i in range(3):
+					var ay: float = fposmod(k + float(i) / 3.0, 1.0)
+					var ax: float = p.x - 10.0 + float(i) * 10.0
+					var yy: float = p.y + 10.0 - ay * 30.0
+					draw_polyline(PackedVector2Array([Vector2(ax - 4.0, yy + 4.0), Vector2(ax, yy), Vector2(ax + 4.0, yy + 4.0)]), Color(col.r, col.g, col.b, 1.0 - ay), 2.0)
+			"boomerang":
+				var bx: float = sin(k * PI) * (a.size.x - 60.0)
+				var by: float = sin(k * TAU) * 14.0
+				var bp := p + Vector2(bx, by)
+				draw_arc(bp, 6.0, tt * 12.0, tt * 12.0 + 4.0, 6, c, 3.0)
+				if bx > a.size.x - 90.0:
+					hit[1] = 1.0
+			"meteor":
+				for i in range(3):
+					var s2: float = fposmod(k - float(i) * 0.25, 1.0)
+					var tgt2: Vector2 = foes[i]
+					if s2 < 0.6:
+						var mp: Vector2 = tgt2 + Vector2(-18.0, -40.0).lerp(Vector2.ZERO, s2 / 0.6)
+						draw_circle(mp, 4.5, c)
+						draw_line(mp, mp + Vector2(-8.0, -14.0), soft, 3.0)
+					else:
+						draw_arc(tgt2, 4.0 + (s2 - 0.6) * 40.0, 0.0, TAU, 16, Color(col.r, col.g, col.b, 1.0 - (s2 - 0.6) / 0.4), 2.0)
+						hit[i] = 1.0
+			"mine":
+				for i in range(3):
+					var mp2 := Vector2(p.x + 34.0 + float(i) * 22.0, cy + (float(i) - 1.0) * 12.0)
+					var blink: float = 0.5 + 0.5 * sin(tt * 10.0 + float(i))
+					if k > 0.75 and i == 2:
+						draw_arc(mp2, (k - 0.75) * 80.0, 0.0, TAU, 16, Color(col.r, col.g, col.b, 1.0 - (k - 0.75) * 4.0), 3.0)
+					else:
+						draw_circle(mp2, 4.0, Color(col.r, col.g, col.b, 0.5 + 0.5 * blink))
+			"orbit":
+				for i in range(3):
+					var oa: float = tt * 4.0 + float(i) * TAU / 3.0
+					var op: Vector2 = p + Vector2(cos(oa) * 22.0, sin(oa) * 14.0)
+					draw_circle(op, 4.0, c)
+					draw_circle(op, 7.0, soft)
+			"trail":
+				var tx2: float = sin(k * TAU) * 0.5 + 0.5
+				var head: Vector2 = Vector2(a.position.x + 20.0 + tx2 * (a.size.x - 80.0), cy + cos(k * TAU) * 10.0)
+				for g2 in range(8):
+					var kk: float = fposmod(k - float(g2) * 0.03, 1.0)
+					var tp := Vector2(a.position.x + 20.0 + (sin(kk * TAU) * 0.5 + 0.5) * (a.size.x - 80.0), cy + cos(kk * TAU) * 10.0)
+					draw_circle(tp, 5.0 - float(g2) * 0.5, Color(col.r, col.g, col.b, 0.6 - float(g2) * 0.07))
+				p = head
+			"turret":
+				var tp2 := Vector2(a.get_center().x - 10.0, cy)
+				draw_rect(Rect2(tp2 - Vector2(6.0, 6.0), Vector2(12.0, 12.0)), c)
+				var s3: float = fposmod(k * 2.0, 1.0)
+				var tg: Vector2 = foes[int(k * 2.0) % 3]
+				draw_circle(tp2.lerp(tg, s3), 3.0, Color(1, 1, 1, 0.9))
+				if s3 > 0.85:
+					hit[int(k * 2.0) % 3] = 1.0
+			"chain":
+				if k < 0.6:
+					var pts: Array = [p, foes[1], foes[0], foes[2]]
+					var n: int = 1 + int(k / 0.2)
+					for j in range(mini(n, 3)):
+						var a0: Vector2 = pts[j]
+						var a1: Vector2 = pts[j + 1]
+						var mid2: Vector2 = a0.lerp(a1, 0.5) + Vector2(0.0, 6.0 if j % 2 == 0 else -6.0)
+						draw_polyline(PackedVector2Array([a0, mid2, a1]), Color(1, 1, 0.85, 0.9), 2.0)
+						draw_polyline(PackedVector2Array([a0, mid2, a1]), soft, 5.0)
+						hit[[1, 0, 2][j]] = 1.0
+		# foes (small dark bodies that flash white when hit) and the Pokémon
+		for i in range(3):
+			var fp: Vector2 = foes[i]
+			draw_circle(fp, 6.5, Color(1, 1, 1, 0.9) if hit.has(i) else Color(0.55, 0.22, 0.28))
+			draw_circle(fp + Vector2(-2.0, -2.0), 1.5, Color(0, 0, 0, 0.6))
+		draw_circle(p, 7.5, Color(0.95, 0.93, 0.85))
+		draw_circle(p, 7.5, c, false, 2.0)
+
 	func _pick(i: int) -> void:
 		if i >= 0 and i < items.size():
 			sel = i
@@ -11620,10 +11817,19 @@ class Cards extends Node2D:
 					var pc := Vector2(r.position.x + r.size.x - 44.0 - float(pk) * 11.0, r.position.y + 16.0)
 					draw_colored_polygon(PackedVector2Array([pc + Vector2(0, -5), pc + Vector2(4.5, 0), pc + Vector2(0, 5), pc + Vector2(-4.5, 0)]), Color("#2b1a00") if legend else Color.WHITE)
 			var ic_c: Vector2 = r.position + Vector2(r.size.x * 0.5, 72.0)
-			var ic_bg := Rect2(ic_c - Vector2(34.0, 34.0), Vector2(68.0, 68.0))
-			draw_rect(ic_bg, Color(0.1, 0.06, 0.0, 0.82) if legend else Color(tag_col.r, tag_col.g, tag_col.b, 0.22))
-			draw_rect(ic_bg, Color(tag_col.r, tag_col.g, tag_col.b, 0.7), false, 2.0)
-			IC.draw_in(self, String(it.get("icon", "star")), ic_c, 52.0)
+			var mid: String = String(it.get("id", ""))
+			if String(it["cat"]) == "new" and MD.MOVES.has(mid):
+				# a new move: a little looping preview of how it attacks, with its icon in the corner
+				var pa := Rect2(r.position.x + 10.0, ic_c.y - 34.0, r.size.x - 20.0, 68.0)
+				draw_rect(pa, Color(0.05, 0.04, 0.10, 0.92))
+				draw_rect(pa, Color(tag_col.r, tag_col.g, tag_col.b, 0.7), false, 2.0)
+				_move_preview(pa.grow(-3.0), String(MD.MOVES[mid]["kind"]), tag_col, age)
+				IC.draw_in(self, String(it.get("icon", "star")), pa.position + Vector2(15.0, 15.0), 22.0)
+			else:
+				var ic_bg := Rect2(ic_c - Vector2(34.0, 34.0), Vector2(68.0, 68.0))
+				draw_rect(ic_bg, Color(0.1, 0.06, 0.0, 0.82) if legend else Color(tag_col.r, tag_col.g, tag_col.b, 0.22))
+				draw_rect(ic_bg, Color(tag_col.r, tag_col.g, tag_col.b, 0.7), false, 2.0)
+				IC.draw_in(self, String(it.get("icon", "star")), ic_c, 52.0)
 			draw_multiline_string(font, r.position + Vector2(12.0, 134.0), L.t(String(it["title"])), HORIZONTAL_ALIGNMENT_CENTER, r.size.x - 24.0, 24, 2, Color("#4a2f12") if paper else (Color("#2b1a00") if legend else Color.WHITE))
 			var dl: Array = it.get("delta", [])
 			draw_multiline_string(font, r.position + Vector2(16.0, 196.0), L.t(String(it["desc"])), HORIZONTAL_ALIGNMENT_CENTER, r.size.x - 32.0, 18, 4 if not dl.is_empty() else 5, Color("#5a3d1c") if paper else (Color("#3a2600") if legend else Color("#f2e9d8")))
@@ -11671,7 +11877,7 @@ class Cards extends Node2D:
 			if block_name != "":   # el Caramelo Raro no se puede descartar para siempre
 				draw_rect(ibr[0], Color("#5a1f2a"))
 				draw_rect(ibr[0], Color("#ff6b7a"), false, 2.0)
-				_draw_key_label(ibr[0], L.t("Never offer again  [R]"), "reroll")
+				_draw_key_label(ibr[0], L.t("Not this run  [R]"), "reroll")
 			draw_rect(ibr[1], Color("#1f5a34") if lock_on else Color("#1c1833"))
 			draw_rect(ibr[1], Color("#7dffa0") if lock_on else Color("#8fa8cc"), false, 2.0)
 			_draw_key_label(ibr[1], (L.t("Lock: ON  [B]") if lock_on else L.t("Lock: OFF  [B]")), "ban")

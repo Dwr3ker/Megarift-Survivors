@@ -335,6 +335,18 @@ func _shop_and_gacha() -> void:
 	menu._do_max_pull("t1")
 	await _frames(20)
 	await _shot("gacha_max_pull")
+	# Legend Pick: shards and the picker of legendaries you don't own (drop a few legendaries from the save first)
+	menu.gacha_result.visible = false
+	for p in SV.dex_list:
+		if bool(p.get("leg", false)) and int(p["dex"]) % 3 == 0:
+			SV.d["owned"].erase(str(int(p["dex"])))
+	SV.d["lshards"] = 6
+	menu._refresh_gacha()
+	await _frames(10)
+	await _shot("gacha_legend_shards")
+	menu._legend_picker()
+	await _frames(15)
+	await _shot("legend_pick")
 	menu.queue_free()
 	await _frames(3)
 	SV.d["owned"] = saved_owned

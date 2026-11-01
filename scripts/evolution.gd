@@ -13,6 +13,8 @@ extends RefCounted
 # something the in-run line does not.
 const Aud = preload("res://scripts/audio.gd")
 const L = preload("res://scripts/lang.gd")
+const SV = preload("res://scripts/save_data.gd")
+const IVS = preload("res://scripts/ivs.gd")
 
 # Total bonus for completing the whole line in a run.
 const SURGE_DMG := 0.12
@@ -145,14 +147,16 @@ static func apply(main, dex: int, restore: bool = false, say: bool = true) -> vo
 	var old: Dictionary = main._dex_by[from]
 	# the base stats become the new species' (stat cards and perks stay on top)
 	var perks: Dictionary = main.perks
-	var hp_new: float = float(st["hp"]) + float(perks["hp"])
-	var hp_old: float = float(old["hp"]) + float(perks["hp"])
+	# the evolved body keeps the IVs and nature of the Pokémon you started the run with (ivs.gd)
+	var ivd: int = int(SV.run_dex)
+	var hp_new: float = (float(st["hp"]) + float(perks["hp"])) * IVS.mul(ivd, "hp")
+	var hp_old: float = (float(old["hp"]) + float(perks["hp"])) * IVS.mul(ivd, "hp")
 	var share: float = step_share(from)
 	var gain: float = hp_new - hp_old
 	p.max_hp = roundf((p.max_hp + gain) * (1.0 + SURGE_HP * share))
 	p.hp = p.max_hp   # a full heal
-	main.base_spd = float(st["spd"]) * float(perks["spd"])
-	main.base_atk = float(st["atk"]) * float(perks["atk"])
+	main.base_spd = float(st["spd"]) * float(perks["spd"]) * IVS.mul(ivd, "spd")
+	main.base_atk = float(st["atk"]) * float(perks["atk"]) * IVS.mul(ivd, "atk")
 	p.spd = float(st["spd"])
 	p.atk = float(st["atk"])
 	p.types = (st["types"] as Array).duplicate()
