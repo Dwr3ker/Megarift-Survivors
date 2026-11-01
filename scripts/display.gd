@@ -22,7 +22,9 @@ static func apply(tree: SceneTree) -> void:
 		SV.d["settings"]["view_v"] = 2
 		SV.d["settings"]["view"] = 100
 		SV.save()
-	tree.root.content_scale_factor = 1.0 if menu_mode else float(pct()) / 100.0
+	# Screen size used to scale the whole window here (world, HUD, pause screen, cards). It is now Settings > HUD size,
+	# which only scales the run HUD; the window always stays at 100%.
+	tree.root.content_scale_factor = 1.0
 	# El boton atras de Android lo gestiona el juego (no cierra la app).
 	tree.quit_on_go_back = false
 

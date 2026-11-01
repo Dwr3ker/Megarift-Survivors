@@ -8238,6 +8238,9 @@ func _hud_size(label: String, key: String) -> void:
 		pl.text = "%d%%" % int(v))
 
 
+# HUD size (it used to be "Screen size", which scaled the whole window: menus, pause screen and cards too).
+# Now it only scales the run HUD (health plate, radar, stats, items, counters, move bar); each element also has its own
+# size in Edit HUD layout.
 func _view_row() -> void:
 	var box := VBoxContainer.new()
 	_sadd(box)
@@ -8246,33 +8249,30 @@ func _view_row() -> void:
 	var sic := IC.rect("phone", 28)
 	sic.custom_minimum_size.x = 40
 	row.add_child(sic)
-	var l := _label("Screen size", 22)
+	var l := _label("HUD size", 22)
 	l.custom_minimum_size = Vector2(200, 0)
 	row.add_child(l)
+	var cur: int = clampi(int(SV.d["settings"].get("hud_scale", 100)), 60, 140)
 	var sl := HSlider.new()
-	sl.min_value = DSP.MIN_PCT
-	sl.max_value = DSP.MAX_PCT
+	sl.min_value = 60
+	sl.max_value = 140
 	sl.step = 5
-	sl.value = float(DSP.pct())
+	sl.value = float(cur)
 	sl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	sl.custom_minimum_size = Vector2(0, 40)
 	sl.focus_mode = Control.FOCUS_ALL
 	row.add_child(sl)
-	var pl := _label("%d%%" % DSP.pct(), 22, C_GOLD)
+	var pl := _label("%d%%" % cur, 22, C_GOLD)
 	pl.custom_minimum_size = Vector2(80, 0)
 	pl.autowrap_mode = TextServer.AUTOWRAP_OFF
 	row.add_child(pl)
 	var rs := _btn("Reset", func(): pass, Vector2(150, 40))
 	row.add_child(rs)
-	var info := _label("", 16, Color("#f2e9d8"))
-	box.add_child(info)
-	var upd := func():
-		pl.text = "%d%%" % DSP.pct()
-		info.text = L.t("Screen (px) → game view: ") + DSP.info(get_tree())
-	upd.call()
+	box.add_child(_label("Size of the HUD during a run: health, radar, stats, items, counters and moves. Menus and the pause screen are not affected.", 16, Color("#f2e9d8")))
 	sl.value_changed.connect(func(v: float):
-		DSP.set_pct(get_tree(), int(v))
-		upd.call())
+		SV.d["settings"]["hud_scale"] = int(v)
+		SV.save()
+		pl.text = "%d%%" % int(v))
 	rs.pressed.connect(func():
 		sl.value = 100.0)
 
@@ -8455,11 +8455,6 @@ func _set_graphics() -> void:
 		SV.d["settings"]["stats_mode"] = i
 		SV.save()
 		_refresh_settings()))
-	var hud_opts := [80, 100, 115, 130]
-	_srow("HUD size", "Master scale for every HUD element during a run. Each element has its own slider below.", _seg(["80%", "100%", "115%", "130%"], maxi(0, hud_opts.find(int(SV.d["settings"].get("hud_scale", 100)))), func(i: int):
-		SV.d["settings"]["hud_scale"] = hud_opts[i]
-		SV.save()
-		_refresh_settings(), false))
 	_srow("Colorblind mode", "Swaps red and green for blue and magenta and adds a pattern to the low-health bar.", _toggle_set("colorblind"))
 	_srow("Mono-type bonus (+20%)", "Experimental: single-type Pokémon deal +20% damage with moves of that type. Off by default while balance is reviewed.", _toggle_set("mono_bonus"))
 	_srow("Adaptive difficulty", "In normal runs, the game starts easy and gets harder as you upgrade: more enemy health and damage, more enemies, more frequent hordes and more experience needed per level.", _toggle_set("adaptive"))

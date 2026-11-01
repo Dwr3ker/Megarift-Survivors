@@ -505,14 +505,14 @@ func chunk_of(pos: Vector2) -> Vector2i:
 
 func set_center(c: Vector2i) -> void:
 	cc = c
-	for dx in range(-1, 2):
-		for dy in range(-1, 2):
+	for dx in range(-2, 3):   # 5x5 chunks: enough ground for View down to 70% on wide phone screens
+		for dy in range(-2, 3):
 			var key := Vector2i(c.x + dx, c.y + dy)
 			if not chunks.has(key):
 				chunks[key] = {"tex": null, "old": null, "tb": -1, "liq": []}
 				queue.append(key)
 	for key in chunks.keys():
-		if absi(key.x - c.x) > 2 or absi(key.y - c.y) > 2:
+		if absi(key.x - c.x) > 3 or absi(key.y - c.y) > 3:
 			chunks.erase(key)
 			queue.erase(key)
 	for key in grass.keys():

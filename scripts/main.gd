@@ -517,7 +517,7 @@ var daily_fmt := ""     # Daily Challenge format of the day (daily.gd): medals /
 var daily_stage := 0    # Gauntlet: stages already reached (a new rule every 5 minutes)
 var evo_cine = null     # games-style evolution scene (evo_cine.gd); the world is frozen while it plays
 var zoom_punch := 0.0   # brief camera push-in (Z-Move cinematic, Dynamax); decays by itself
-var cam_zoom := 1.65  # campo de vision: ajustable en la pausa (100-200 %), se guarda en Ajustes
+var cam_zoom := 1.65  # campo de vision: ajustable en la pausa (View, 70-250 %), se guarda en Ajustes
 var settings_open := false
 var run_saved := false
 var run_bosses := 0
@@ -798,6 +798,7 @@ func _ready() -> void:
 	mini.position = Vector2(8.0 + DSP.insets(get_tree()).x, 102.0 + DSP.insets(get_tree()).y)
 	ui.add_child(mini)
 	pause_ui = PAUSEUI.new()
+	pause_ui.can_save = mode == "normal"
 	add_child(pause_ui)
 	pause_ui.build()
 	pause_ui.resume.connect(func(): paused = false)
@@ -1282,7 +1283,7 @@ func _run_dmg_total() -> int:
 func _save_and_quit() -> void:
 	var why: String = RS.block_reason(self)
 	if why != "":
-		_say(why, 3.0)
+		pause_ui.confirm_quit(why)   # can't save now: explain, warn it won't be saved, and offer Quit run
 		return
 	if RS.save(self):
 		run_saved = true   # nothing is paid out now
@@ -1594,7 +1595,7 @@ func _process(delta: float) -> void:
 	hud.icon_tex = _hud_icon(_cur_dex())
 	hud.flash_k = 1.0 if shake_on else 0.2
 	UIS.colorblind = bool(SV.d["settings"].get("colorblind", false))
-	var hs: float = clampf(float(SV.d["settings"].get("hud_scale", 100)) / 100.0, 0.8, 1.3)   # master size
+	var hs: float = clampf(float(SV.d["settings"].get("hud_scale", 100)) / 100.0, 0.6, 1.4)   # master size (Settings > HUD size)
 	# Per-element size and position come from the HUD layout (Settings > Graphics > Edit HUD layout, hud_layout.gd).
 	var s_plate: float = hs * HL.scale_of("plate")
 	var s_radar: float = hs * HL.scale_of("radar")
@@ -5211,7 +5212,7 @@ func _make_enemy(def: Dictionary, pos: Vector2, sc: Dictionary, boss: bool = fal
 
 
 func _apply_fov() -> void:
-	var pct: int = clampi(int(SV.d["settings"].get("fov", 165)), 100, 200)
+	var pct: int = clampi(int(SV.d["settings"].get("fov", 165)), 70, 250)
 	cam_zoom = float(pct) / 100.0
 	if cam != null:
 		cam.zoom = Vector2(cam_zoom, cam_zoom)

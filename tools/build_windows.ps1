@@ -6,11 +6,11 @@
 #>
 param(
     [string]$Godot = $(if ($env:GODOT) { $env:GODOT } else { "godot" }),
-    [string]$Version = "0.1.0"
+    [string]$Version = $(([regex]::Match((Get-Content (Join-Path (Split-Path -Parent $PSScriptRoot) "project.godot") -Raw), 'config/version="([^"]+)"')).Groups[1].Value)
 )
 $ErrorActionPreference = "Stop"
 $project = Split-Path -Parent $PSScriptRoot
-$exe = Join-Path $project "build\megarift-survivors-0.1.0-windows.exe"
+$exe = Join-Path $project "build\megarift-survivors-$Version-windows.exe"   # named after the version, so an old build is never mistaken for a new one
 Remove-Item $exe -ErrorAction SilentlyContinue
 & $Godot --headless --path $project --export-release "Windows Desktop" $exe
 if (-not (Test-Path $exe)) { throw "Export failed: $exe was not created" }
@@ -19,7 +19,7 @@ Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Path $stage | Out-Null
 Copy-Item $exe (Join-Path $stage "Megarift Survivors.exe")
 @"
-Megarift Survivors $Version (test build)
+Megarift Survivors $Version
 Double-click "Megarift Survivors.exe". No install needed; progress is saved in
 %APPDATA%\Godot\app_userdata\Megarift Survivors
 Windows may show a SmartScreen warning because the file is not signed: choose "More info" then "Run anyway".

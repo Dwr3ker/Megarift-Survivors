@@ -163,7 +163,13 @@ class UpdatePopup extends Control:
 		t2.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		v.add_child(t2)
 		var t3 := Label.new()
-		t3.text = L.t("Download the new APK and install it over the current one: your progress is kept.")
+		# what to do with the download depends on the platform (asset_url picks the APK on Android, the zip on Windows)
+		if OS.get_name() == "Android":
+			t3.text = L.t("Download the new APK and install it over the current one: your progress is kept.")
+		elif OS.get_name() == "Windows":
+			t3.text = L.t("Download the new Windows version (a .zip), unzip it and run Megarift Survivors.exe: your progress is kept.")
+		else:
+			t3.text = L.t("Open the release page to download the new version: your progress is kept.")
 		t3.add_theme_font_size_override("font_size", 20)
 		msg = t3
 		t3.modulate = Color(1, 1, 1, 0.8)

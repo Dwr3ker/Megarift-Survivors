@@ -17,6 +17,7 @@ const TXS = preload("res://scripts/textscale.gd")
 signal resume
 signal quit_run
 signal save_quit
+var can_save := true   # set by main before build(): only Normal runs can be saved; other modes get "Quit run" instead
 signal open_settings
 signal summary_requested
 signal fov_changed(pct: int)
@@ -153,8 +154,7 @@ func build() -> void:
 	cont_btn = _btn("Continue", true, func(): resume.emit())
 	brow.add_child(cont_btn)
 	brow.add_child(_btn("Settings", false, func(): open_settings.emit()))
-	brow.add_child(_btn("Save and quit", false, func(): save_quit.emit()))
-	brow.add_child(_btn("Quit run", false, func(): quit_run.emit()))
+	brow.add_child(_exit_btn())
 	_build_summary(root)
 	_build_tabs(root)
 
@@ -332,16 +332,19 @@ func _build_summary(root: Control) -> void:
 	rsp.alignment = BoxContainer.ALIGNMENT_END
 	rsp.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	bar.add_child(rsp)
-	var sum_save := _btn("Save and quit", false, func(): save_quit.emit())
+	var sum_save := _exit_btn()
 	sum_save.custom_minimum_size = Vector2(250, 56)
 	sum_save.add_theme_font_size_override("font_size", 22)
 	sum_save.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	rsp.add_child(sum_save)
-	var sum_quit := _btn("Quit run", false, func(): quit_run.emit())
-	sum_quit.custom_minimum_size = Vector2(250, 56)
-	sum_quit.add_theme_font_size_override("font_size", 22)
-	sum_quit.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	rsp.add_child(sum_quit)
+
+
+# The only way out of a run: "Save and quit" in Normal runs (no more "Quit run" there), and "Quit run" in the modes
+# that can't be saved (Daily, Tower, Boss Rush, challenges...), which would otherwise have no way out.
+func _exit_btn() -> Button:
+	if can_save:
+		return _btn("Save and quit", false, func(): save_quit.emit())
+	return _btn("Quit run", false, func(): quit_run.emit())
 
 
 func hide_summary() -> void:
@@ -716,10 +719,10 @@ func _fov_row() -> HBoxContainer:
 	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	row.add_child(l)
 	var sl := HSlider.new()
-	sl.min_value = 100
-	sl.max_value = 200
+	sl.min_value = 70    # wider than before (100-200): further out to see more, closer in for small screens
+	sl.max_value = 250
 	sl.step = 5
-	sl.value = float(clampi(int(SV.d["settings"].get("fov", 165)), 100, 200))
+	sl.value = float(clampi(int(SV.d["settings"].get("fov", 165)), 70, 250))
 	sl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	sl.custom_minimum_size = Vector2(300, 40)
 	sl.focus_mode = Control.FOCUS_ALL
@@ -880,6 +883,13 @@ func _process(_d: float) -> void:
 func _input(event: InputEvent) -> void:
 	if not visible:
 		return
+	if quit_dlg != null and is_instance_valid(quit_dlg):   # the "can't save" dialog takes the input while it is open
+		if PAD.is_cancel(event) or (event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE):
+			_close_quit_dlg()
+			get_viewport().set_input_as_handled()
+		elif PAD.stick_event(event) or NAVG.move(get_viewport(), event, NAVG.focusables(quit_dlg)):
+			get_viewport().set_input_as_handled()
+		return
 	var sw := 0
 	if event is InputEventJoypadButton and event.pressed:
 		if event.button_index == PAD.btn("prev"):
@@ -939,7 +949,68 @@ func open(first_tab: int = 0) -> void:
 
 
 func close() -> void:
+	_close_quit_dlg()
 	visible = false
+
+
+# Save and quit was refused (boss fight, rift, special event, cards open): say why, warn that this run will not be
+# saved, and offer to quit anyway (the run ends and pays what was collected, like a lost run) or go back.
+var quit_dlg: Control = null
+
+
+func confirm_quit(why: String) -> void:
+	_close_quit_dlg()
+	var dlg := Control.new()
+	dlg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dlg.theme = th
+	dlg.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(dlg)
+	quit_dlg = dlg
+	var dim := ColorRect.new()
+	dim.color = Color(UIS.INK, 0.7)
+	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dlg.add_child(dim)
+	var cc := CenterContainer.new()
+	cc.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dlg.add_child(cc)
+	var pc := PanelContainer.new()
+	var pbox: StyleBox = UIS.frame(UIS.PANEL, UIS.EDGE).duplicate()
+	pbox.content_margin_left = 28
+	pbox.content_margin_right = 28
+	pbox.content_margin_top = 22
+	pbox.content_margin_bottom = 22
+	pc.add_theme_stylebox_override("panel", pbox)
+	cc.add_child(pc)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 14)
+	v.custom_minimum_size = Vector2(640, 0)
+	pc.add_child(v)
+	var t := _label("Can't save right now", 34, GOLD)
+	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	v.add_child(t)
+	for line in [L.t(why), L.t("If you quit now, this run will not be saved: it ends here and you keep what you have collected so far.")]:
+		var l := _label(line, 22)
+		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		v.add_child(l)
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.add_theme_constant_override("separation", 18)
+	v.add_child(row)
+	var cancel := _btn("Cancel", true, func(): _close_quit_dlg())
+	var quit := _btn("Quit run", false, func():
+		_close_quit_dlg()
+		quit_run.emit())
+	row.add_child(cancel)
+	row.add_child(quit)
+	TXS.scale_tree(dlg)
+	cancel.grab_focus.call_deferred()
+
+
+func _close_quit_dlg() -> void:
+	if quit_dlg != null and is_instance_valid(quit_dlg):
+		quit_dlg.queue_free()
+	quit_dlg = null
 
 
 func _scale_sum() -> void:
