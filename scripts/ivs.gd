@@ -99,6 +99,7 @@ static func train(dex: int, stat: String) -> String:
 		return "coins"
 	SV.d["coins"] = int(SV.d["coins"]) - VIT_COST
 	ivs[i] = mini(IV_MAX, int(ivs[i]) + VIT_STEP)
+	SV.d["stats"]["vitamins"] = int(SV.d["stats"].get("vitamins", 0)) + 1
 	SV.save()
 	return ""
 
@@ -117,6 +118,7 @@ static func set_nature(dex: int, nat: String) -> String:
 			return "coins"
 		SV.d["coins"] = int(SV.d["coins"]) - MINT_COST
 		nats.append(nat)
+		SV.d["stats"]["mints"] = int(SV.d["stats"].get("mints", 0)) + 1
 	e["nat"] = nat
 	SV.save()
 	return ""

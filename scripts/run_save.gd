@@ -21,7 +21,7 @@ const FIELDS := ["run_time", "kills", "coins", "tickets", "tickets10", "gcoins_r
 	"forme_t", "kyurem", "cur_dex", "evo_dmg", "evo_spd", "evo_steps", "seas_hp_done", "z_type", "z_crystal", "z_used", "z_cd", "dyn_used", "dyn_cd", "dash_k", "mom_max", "doom_winds", "eter_kills", "eter_at",
 	"eter_last", "cal_used", "cal_for", "dir_done", "dir_gap", "dir_warned", "dir_map", "dir_log", "boss_idx", "boss_run", "cast_run",
 	"surge_t", "next_event_t", "thief_t", "thieves", "wl_acc", "mini_last", "mini_chk", "rift_miss", "rift_check", "biome_idx", "world_seed", "balls",
-	"item_seen", "chests_no_item", "lshards_run", "item_block_run"]
+	"item_seen", "chests_no_item", "lshards_run", "item_block_run", "arceus_beaten"]
 
 
 static func exists() -> bool:

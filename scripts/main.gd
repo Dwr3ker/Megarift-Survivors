@@ -1223,8 +1223,8 @@ func _finish_run() -> void:
 		extra += " · " + L.t("Eternatus defeated %d times") % eter_kills
 	if lshards_run > 0:
 		extra += " · " + L.t("+%d Legend Shards") % lshards_run
-	if mode == "normal" and region > 0:   # region maps: best time per region; 30 minutes unlocks the next region
-		var newr: int = SV.region_record(region, int(run_time))
+	if mode == "normal" and region > 0:   # region maps: best time per region; defeating Arceus unlocks the next region
+		var newr: int = SV.region_record(region, int(run_time), arceus_beaten)
 		if newr > 0:
 			extra += " · " + L.t("New region unlocked: %s!") % L.t(SV.REGIONS[newr - 1])
 	var st2: Dictionary = SV.d["stats"]
@@ -4657,6 +4657,7 @@ static var _cand_cache: Dictionary = {}
 const REGION_MAP := {1: ["normal", "cave"], 2: ["bug", "ice"], 3: ["water", "fire"], 4: ["ice", "rock"], 5: ["dark", "ground"],
 	6: ["fairy", "steel"], 7: ["grass", "water"], 8: ["dragon", "fighting"], 9: ["ground", "flying"]}
 var region := 0
+var arceus_beaten := false   # Arceus (the 30-minute Judgment) defeated this run: clears a region map
 
 
 # Biome index (tileworld.gd) of the region's first (0) or second (1) biome; -1 without a region.

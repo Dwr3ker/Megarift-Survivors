@@ -705,6 +705,7 @@ func arceus_down(e) -> void:
 		return
 	won = true
 	win_t = 4.5
+	m.arceus_beaten = true   # on a region map, this clears the region and opens the next one
 	var stt: Dictionary = m.SV.d["stats"]
 	stt["arceusJudge"] = int(stt.get("arceusJudge", 0)) + 1
 	m.PG.grant({"coins": 20000, "t1": 8, "t10": 6})

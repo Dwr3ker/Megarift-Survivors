@@ -120,7 +120,7 @@ const GOALS := [
 
 static func default_data() -> Dictionary:
 	return {
-		"v": 1, "created": int(Time.get_unix_time_from_system()), "title": "", "nick": "", "favs": [0, 0, 0], "coins": 600, "tickets": 10, "tickets10": 3, "lshards": 0, "regions_migrated": true, "pity": {}, "legends": {}, "arenas": {}, "lshiny": {}, "owned": {}, "selected": 25, "shiny_on": false,
+		"v": 1, "created": int(Time.get_unix_time_from_system()), "title": "", "nick": "", "favs": [0, 0, 0], "coins": 600, "tickets": 10, "tickets10": 3, "lshards": 0, "regions_migrated": true, "regions_rule2": true, "pity": {}, "legends": {}, "arenas": {}, "lshiny": {}, "owned": {}, "selected": 25, "shiny_on": false,
 		"fusions": [], "upgrades": {}, "pup": {}, "claimed": {}, "pban": {}, "pbind": {}, "ptm": {}, "pz": {},
 		"stats": {"runs": 0, "kills": 0, "best_time": 0, "best_level": 1, "bosses": 0, "chests": 0, "pulls": 0, "shinies": 0, "total_time": 0, "coins_total": 0, "defeated_runs": 0, "rifts": 0},
 		"settings": {"master": 80, "music": 70, "sfx": 80, "dmg_numbers": true, "vibration": true, "shake": true, "stick": 1, "stick_fixed": false, "manual_aim": false, "lang": "en", "view": 100, "fov": 165, "pad": 0, "padmap": {}, "mute": false, "quality": 0, "fps": false, "stats_box": true, "stats_mode": 0, "mirror": false, "hud_scale": 100, "colorblind": false, "adaptive": true, "mono_bonus": false, "fx_op": 1, "act_side": 0, "text_sz": 0, "show_map": true},
@@ -625,8 +625,8 @@ static func _pick_weighted(list: Array, mul: float) -> Dictionary:
 	return list[list.size() - 1]
 
 
-# ---- Region maps: Kanto is open; each next region unlocks by surviving REGION_UNLOCK_S (30 min: Arceus) on the previous one ----
-const REGION_UNLOCK_S := 1800
+# ---- Region maps: Kanto is open; each next region unlocks by defeating Arceus (the 30-minute Judgment) on the previous one ----
+const REGION_UNLOCK_S := 1800   # 0.1.1's rule (survive 30 min); still used to keep what players unlocked under it
 const REGION_STARTER := [4, 155, 258, 390, 498, 653, 725, 813, 909]   # shown on each region's card
 
 
@@ -634,37 +634,55 @@ static func region_best(k: int) -> int:
 	return int((d.get("region_best", {}) as Dictionary).get(str(k), 0))
 
 
+# Arceus defeated on region map `k` (clears it and opens the next region).
+static func region_cleared(k: int) -> bool:
+	return bool((d.get("region_clear", {}) as Dictionary).get(str(k), false))
+
+
 static func region_unlocked(k: int) -> bool:
 	_migrate_regions()
-	return k <= 1 or region_best(k - 1) >= REGION_UNLOCK_S or (d.get("regions_open", []) as Array).has(k)
+	return k <= 1 or region_cleared(k - 1) or (d.get("regions_open", []) as Array).has(k)
 
 
-# Saves from before region maps keep their progress (once): beating Eternatus opens every region, and a run
-# that reached Arceus (30 min) opens Johto, as if Kanto had been cleared. Kept apart from the real best times.
-static func _migrate_regions() -> void:
-	if bool(d.get("regions_migrated", false)):
-		return
-	d["regions_migrated"] = true
-	var st: Dictionary = d.get("stats", {})
+static func _open_region(k: int) -> void:
 	var open: Array = d.get("regions_open", [])
-	if int(st.get("eternatusKills", 0)) > 0:
-		for k in range(2, REGIONS.size() + 1):
-			if not open.has(k):
-				open.append(k)
-	elif int(st.get("best_time", 0)) >= REGION_UNLOCK_S or int(st.get("hyper_best", 0)) >= REGION_UNLOCK_S / 2:
-		if not open.has(2):
-			open.append(2)
+	if not open.has(k):
+		open.append(k)
 	d["regions_open"] = open
 
 
-# Records a Normal run on region map `k`; returns the region it just unlocked (0 if none).
-static func region_record(k: int, secs: int) -> int:
+# Saves from before region maps keep their progress (once): beating Eternatus opens every region, and having
+# beaten Arceus opens Johto, as if Kanto had been cleared. Regions opened under 0.1.1's "survive 30 minutes" rule
+# stay open (also once). Kept apart from the real best times and clears.
+static func _migrate_regions() -> void:
+	if not bool(d.get("regions_migrated", false)):
+		d["regions_migrated"] = true
+		var st: Dictionary = d.get("stats", {})
+		if int(st.get("eternatusKills", 0)) > 0:
+			for k in range(2, REGIONS.size() + 1):
+				_open_region(k)
+		elif int(st.get("arceusJudge", 0)) > 0:
+			_open_region(2)
+	if not bool(d.get("regions_rule2", false)):
+		d["regions_rule2"] = true
+		for k in range(1, REGIONS.size()):
+			if region_best(k) >= REGION_UNLOCK_S:
+				_open_region(k + 1)
+
+
+# Records a Normal run on region map `k` (best time, and whether Arceus was defeated); returns the region it just
+# unlocked (0 if none).
+static func region_record(k: int, secs: int, beat_arceus: bool = false) -> int:
 	if k < 1 or k > REGIONS.size():
 		return 0
 	var was: bool = region_unlocked(k + 1)
 	var rb: Dictionary = d.get("region_best", {})
 	rb[str(k)] = maxi(int(rb.get(str(k), 0)), secs)
 	d["region_best"] = rb
+	if beat_arceus:
+		var rc: Dictionary = d.get("region_clear", {})
+		rc[str(k)] = true
+		d["region_clear"] = rc
 	return k + 1 if k < REGIONS.size() and not was and region_unlocked(k + 1) else 0
 
 
@@ -685,6 +703,7 @@ static func pick_legend(dex: int) -> bool:
 	if int(d.get("lshards", 0)) < SHARD_COST or owns(dex) or not dex_by.has(dex) or not bool(dex_by[dex].get("leg", false)):
 		return false
 	d["lshards"] = int(d["lshards"]) - SHARD_COST
+	d["stats"]["legendPicks"] = int(d["stats"].get("legendPicks", 0)) + 1
 	add_owned(dex, false)
 	save()
 	return true
@@ -788,6 +807,7 @@ static func pull(region: int, n: int = 1, use: String = "t1") -> Array:
 		if rarity == 5 and not was_new and not (shiny and not shiny_owned):
 			shard = 1   # a legendary you already had: a Legend Shard on top of the coin refund
 			d["lshards"] = int(d.get("lshards", 0)) + 1
+			d["stats"]["lshardsTotal"] = int(d["stats"].get("lshardsTotal", 0)) + 1
 		if shiny:
 			was_new = not shiny_owned
 			if not was_new:
@@ -864,6 +884,7 @@ static func finish_run(r: Dictionary) -> Dictionary:
 	var tickets10: int = int(r.get("tickets10", 0))
 	d["tickets10"] = int(d.get("tickets10", 0)) + tickets10
 	d["lshards"] = int(d.get("lshards", 0)) + int(r.get("lshards", 0))
+	s["lshardsTotal"] = int(s.get("lshardsTotal", 0)) + int(r.get("lshards", 0))
 	d["gcoins"] = int(d.get("gcoins", 0)) + int(r.get("gcoins", 0))
 	d["gold_coins"] = int(d.get("gold_coins", 0)) + int(r.get("gold_gcoins", 0))
 	if not hyper:

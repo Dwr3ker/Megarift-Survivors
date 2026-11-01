@@ -90,5 +90,8 @@
   "screens/region_map_picker.jpg",
   "screens/region_map_hoenn.jpg",
   "screens/region_map_kalos.jpg"
+ ],
+ "Achievements for the new features": [
+  "screens/achievements_regions.jpg"
  ]
 }

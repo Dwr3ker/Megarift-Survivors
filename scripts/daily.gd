@@ -164,6 +164,10 @@ static func record(sd: int, kills: int, bosses: int, secs: float) -> Dictionary:
 			if st % 7 == 0:
 				out["tickets10"] = int(out["tickets10"]) + 1
 		s["medal"] = medal
+		var stt: Dictionary = SV.d["stats"]
+		if medal == 3:
+			stt["dailyGolds"] = int(stt.get("dailyGolds", 0)) + 1
+		stt["dailyStreakBest"] = maxi(int(stt.get("dailyStreakBest", 0)), int(s.get("streak", 0)))
 		SV.d["tickets"] = int(SV.d["tickets"]) + int(out["tickets"])
 		SV.d["tickets10"] = int(SV.d.get("tickets10", 0)) + int(out["tickets10"])
 		SV.d["coins"] = int(SV.d["coins"]) + int(out["coins"])

@@ -2515,6 +2515,7 @@ func _iv_train_ui(dx: int) -> void:
 				toast(L.t("Not enough coins"))
 			elif r == "":
 				Aud.sfx("levelup")
+				PG.check()
 				_update_top()
 				_dex_detail()
 				_iv_train_ui(dx), Vector2(560, 48))
@@ -2559,6 +2560,7 @@ func _mint_ui(dx: int) -> void:
 				toast(L.t("Not enough coins"))
 			elif r == "":
 				Aud.sfx("confirm")
+				PG.check()
 				_update_top()
 				_dex_detail()
 				gacha_result.visible = false, Vector2(230, 58))
@@ -2575,7 +2577,7 @@ func _mint_ui(dx: int) -> void:
 
 
 # Region picker (after Play on a Normal run): every region with a snapshot of how it looks, its biomes and Pokémon.
-# Kanto is open; each next region unlocks by surviving 30 minutes (reaching Arceus) on the previous one. "Every region" is the classic run.
+# Kanto is open; each next region unlocks by defeating Arceus (the 30-minute Judgment) on the previous one. "Every region" is the classic run.
 const REGION_BIOMES := {1: ["Eternal Meadow", "Crystal Cave"], 2: ["Hive Forest", "Eternal Glacier"], 3: ["Sea Grotto", "Igneous Volcano"],
 	4: ["Eternal Glacier", "Ancient Quarry"], 5: ["Dark Alley", "Red Desert"], 6: ["Enchanted Forest", "Steel Fortress"],
 	7: ["Emerald Jungle", "Sea Grotto"], 8: ["Dragon Sanctuary", "Ancient Dojo"], 9: ["Red Desert", "Sky Peak"]}
@@ -2642,12 +2644,14 @@ func _region_picker() -> void:
 		if k == 0:
 			sub = L.t("Classic: every region's Pokémon")
 		elif not open:
-			sub = L.t("Locked: survive 30 min on %s") % L.t(SV.REGIONS[k - 2])
+			sub = L.t("Locked: defeat Arceus on %s") % L.t(SV.REGIONS[k - 2])
 		else:
 			sub = "%s → %s" % [L.t(String(REGION_BIOMES[k][0])), L.t(String(REGION_BIOMES[k][1]))]
 			var best: int = SV.region_best(k)
 			if best > 0:
 				sub += "\n" + L.t("Best: %s") % ("%d:%02d" % [best / 60, best % 60])
+				if SV.region_cleared(k):
+					sub += " · " + L.t("Arceus defeated")
 		var sl := _label(sub, 13, UIS.MUTED if open else Color("#ff9c8a"))
 		sl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		sl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -5907,6 +5911,7 @@ func _legend_confirm(dex: int) -> void:
 	var yes := _btn(L.t("Confirm"), func():
 		if SV.pick_legend(dex):
 			Aud.sfx("legend")
+			PG.check()
 			toast(L.t("%s joins your collection!") % _name_of(dex))
 		gacha_result.visible = false
 		_update_top()
@@ -5957,6 +5962,7 @@ func _do_max_pull(use: String) -> void:
 	if batches <= 0:
 		toast(L.t("Not enough tickets: earn them by playing"))
 		return
+	SV.d["stats"]["maxPulls"] = int(SV.d["stats"].get("maxPulls", 0)) + 1
 	var results: Array = []
 	var crystals: Array = []
 	for i in range(batches):
@@ -5967,6 +5973,7 @@ func _do_max_pull(use: String) -> void:
 		if SV.last_crystal != "":
 			crystals.append(SV.last_crystal)
 	SV.save()
+	PG.check()
 	_update_top()
 	var best := 1
 	var anyshiny := false

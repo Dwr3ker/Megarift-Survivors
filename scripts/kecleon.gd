@@ -6,6 +6,7 @@ extends RefCounted
 const PAD = preload("res://scripts/pad.gd")
 const IC = preload("res://scripts/icons.gd")
 const UIS = preload("res://scripts/ui_style.gd")
+const SVD = preload("res://scripts/save_data.gd")
 const REROLL := [50, 100, 175, 275, 400, 550]
 const RESERVE_PCT := 0.3      # reserva: pagas el 30% ahora y el siguiente Kecleon trae el objeto por el resto
 const RES_COL := "#f6b52b"
@@ -237,6 +238,8 @@ func reserve(id: String) -> String:
 	just_reserved = true
 	reserved = id
 	reserve_paid = p
+	if SVD.d.has("stats"):   # for the Layaway achievements
+		SVD.d["stats"]["reservations"] = int(SVD.d["stats"].get("reservations", 0)) + 1
 	m.Aud.sfx("coin")
 	m.add_text(m.player.position + Vector2(0, -m.player.body_h - 20.0), m.L.t("Reserved: %s") % m.L.t(String(ITEMS[id][0])), Color(RES_COL), 20)
 	log.append(["reserve", variant, id, p])

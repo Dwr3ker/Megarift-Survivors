@@ -9,6 +9,19 @@ const UPD = preload("res://scripts/updater.gd")
 
 const ENTRIES := [
 	{
+		"ver": "0.1.2",
+		"date": "2026-11-01",
+		"title": "Megarift Survivors 0.1.2: defeat Arceus to unlock regions, new achievements",
+		"new": [
+			"New achievements for the new features: a Regions tab (Champion of each region, Region hopper, World Champion), plus perfect IVs, all natures, vitamins, Mints, Legend Shards, Legend Picks, Max pull, daily Gold medals and streaks, and Kecleon reservations.",
+		],
+		"changes": [
+			"Regions now unlock by defeating Arceus (the Judgment at minute 30) on the previous region, not just by surviving 30 minutes. Regions you already unlocked stay open, and the region picker shows which maps you have cleared.",
+		],
+		"fixes": [
+		],
+	},
+	{
 		"ver": "0.1.1",
 		"date": "2026-11-01",
 		"title": "Megarift Survivors 0.1.1: region maps, IVs and natures, Legend Shards",

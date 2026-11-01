@@ -7,7 +7,7 @@ const MD = preload("res://scripts/moves_data.gd")
 const TD = preload("res://scripts/types_data.gd")
 
 const CATS := [["coleccion", "Collection"], ["supervivencia", "Survival"], ["combate", "Combat"], ["tipos", "By type"],
-	["grietas", "Rifts"], ["legendaries", "Legendaries"], ["modos", "Game modes"], ["otros", "Missions & more"]]
+	["grietas", "Rifts"], ["legendaries", "Legendaries"], ["regiones", "Regions"], ["modos", "Game modes"], ["otros", "Missions & more"]]
 
 static var toasts: Array = []
 static var _list: Array = []
@@ -150,6 +150,27 @@ static func list() -> Array:
 	L2.append(_a("tower60", "modos", 3, "Top of the Tower", "Reach floor 60 of the Tower.", "towerBest", 59, {"coins": 30000, "t1": 15, "t10": 12}, "Top of the Tower"))
 	L2.append(_a("towerArceus", "modos", 3, "Arceus Conqueror", "Defeat Arceus, the final boss on floor 60 of the Tower.", "arceus", 1, {"coins": 30000, "t1": 15, "t10": 15}, "Arceus Conqueror"))
 	L2.append(_a("towerRuns10", "modos", 2, "Tower apprentice", "Play the Tower 10 times.", "towerRuns", 10, {"coins": 1200, "t10": 1}))
+	# 0.1.1 features: region maps, IVs and natures, Legend Shards, daily medals, Kecleon reservations, Max pull
+	for k in range(1, SV.REGIONS.size() + 1):
+		L2.append(_a("region%d" % k, "regiones", 3 if k == SV.REGIONS.size() else 2, "Champion of %s", "Defeat Arceus on the %s map.", "rclear%d" % k, 1,
+			{"coins": 1000 * k, "t10": 1 + k / 3}, "", SV.REGIONS[k - 1]))
+	L2.append(_a("regions3", "regiones", 2, "Region hopper", "Clear 3 region maps (defeat Arceus on each).", "regionsCleared", 3, {"coins": 3000, "t10": 2}))
+	L2.append(_a("regions9", "regiones", 3, "World Champion", "Clear all 9 region maps.", "regionsCleared", 9, {"coins": 20000, "t10": 10}, "World Champion"))
+	L2.append(_a("ivPerfect1", "coleccion", 2, "Perfect specimen", "Own a Pokémon with 31 in all three IVs.", "perfectIVs", 1, {"t10": 1}, "Perfectionist"))
+	L2.append(_a("ivPerfect10", "coleccion", 3, "Flawless squad", "Own 10 Pokémon with 31 in all three IVs.", "perfectIVs", 10, {"t10": 3}))
+	L2.append(_a("natures11", "coleccion", 2, "Nature's palette", "Unlock all 11 natures on one Pokémon.", "natureMax", 11, {"t10": 2}))
+	L2.append(_a("vitamins25", "coleccion", 1, "Personal trainer", "Use 25 vitamins.", "vitamins", 25, {"t1": 5}))
+	L2.append(_a("mint1", "coleccion", 1, "Fresh breath", "Buy a Mint.", "mints", 1, {"coins": 500}))
+	L2.append(_a("shards5", "coleccion", 1, "Shard collector", "Earn 5 Legend Shards.", "lshardsTotal", 5, {"t1": 3}))
+	L2.append(_a("shards25", "coleccion", 2, "Shard hoarder", "Earn 25 Legend Shards.", "lshardsTotal", 25, {"t10": 2}))
+	L2.append(_a("legendPick1", "coleccion", 2, "Hand-picked legend", "Pick a legendary with Legend Shards.", "legendPicks", 1, {"t10": 1}))
+	L2.append(_a("legendPick5", "coleccion", 3, "Legend curator", "Pick 5 legendaries with Legend Shards.", "legendPicks", 5, {"t10": 3}, "Legend curator"))
+	L2.append(_a("maxPull1", "coleccion", 1, "All in", "Do a Max pull.", "maxPulls", 1, {"t1": 3}))
+	L2.append(_a("dailyGold1", "modos", 2, "Golden day", "Win a Gold medal in the Daily Challenge.", "dailyGolds", 1, {"coins": 1500, "t10": 1}))
+	L2.append(_a("dailyGold10", "modos", 3, "Gold standard", "Win 10 Gold medals in the Daily Challenge.", "dailyGolds", 10, {"coins": 6000, "t10": 3}, "Gold standard"))
+	L2.append(_a("dailyStreak7", "modos", 2, "Week of medals", "Earn a Daily Challenge medal 7 days in a row.", "dailyStreakBest", 7, {"coins": 3000, "t10": 2}))
+	L2.append(_a("reserve1", "otros", 1, "Layaway", "Reserve an item at Kecleon's shop.", "reservations", 1, {"coins": 500}))
+	L2.append(_a("reserve10", "otros", 2, "Regular customer", "Reserve 10 items at Kecleon's shop.", "reservations", 10, {"t10": 1}))
 	# uno por legendario
 	for p in legs:
 		var a: Dictionary = _a("leg_%d" % int(p["dex"]), "legendaries", 2, "Defeat %s", "Defeat %s in a rift.", "leg", 1, {"t1": 1}, "", String(p["name"]))
@@ -196,6 +217,24 @@ static func stat(name: String) -> int:
 			return (SV.d.get("type_done", {}) as Dictionary).size()
 		"legends":
 			return (SV.d.get("legends", {}) as Dictionary).size()
+		"regionsCleared":
+			var n := 0
+			for k in range(1, SV.REGIONS.size() + 1):
+				if SV.region_cleared(k):
+					n += 1
+			return n
+		"perfectIVs", "natureMax":
+			var best := 0
+			var full := 0
+			for key in (SV.d.get("owned", {}) as Dictionary):
+				var e: Dictionary = SV.d["owned"][key]
+				if e.get("iv") is Array and (e["iv"] as Array).size() == 3 and int(e["iv"][0]) >= 31 and int(e["iv"][1]) >= 31 and int(e["iv"][2]) >= 31:
+					full += 1
+				if e.get("nats") is Array:
+					best = maxi(best, (e["nats"] as Array).size())
+			return full if name == "perfectIVs" else best
+	if name.begins_with("rclear"):
+		return 1 if SV.region_cleared(int(name.substr(6))) else 0
 	return int(s.get(name, 0))
 
 
