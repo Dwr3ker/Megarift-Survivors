@@ -9,6 +9,18 @@ const UPD = preload("res://scripts/updater.gd")
 
 const ENTRIES := [
 	{
+		"ver": "0.1.3-alpha.3",
+		"date": "2026-11-02",
+		"title": "Megarift Survivors 0.1.3-alpha.3: What's new scrolls again (test build)",
+		"new": [
+		],
+		"changes": [
+		],
+		"fixes": [
+			"What's new: the release list and the notes each scroll on their own, so long notes can be read to the end on any screen. The selected release is always in view when the screen opens.",
+		],
+	},
+	{
 		"ver": "0.1.3-alpha.2",
 		"date": "2026-11-02",
 		"title": "Megarift Survivors 0.1.3-alpha.2: pickups in fights, the legendary shrine wall, sharper text (test build)",

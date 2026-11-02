@@ -8042,9 +8042,17 @@ func _build_news() -> void:
 	tt.autowrap_mode = TextServer.AUTOWRAP_OFF
 	rv.add_child(tt)
 	rv.add_child(HSeparator.new())
+	# The release list scrolls on its own: with every alpha listed it used to grow taller than the screen, which made the
+	# whole page taller too, so the article on the right never had anything to scroll.
+	var rsc := ScrollContainer.new()
+	rsc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	rsc.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	rsc.follow_focus = true   # a controller moving down the list keeps the focused release on screen
+	rv.add_child(rsc)
 	news_rail = VBoxContainer.new()
+	news_rail.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	news_rail.add_theme_constant_override("separation", 6)
-	rv.add_child(news_rail)
+	rsc.add_child(news_rail)
 	var cpanel := PanelContainer.new()
 	cpanel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var cbox := UIS.box(Color(UIS.BG, 0.92), UIS.EDGE, 3, false)
@@ -8180,6 +8188,25 @@ func _refresh_news() -> void:
 			cv.add_child(brow)
 	news_scroll.scroll_vertical = 0
 	focus_first = first_btn if first_btn != null else back_btn
+	_news_rail_show(first_btn)
+
+
+# The release list opens with the selected release in view. Waits two frames so the buttons have their real positions
+# (scrolling to the focused button straight away used the half-built layout and scrolled too far).
+func _news_rail_show(btn: Control) -> void:
+	var rsc: ScrollContainer = news_rail.get_parent() as ScrollContainer
+	if rsc == null or btn == null:
+		return
+	await get_tree().process_frame
+	await get_tree().process_frame
+	if not is_instance_valid(btn) or not is_instance_valid(rsc):
+		return
+	var top: float = btn.position.y
+	var bottom: float = top + btn.size.y
+	if bottom <= rsc.size.y:
+		rsc.scroll_vertical = 0   # fits on the first screenful: start at the top, newest release first
+	elif top < float(rsc.scroll_vertical) or bottom > float(rsc.scroll_vertical) + rsc.size.y:
+		rsc.scroll_vertical = maxi(0, int(top - 8.0))
 
 
 func _slider_row(label: String, key: String) -> void:
