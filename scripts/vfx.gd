@@ -166,6 +166,22 @@ class Grid:
 		for m in marks:
 			g[int(m[1])][int(m[0])] = "o"
 
+	# Thickens every 1-pixel stroke by one pixel (a shade darker), so line-drawn sprites stay readable when small.
+	func bolden() -> void:
+		const DARKER := {"w": "l", "l": "m", "m": "d", "d": "d"}
+		var marks: Array = []
+		for y in range(h):
+			for x in range(w):
+				if String(g[y][x]) != "":
+					continue
+				for d in [[1, 0], [-1, 0], [0, 1], [0, -1]]:
+					var c: String = get_px(x + int(d[0]), y + int(d[1]))
+					if DARKER.has(c):
+						marks.append([x, y, DARKER[c]])
+						break
+		for m in marks:
+			g[int(m[1])][int(m[0])] = String(m[2])
+
 	func line(x0: float, y0: float, x1: float, y1: float, c: String, thick: bool = false, side: String = "") -> void:
 		var n: int = int(ceil(Vector2(x1 - x0, y1 - y0).length() * 2.0)) + 1
 		for i in range(n + 1):
@@ -460,6 +476,11 @@ static func sprite(shape: String, pal: String, frame: int) -> Texture2D:
 		V2.gen(shape, P, f)
 	else:
 		_gen(shape, P, f)
+	if V2.BOLD.has(shape):
+		P.bolden()
+		P.outline()
+	elif V2.OUTLINED.has(shape):
+		P.outline()
 	var img := Image.create(P.w, P.h, false, Image.FORMAT_RGBA8)
 	var colors: Array = PAL.get(pal, PAL["normal"])
 	for y in range(P.h):

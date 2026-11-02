@@ -18,12 +18,22 @@ static func get_font() -> Font:
 		var base: FontFile = load("res://fonts/PixelifySansFix.ttf")
 		if base == null:
 			return ThemeDB.fallback_font
+		_crisp(base)
 		font = FontVariation.new()
 		font.base_font = base
 		font.variation_opentype = {"weight": 500}
 		font.opentype_features = {"liga": 0, "clig": 0, "dlig": 0}
 		_set_fallbacks()
 	return font
+
+
+# The pixel font is drawn with hard pixel edges: no smoothing, no sub-pixel offsets. Godot already renders text at the
+# screen's real resolution (font oversampling follows the window scale), so on a 1080p phone this keeps letters as sharp
+# blocks instead of soft grey edges. Inter (Vietnamese) and the CJK fonts keep normal smoothing: they are not pixel fonts.
+static func _crisp(f: FontFile) -> void:
+	f.antialiasing = TextServer.FONT_ANTIALIASING_NONE
+	f.subpixel_positioning = TextServer.SUBPIXEL_POSITIONING_DISABLED
+	f.hinting = TextServer.HINTING_NONE
 
 
 # Respaldo segun el idioma: CJK propio (ja/zh) o, en el resto, el japones solo para simbolos.

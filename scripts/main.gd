@@ -10869,6 +10869,11 @@ class Prop extends Node2D:
 							draw_rect(Rect2(-23.0, -95.0, 46.0 * kf, 6.0), Color(1.0, 0.85, 0.25).lerp(Color("#fff6c8"), kf))
 				return
 		elif kind == "altar":
+			# The legendary shrine draws its own used state (the same shrine, lights off). It used to fall into the
+			# "spent statue" branch below once used: the shrine art vanished while its walls stayed, an invisible wall.
+			if sub == "legend":
+				_draw_legend_altar()
+				return
 			if used:
 				# Estatua gastada: la misma estatua, apagada y derretida (oscura, achatada, con charco).
 				var mt: Texture2D = WTex.get_t("altar_" + power)
@@ -10884,9 +10889,6 @@ class Prop extends Node2D:
 					draw_circle(Vector2(msz.x * 0.18, -msz.y * 0.18), 2.5, Color(0.12, 0.10, 0.12, 0.9))
 					return
 			var nm: String = "used" if used else power
-			if sub == "legend":
-				_draw_legend_altar()
-				return
 			if _spr("altar_" + nm):
 				if not used:
 					var pulse: float = 0.5 + 0.5 * sin(t * 3.0)

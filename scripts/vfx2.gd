@@ -23,12 +23,17 @@ const META := {
 	"caltrop": [9, 9, 1, false, true], "toxicspike": [9, 11, 2, false, false], "shieldbash": [13, 13, 2, false, false],
 	"dustcloud": [15, 13, 2, false, false], "petal": [9, 9, 2, false, true], "whiteflame": [15, 11, 3, true, false],
 	"stoneaxe": [13, 13, 1, true, false], "flamekick": [13, 13, 2, false, false], "firering": [13, 13, 2, false, true],
-	"heatshimmer": [15, 9, 2, true, false], "flamewheel": [13, 13, 3, false, true], "confuse": [11, 11, 2, false, true],
+	"heatshimmer": [15, 9, 2, true, false], "flamewheel": [13, 13, 3, false, true], "confuse": [15, 15, 2, false, true],
 	"hypno": [13, 13, 2, false, false], "sparklewind": [13, 9, 2, true, false], "decoy": [9, 11, 1, false, false],
 	"darkring": [13, 13, 2, false, false], "zapring": [13, 13, 2, false, true], "psyblast": [15, 15, 2, false, true],
 	"sludgewave": [15, 9, 2, true, false], "egg": [9, 11, 1, false, true], "hailstone": [9, 9, 2, false, true],
 	"aircut": [13, 7, 1, true, false], "boulder": [15, 15, 2, false, true], "cut": [15, 15, 1, false, false],
 }
+
+# Sprites that read too faint on grass. BOLD: thin line drawings, VFX.sprite() thickens their strokes and outlines them.
+# OUTLINED: denser drawings that only need the dark outline.
+const BOLD := ["dreambubble", "speedlines", "sparklewind", "aircut", "zapring", "cut"]
+const OUTLINED := ["gleam", "heatshimmer", "darkring", "firering", "flamewheel", "hypno", "psyblast", "twinring", "ring"]
 
 const MOVE := {
 	"electro-ball": {"proj": "orbelec", "trail": "spark"}, "electroweb": {"proj": "mesh"},
@@ -639,16 +644,27 @@ static func gen(shape: String, P, f: int) -> void:
 				P.line(6, 6, 6.0 + cos(a6) * 4.4, 6.0 + sin(a6) * 4.4, "w")
 				P.set_px(6.0 + cos(a6 + 0.3) * 6.0, 6.0 + sin(a6 + 0.3) * 6.0, "l")
 			_disc(P, 6, 6, 1.2, "w")
-		"confuse":   # Confusion: little stars circling a dizzy spiral
-			for i in range(30):
-				var t3: float = float(i) * 0.2
-				var r3: float = 0.6 + t3 * 0.7
-				if r3 > 3.6:
+		"confuse":   # Confusion: a bold dizzy spiral with little stars circling it
+			var prev3 := Vector2(7, 7)
+			for i in range(1, 60):
+				var t3: float = float(i) * 0.12
+				var r3: float = 0.5 + t3 * 0.95
+				if r3 > 5.0:
 					break
-				P.set_px(5.0 + cos(t3 * 1.6) * r3, 5.0 + sin(t3 * 1.6) * r3, "l")
+				var q3 := Vector2(7.0 + cos(t3 * 1.7 + float(f) * 0.8) * r3, 7.0 + sin(t3 * 1.7 + float(f) * 0.8) * r3)
+				P.line(prev3.x, prev3.y, q3.x, q3.y, "l", true, "m")
+				prev3 = q3
+			P.set_px(7, 7, "w")
 			for k in range(3):
-				var a7: float = float(k) * TAU / 3.0 + float(f) * 0.9
-				P.set_px(5.0 + cos(a7) * 4.6, 5.0 + sin(a7) * 4.6, "w")
+				var a7: float = float(k) * TAU / 3.0 - float(f) * 0.9
+				var sx3: float = 7.0 + cos(a7) * 6.0
+				var sy3: float = 7.0 + sin(a7) * 6.0
+				P.set_px(sx3, sy3, "w")
+				P.set_px(sx3 - 1, sy3, "l")
+				P.set_px(sx3 + 1, sy3, "l")
+				P.set_px(sx3, sy3 - 1, "l")
+				P.set_px(sx3, sy3 + 1, "l")
+			P.outline()
 		"hypno":   # Hypnosis: hypnotic concentric rings
 			for y in range(13):
 				for x in range(13):

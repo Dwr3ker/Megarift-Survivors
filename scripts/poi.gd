@@ -165,8 +165,15 @@ func _mk(kind: String, sub: String, pos: Vector2, ttl: float) -> Item:
 	return it
 
 
+# Nothing on the map can be touched (an arena fight, the run is over).
 func _busy() -> bool:
-	return m.arena != null or m._boss_alive() or m._legend_busy() or m.dir_finale or m.player.dead or m.timeup
+	return m.arena != null or m.player.dead or m.timeup
+
+
+# No NEW items appear while a boss, a legendary or the finale is on; the ones already on the ground can still be
+# picked up and opened (they used to freeze for the whole fight, which looked like pickups not registering).
+func _quiet() -> bool:
+	return m._boss_alive() or m._legend_busy() or m.dir_finale
 
 
 func spawn_pickup() -> Item:
@@ -255,6 +262,16 @@ func claim(it: Item) -> bool:
 	log.append(["claim", it.kind, it.sub])
 	_remove(it)
 	return true
+
+
+# Touching an item that is no use right now leaves it on the ground: say why once, until you step away from it.
+func _why_not(it: Item) -> void:
+	if bool(it.get_meta("told", false)):
+		return
+	it.set_meta("told", true)
+	var why: String = {"pouch": "Poké Ball bag full", "xp": "No enemies nearby: the Prism Crystal stays here", "potion": "A power-up is already active: the Elixir stays here"}.get(it.kind, "")
+	if why != "":
+		m.add_text(m.player.position + Vector2(0.0, -m.player.body_h - 4.0), m.L.t(why), Color("#c8d0dc"), 16)
 
 
 # Cristal Prisma: paraliza un momento a los enemigos cercanos (salida de emergencia, no da experiencia).
@@ -462,18 +479,19 @@ func update(delta: float) -> void:
 	if _busy():
 		return
 	# generacion
-	pick_t -= delta
-	if pick_t <= 0.0:
-		pick_t = randf_range(14.0, 26.0)
-		spawn_pickup()
-	pack_t -= delta
-	if pack_t <= 0.0:
-		pack_t = randf_range(70.0, 110.0)
-		spawn_pack()
-	sup_t -= delta
-	if sup_t <= 0.0:
-		sup_t = randf_range(150.0, 210.0)
-		spawn_supply()
+	if not _quiet():
+		pick_t -= delta
+		if pick_t <= 0.0:
+			pick_t = randf_range(14.0, 26.0)
+			spawn_pickup()
+		pack_t -= delta
+		if pack_t <= 0.0:
+			pack_t = randf_range(70.0, 110.0)
+			spawn_pack()
+		sup_t -= delta
+		if sup_t <= 0.0:
+			sup_t = randf_range(150.0, 210.0)
+			spawn_supply()
 	# vida, recogida e interaccion
 	var pp: Vector2 = m.player.position
 	var target = null
@@ -492,7 +510,10 @@ func update(delta: float) -> void:
 		var d: float = it.position.distance_to(pp)
 		if it.kind == "pouch" or it.kind == "xp" or it.kind == "potion":
 			if d < 34.0:
-				claim(it)
+				if not claim(it):
+					_why_not(it)
+			elif d > 60.0:
+				it.set_meta("told", false)
 		elif d < 52.0 and (it.kind == "pack" or it.kind == "crate"):
 			target = it
 	var ct = null

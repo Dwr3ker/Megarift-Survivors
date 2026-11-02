@@ -9,6 +9,22 @@ const UPD = preload("res://scripts/updater.gd")
 
 const ENTRIES := [
 	{
+		"ver": "0.1.3-alpha.2",
+		"date": "2026-11-02",
+		"title": "Megarift Survivors 0.1.3-alpha.2: pickups in fights, the legendary shrine wall, sharper text (test build)",
+		"new": [
+		],
+		"changes": [
+			"Faint moves are easier to see: Confusion is a bigger, bolder spiral, and other thin move animations (Dream Eater, Dazzling Gleam, Agility, Heat Wave, Fairy Wind, Air Cutter, Thunder Wave, Dark Pulse, Fire Spin, Flame Wheel, Slash, Hypnosis, Psystrike, Psyshock, Psychic) have thicker strokes or a dark outline.",
+			"Sharper text: the pixel font is drawn with hard pixel edges instead of soft grey ones.",
+		],
+		"fixes": [
+			"Map items work during boss and legendary fights: Poké Ball Pouches, Elixirs and Prism Crystals are picked up, and mystery parcels and supply crates show the Open button. Only new items stop appearing during a fight.",
+			"An item that is no use right now (bag full, a power-up already active, no enemies nearby) says why it stays on the ground.",
+			"Legendary shrine: after summoning, the shrine no longer turns into a small statue with invisible walls around it. The used shrine stays visible, so you can see its walls and leave by the stairs.",
+		],
+	},
+	{
 		"ver": "0.1.3-alpha.1",
 		"date": "2026-11-01",
 		"title": "Megarift Survivors 0.1.3-alpha.1: a look for every move (test build)",
