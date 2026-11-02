@@ -15,37 +15,50 @@ const META := {
 	"fist": [11, 11, 2, false, false], "hammer": [13, 13, 1, false, true], "feather": [9, 13, 1, false, false],
 	"plus": [9, 9, 2, false, false], "fang": [9, 13, 1, false, false], "slashx": [13, 13, 2, false, false],
 	"ember2": [9, 9, 2, false, false], "kick": [13, 13, 2, false, false], "lava": [11, 11, 2, false, false],
+	# v0.1.3: one look per move (every move fits its name instead of re-colouring another type's sprite)
+	"slam": [15, 13, 2, false, false], "chop": [9, 15, 1, false, false], "tongue": [15, 9, 2, true, false],
+	"swords": [7, 15, 1, false, true], "speedlines": [15, 9, 2, true, false], "plate": [11, 11, 1, false, false],
+	"dragonflame": [11, 15, 3, false, false], "mandible": [13, 11, 2, false, false], "dreambubble": [11, 11, 2, false, false],
+	"roots": [11, 13, 2, false, false], "gleam": [13, 13, 2, false, true], "psyblade": [13, 11, 1, true, false],
+	"caltrop": [9, 9, 1, false, true], "toxicspike": [9, 11, 2, false, false], "shieldbash": [13, 13, 2, false, false],
+	"dustcloud": [15, 13, 2, false, false], "petal": [9, 9, 2, false, true], "whiteflame": [15, 11, 3, true, false],
+	"stoneaxe": [13, 13, 1, true, false], "flamekick": [13, 13, 2, false, false], "firering": [13, 13, 2, false, true],
+	"heatshimmer": [15, 9, 2, true, false], "flamewheel": [13, 13, 3, false, true], "confuse": [11, 11, 2, false, true],
+	"hypno": [13, 13, 2, false, false], "sparklewind": [13, 9, 2, true, false], "decoy": [9, 11, 1, false, false],
+	"darkring": [13, 13, 2, false, false], "zapring": [13, 13, 2, false, true], "psyblast": [15, 15, 2, false, true],
+	"sludgewave": [15, 9, 2, true, false], "egg": [9, 11, 1, false, true], "hailstone": [9, 9, 2, false, true],
+	"aircut": [13, 7, 1, true, false], "boulder": [15, 15, 2, false, true], "cut": [15, 15, 1, false, false],
 }
 
 const MOVE := {
 	"electro-ball": {"proj": "orbelec", "trail": "spark"}, "electroweb": {"proj": "mesh"},
-	"bolt-beak": {"proj": "beak", "trail": "spark"}, "zap-cannon": {"beam": "cannon", "proj": "cannon"},
-	"thunder-wave": {"proj": "twinring"},
+	"bolt-beak": {"proj": "beak", "trail": "spark"}, "zap-cannon": {"beam": "orbelec", "proj": "orbelec", "bstyle": "charged"},
+	"thunder-wave": {"proj": "zapring"},
 	"dragon-darts": {"proj": "dart"}, "dragon-breath": {"proj": "chevron"}, "dragon-energy": {"proj": "rune"},
 	"outrage": {"aura": "rune", "rise": true},
-	"fleur-cannon": {"beam": "cannon", "proj": "cannon"}, "play-rough": {"melee": "slashx"},
+	"fleur-cannon": {"beam": "petal", "proj": "petal", "bstyle": "stream"}, "play-rough": {"melee": "dustcloud"},
 	"axe-kick": {"melee": "kick", "proj": "axeslash"}, "high-jump-kick": {"proj": "kick"},
-	"hammer-arm": {"melee": "fist"}, "sacred-sword": {"melee": "slashx", "proj": "blade"},
-	"blaze-kick": {"proj": "kick", "trail": "ember"},
-	"eruption": {"proj": "lava", "trail": "ember"}, "fire-lash": {"melee": "slashx"},
+	"hammer-arm": {"melee": "fist"}, "sacred-sword": {"melee": "blade", "proj": "blade", "beam": "blade"},
+	"blaze-kick": {"proj": "flamekick", "trail": "ember"},
+	"eruption": {"proj": "lava", "trail": "ember"}, "fire-lash": {"melee": "whip"},
 	"magma-storm": {"aura": "lava", "rise": true},
 	"mystical-fire": {"proj": "pyre", "trail": "wisp"},
-	"air-cutter": {"proj": "airx"}, "air-slash": {"proj": "airx"}, "roost": {"buff": "feather"},
-	"infernal-parade": {"proj": "pyre", "trail": "ember"}, "shadow-bone": {"proj": "bone"},
+	"air-cutter": {"proj": "aircut"}, "air-slash": {"proj": "airx"}, "roost": {"buff": "feather"},
+	"infernal-parade": {"proj": "pyre", "trail": "ember"}, "shadow-bone": {"proj": "bone", "trail": "wisp"},
 	"leech-seed": {"proj": "seed"}, "solar-beam": {"beam": "sun", "proj": "sun"},
 	"sludge-bomb": {"proj": "bomb", "trail": "bubbles"}, "cross-poison": {"melee": "xmark"},
-	"poison-jab": {"proj": "fang"}, "sludge-wave": {"proj": "bomb"},
+	"poison-jab": {"proj": "fang"}, "sludge-wave": {"proj": "sludgewave"},
 	"drill-run": {"proj": "drill", "trail": "dirt"}, "scorching-sands": {"proj": "grain", "trail": "ember"},
 	"magnitude": {"aura": "grain", "rise": true},
 	"aurora-beam": {"beam": "flake", "proj": "flake"}, "freeze-dry": {"proj": "flake"},
 	"ice-ball": {"proj": "iceball"}, "ice-burn": {"aura": "flake", "rise": true},
 	"ice-hammer": {"melee": "hammer"}, "icicle-spear": {"proj": "icicle"},
-	"egg-bomb": {"proj": "bomb"}, "milk-drink": {"buff": "plus"}, "pay-day": {"proj": "coin"},
-	"slash": {"melee": "slashx"}, "sucker-punch": {"proj": "fist"}, "mist-ball": {"proj": "mistorb"},
-	"psyshock": {"proj": "twinring"}, "psystrike": {"beam": "twinring", "proj": "twinring"},
-	"stealth-rock": {"proj": "rockspike"}, "stone-axe": {"melee": "kick", "proj": "axeslash"},
+	"egg-bomb": {"proj": "egg"}, "milk-drink": {"buff": "plus"}, "pay-day": {"proj": "coin"},
+	"slash": {"melee": "cut", "beam": "cut"}, "sucker-punch": {"proj": "fist"}, "mist-ball": {"proj": "mistorb"},
+	"psyshock": {"proj": "twinring"}, "psystrike": {"beam": "psyblast", "proj": "psyblast"},
+	"stealth-rock": {"proj": "rockspike"}, "stone-axe": {"melee": "stoneaxe", "proj": "stoneaxe"},
 	"stone-edge": {"proj": "pillar"}, "anchor-shot": {"proj": "anchor"},
-	"behemoth-blade": {"melee": "slashx", "proj": "blade"}, "behemoth-bash": {"melee": "slashx", "proj": "blade"}, "hyper-beam": {"beam": "cannon", "proj": "cannon"},
+	"behemoth-blade": {"melee": "slashx", "proj": "blade"}, "behemoth-bash": {"melee": "shieldbash", "proj": "shieldbash"}, "hyper-beam": {"beam": "cannon", "proj": "cannon"},
 	"crabhammer": {"melee": "pincer"}, "octazooka": {"proj": "ink", "trail": "drip"},
 	"whirlpool": {"proj": "swirl"},
 }
@@ -411,3 +424,315 @@ static func gen(shape: String, P, f: int) -> void:
 			for k in range(3):
 				P.set_px(2.0 + float(k) * 3.0, 0.0 + float(f), "m")
 			P.outline()
+		# ---- v0.1.3: one look per move ----
+		"slam":   # Body Slam: a heavy body squashing down, dust puffing out at the base
+			var sq: float = 1.0 if f == 0 else 0.75
+			for y in range(13):
+				for x in range(15):
+					var e: float = pow((float(x) - 7.0) / 6.2, 2.0) + pow((float(y) - 6.0) / (4.6 * sq), 2.0)
+					if e <= 1.0:
+						P.g[y][x] = "l" if e < 0.35 else "m"
+			P.line(3, 4, 6, 3, "w")
+			for i in range(4):
+				_disc(P, 1.0 + float(i) * 4.2, 11.0 + float(f) * 0.5, 1.4 + float(f) * 0.3, "d")
+			P.outline()
+		"chop":   # Karate Chop: a straight hand-blade coming down, with speed lines
+			for y in range(1, 12):
+				P.set_px(4, y, "w")
+				P.set_px(5, y, "l")
+				P.set_px(3, y, "m")
+			P.line(3, 11, 6, 11, "m")
+			P.line(2, 7, 2, 10, "l")
+			for k in range(3):
+				P.set_px(7 + (k % 2), 2 + k * 3, "l")
+				P.set_px(7 + (k % 2), 3 + k * 3, "l")
+			P.line(1, 13, 7, 13, "d")
+			P.outline()
+		"tongue":   # Lick: a long curling tongue
+			var pts: Array = []
+			for i in range(13):
+				var t: float = float(i) / 12.0
+				pts.append(Vector2(1.0 + t * 12.0, 4.0 + sin(t * 3.2 + float(f) * 0.8) * 2.0 * t))
+			for i in range(pts.size()):
+				var q: Vector2 = pts[i]
+				var wd: float = 1.6 - float(i) / 12.0 * 0.6
+				for y in range(9):
+					if absf(float(y) - q.y) <= wd:
+						P.set_px(q.x, y, "l" if absf(float(y) - q.y) < wd * 0.5 else "m")
+			var tip: Vector2 = pts[pts.size() - 1]
+			_disc(P, tip.x, tip.y, 1.6, "l")
+			P.set_px(tip.x, tip.y, "w")
+			P.line(2, 4, 9, 4.0 + float(f) * 0.4, "d")
+			P.outline()
+		"swords":   # Swords Dance: an upright sword
+			for y in range(0, 10):
+				P.set_px(3, y, "w")
+				P.set_px(2, y, "l")
+				P.set_px(4, y, "m")
+			P.line(0, 10, 6, 10, "d", true, "d")
+			for y in range(11, 15):
+				P.set_px(3, y, "d")
+			P.outline()
+		"speedlines":   # Agility: horizontal speed streaks
+			var rows: Array = [1, 3, 4, 6, 7]
+			for i in range(rows.size()):
+				var ln: float = 6.0 + hh(i, f, 3) * 8.0
+				P.line(14.0 - ln, rows[i], 14, rows[i], "l" if i % 2 == 0 else "m")
+				P.set_px(14, rows[i], "w")
+		"plate":   # Harden: a riveted steel plate
+			for y in range(11):
+				for x in range(11):
+					var d6: float = absf(float(x) - 5.0) + absf(float(y) - 5.0) * 0.7
+					if d6 <= 5.4 and absf(float(y) - 5.0) <= 4.6:
+						P.g[y][x] = "l" if (x < 5 and y < 5) else "m"
+			for p6 in [[3, 3], [7, 3], [3, 7], [7, 7]]:
+				P.set_px(int(p6[0]), int(p6[1]), "w")
+			P.line(2, 5, 8, 5, "d")
+			P.outline()
+		"dragonflame":   # Dragon Dance / Dragon Rage: a forked dragon flame with scale marks
+			var prof2: Array = [0.0, 0.0, 0.6, 1.4, 2.2, 3.0, 3.6, 4.2, 4.6, 4.8, 4.6, 4.0, 3.2, 2.2, 1.0]
+			for y in range(15):
+				var wd3: float = float(prof2[y]) + (hh(y, f, 6) - 0.5) * 0.7
+				for x in range(11):
+					var d3: float = absf(float(x) - 5.0)
+					if d3 <= wd3:
+						P.set_px(x, y, "w" if (y > 10 and d3 < wd3 * 0.35) else ("l" if d3 < wd3 * 0.6 else "m"))
+			P.set_px(3, 0, "m")
+			P.set_px(7, 0, "m")
+			P.set_px(3, 1, "l")
+			P.set_px(7, 1, "l")
+			for k in range(3):
+				P.set_px(4 + (k % 2) * 2, 6 + k * 2, "d")
+			P.outline()
+		"mandible":   # Bug Bite: two small curved bug jaws closing
+			var op2: float = 0.5 if f == 0 else 0.15
+			P.arc(4, 5.5, 3.6, -PI / 2.0 - op2, PI / 2.0 + op2, "m")
+			P.arc(9, 5.5, 3.6, PI / 2.0 - op2, PI * 1.5 + op2, "m")
+			P.arc(4, 5.5, 2.6, -PI / 2.0, PI / 2.0, "l")
+			P.arc(9, 5.5, 2.6, PI / 2.0, PI * 1.5, "l")
+			for y in [3, 5, 7]:
+				P.set_px(6, y, "w")
+			P.outline()
+		"dreambubble":   # Dream Eater: a dream bubble with a sleeping z
+			P.arc(5, 5, 4.4, 0.0, TAU, "l")
+			P.arc(5, 5, 3.6, 2.4, 3.6, "w")
+			P.line(3, 3 + f, 7, 3 + f, "m")
+			P.line(7, 3 + f, 3, 7, "m")
+			P.line(3, 7, 7, 7, "m")
+		"roots":   # Grass Knot: roots snaking up out of the ground
+			var tips: Array = [[2.0, 3.0], [5.0, 0.0], [8.5, 2.0]]
+			for i in range(tips.size()):
+				var tx: float = float(tips[i][0]) + (float(f) - 0.5) * 0.6
+				var ty: float = float(tips[i][1]) + float(f)
+				P.line(5, 12, tx, ty, "m" if i != 1 else "l", true, "d")
+			P.line(1, 12, 9, 12, "d", true, "d")
+			P.outline()
+		"gleam":   # Dazzling Gleam: a four-point sparkle
+			var L2: float = 6.0 if f == 0 else 5.0
+			P.line(6.0 - L2, 6, 6.0 + L2, 6, "l")
+			P.line(6, 6.0 - L2, 6, 6.0 + L2, "l")
+			P.line(4, 4, 8, 8, "m")
+			P.line(8, 4, 4, 8, "m")
+			_disc(P, 6, 6, 1.4, "w")
+		"psyblade":   # Psycho Cut: a glowing psychic crescent blade
+			for y in range(11):
+				for x in range(13):
+					var a1: float = Vector2(float(x) - 4.0, float(y) - 5.0).length()
+					var b1: float = Vector2(float(x) - 1.5, float(y) - 5.0).length()
+					if a1 <= 6.0 and b1 >= 5.6:
+						P.g[y][x] = "w" if a1 > 5.0 else ("l" if a1 > 4.0 else "m")
+			P.set_px(10, 5, "w")
+			P.outline()
+		"caltrop":   # Spikes: a four-pronged caltrop
+			for k in range(4):
+				var a2: float = float(k) * PI / 2.0 + PI / 4.0
+				P.line(4, 4, 4.0 + cos(a2) * 4.0, 4.0 + sin(a2) * 4.0, "l", true, "m")
+			P.set_px(4, 4, "w")
+			P.outline()
+		"toxicspike":   # Toxic Spikes: a spike dripping poison
+			for y in range(0, 8):
+				var hw2: float = float(y) / 7.0 * 2.6
+				for x in range(9):
+					if absf(float(x) - 4.0) <= hw2:
+						P.set_px(x, y, "l" if absf(float(x) - 4.0) < hw2 * 0.4 else "m")
+			P.set_px(4, 0, "w")
+			P.set_px(2, 8 + f, "l")
+			P.set_px(6, 9 - f, "l")
+			P.set_px(2, 9 + f, "m")
+			P.outline()
+		"shieldbash":   # Behemoth Bash: a round shield with a boss, ringing on impact
+			_disc(P, 6, 6, 4.8, "m")
+			_disc(P, 6, 6, 3.6, "l")
+			_disc(P, 6, 6, 1.4, "w")
+			P.arc(6, 6, 6.0, -0.8 + float(f) * 0.3, 0.8 + float(f) * 0.3, "w")
+			P.outline()
+		"dustcloud":   # Play Rough: a cartoon scuffle cloud with stars popping out
+			for c in [[4.0, 8.0, 3.2], [8.0, 6.0, 3.8], [11.0, 8.5, 3.0], [7.0, 9.5, 3.0]]:
+				_disc(P, float(c[0]), float(c[1]), float(c[2]), "l")
+			_disc(P, 8, 7, 2.0, "w")
+			for i in range(3):
+				var sx: float = 2.0 + float(i) * 5.0 + float(f)
+				var sy: float = 1.0 + float((i + f) % 2)
+				P.set_px(sx, sy, "w")
+				P.set_px(sx - 1, sy, "m")
+				P.set_px(sx + 1, sy, "m")
+				P.set_px(sx, sy - 1, "m")
+				P.set_px(sx, sy + 1, "m")
+			P.outline()
+		"petal":   # Petal Blizzard / Fleur Cannon: a five-petal blossom
+			for k in range(5):
+				var a3: float = float(k) * TAU / 5.0 + float(f) * 0.6
+				_disc(P, 4.0 + cos(a3) * 2.4, 4.0 + sin(a3) * 2.4, 1.6, "l")
+			_disc(P, 4, 4, 1.2, "w")
+			P.outline()
+		"whiteflame":   # Ice Burn (White Kyurem): a pale flame with icy wisps
+			for x in range(1, 13):
+				var t2: float = float(x - 1) / 11.0
+				var th2: float = 0.6 + t2 * 3.4 + (hh(x, f, 9) - 0.5)
+				var yc2: float = 5.0 + sin(float(x) * 1.1 + float(f) * 2.0) * 0.7 * (1.0 - t2)
+				for y in range(P.h):
+					var d4: float = absf(float(y) - yc2)
+					if d4 <= th2:
+						P.set_px(x, y, "w" if d4 < th2 * 0.55 else "l")
+			for i in range(3):
+				P.set_px(2.0 + hh(i, f, 4) * 10.0, hh(i, f, 5) * 2.0, "m")
+			P.outline()
+		"stoneaxe":   # Stone Axe: a stone axe head on a handle
+			P.line(1, 12, 8, 5, "d", true, "d")
+			for y in range(1, 9):
+				for x in range(7, 13):
+					if Vector2(float(x) - 7.0, float(y) - 5.0).length() <= 5.2:
+						P.g[y][x] = "l" if x < 10 else "m"
+			P.line(12, 1, 12, 9, "w")
+			P.set_px(9, 3, "w")
+			P.outline()
+		"flamekick":   # Blaze Kick: a kicking boot wreathed in flames
+			for y in range(6, 11):
+				for x in range(3, 10):
+					P.g[y][x] = "m"
+			P.line(3, 10, 11, 10, "d")
+			for x in range(3, 10):
+				P.set_px(x, 6, "l")
+			for i in range(5):
+				var fx: float = 2.0 + float(i) * 2.0
+				var fh: float = 2.0 + hh(i, f, 3) * 3.0
+				P.line(fx, 6, fx + (float(f) - 0.5), 6.0 - fh, "l" if i % 2 == 0 else "w")
+			P.outline()
+		"firering":   # Fire Spin: a ring of flame
+			for k in range(10):
+				var a5: float = float(k) * TAU / 10.0 + float(f) * 0.3
+				var r1: float = 5.5 + hh(k, f, 2) * 1.2
+				P.line(6.0 + cos(a5) * 4.0, 6.0 + sin(a5) * 4.0, 6.0 + cos(a5) * r1, 6.0 + sin(a5) * r1, "l" if k % 2 == 0 else "w")
+			P.arc(6, 6, 4.0, 0.0, TAU, "m")
+			P.arc(6, 6, 3.0, 0.0, TAU, "d")
+		"heatshimmer":   # Heat Wave: rippling heat lines
+			for i in range(3):
+				var y0: float = 1.5 + float(i) * 3.0
+				for x in range(15):
+					P.set_px(x, y0 + sin(float(x) * 0.8 + float(f) * 1.6 + float(i)) * 1.1, "l" if i == 1 else "m")
+			P.set_px(14, 4, "w")
+		"flamewheel":   # Flame Wheel: a spinning wheel of fire
+			P.arc(6, 6, 5.0, 0.0, TAU, "m")
+			P.arc(6, 6, 4.2, 0.0, TAU, "l")
+			for k in range(4):
+				var a6: float = float(k) * PI / 2.0 + float(f) * 0.4
+				P.line(6, 6, 6.0 + cos(a6) * 4.4, 6.0 + sin(a6) * 4.4, "w")
+				P.set_px(6.0 + cos(a6 + 0.3) * 6.0, 6.0 + sin(a6 + 0.3) * 6.0, "l")
+			_disc(P, 6, 6, 1.2, "w")
+		"confuse":   # Confusion: little stars circling a dizzy spiral
+			for i in range(30):
+				var t3: float = float(i) * 0.2
+				var r3: float = 0.6 + t3 * 0.7
+				if r3 > 3.6:
+					break
+				P.set_px(5.0 + cos(t3 * 1.6) * r3, 5.0 + sin(t3 * 1.6) * r3, "l")
+			for k in range(3):
+				var a7: float = float(k) * TAU / 3.0 + float(f) * 0.9
+				P.set_px(5.0 + cos(a7) * 4.6, 5.0 + sin(a7) * 4.6, "w")
+		"hypno":   # Hypnosis: hypnotic concentric rings
+			for y in range(13):
+				for x in range(13):
+					var d5: float = Vector2(float(x) - 6.0, float(y) - 6.0).length()
+					if d5 <= 6.2:
+						P.g[y][x] = "l" if int(d5 + float(f)) % 2 == 0 else "d"
+			P.set_px(6, 6, "w")
+		"sparklewind":   # Fairy Wind: a breezy gust trailing sparkles
+			P.arc(4, 8, 6.0, -1.3, -0.1, "l")
+			P.arc(4, 9, 4.0, -1.3, 0.0, "m")
+			for i in range(4):
+				P.set_px(7.0 + hh(i, f, 6) * 5.0, 1.0 + hh(i, f, 7) * 6.0, "w")
+		"decoy":   # Substitute: a little plush decoy doll
+			_disc(P, 4, 3, 2.6, "l")
+			for y in range(5, 10):
+				for x in range(1, 8):
+					if absf(float(x) - 4.0) <= 2.8:
+						P.g[y][x] = "m"
+			P.set_px(3, 3, "d")
+			P.set_px(5, 3, "d")
+			P.set_px(1, 1, "m")
+			P.set_px(7, 1, "m")
+			P.outline()
+		"darkring":   # Dark Pulse: a jagged ring of dark energy
+			for k in range(16):
+				var a8: float = float(k) * TAU / 16.0
+				var r4: float = 4.4 + (1.2 if (k + f) % 2 == 0 else 0.0)
+				P.line(6.0 + cos(a8) * 3.2, 6.0 + sin(a8) * 3.2, 6.0 + cos(a8) * r4, 6.0 + sin(a8) * r4, "m" if k % 2 == 0 else "d")
+			P.arc(6, 6, 2.4, 0.0, TAU, "l")
+		"zapring":   # Thunder Wave: a zig-zag electric ring
+			for k in range(12):
+				var a9: float = float(k) * TAU / 12.0
+				var a10: float = float(k + 1) * TAU / 12.0
+				var r5: float = 4.6 if k % 2 == 0 else 5.8
+				var r6: float = 5.8 if k % 2 == 0 else 4.6
+				P.line(6.0 + cos(a9) * r5, 6.0 + sin(a9) * r5, 6.0 + cos(a10) * r6, 6.0 + sin(a10) * r6, "l" if (k + f) % 3 != 0 else "w")
+		"psyblast":   # Psystrike: a burst of psychic force
+			for k in range(8):
+				var a11: float = float(k) * PI / 4.0 + float(f) * 0.2
+				var L3: float = 7.0 if k % 2 == 0 else 4.6
+				P.line(7, 7, 7.0 + cos(a11) * L3, 7.0 + sin(a11) * L3, "l" if k % 2 == 0 else "m")
+			_disc(P, 7, 7, 2.6, "m")
+			_disc(P, 7, 7, 1.4, "w")
+		"sludgewave":   # Sludge Wave: a cresting wave of sludge
+			for x in range(15):
+				var hgt2: float = 3.0 + sin(float(x) * 0.45 + float(f)) * 2.0
+				for y in range(9):
+					if float(y) >= 8.0 - hgt2:
+						P.set_px(x, y, "l" if float(y) < 9.0 - hgt2 else "m")
+			P.set_px(4.0 + float(f) * 4.0, 1, "m")
+			P.outline()
+		"egg":   # Egg Bomb: a spotted egg
+			for y in range(11):
+				for x in range(9):
+					var e2: float = pow((float(x) - 4.0) / 3.6, 2.0) + pow((float(y) - 5.6) / (4.8 if y < 6 else 4.2), 2.0)
+					if e2 <= 1.0:
+						P.g[y][x] = "w" if e2 < 0.5 else "l"
+			P.set_px(3, 4, "m")
+			P.set_px(5, 7, "m")
+			P.set_px(6, 3, "m")
+			P.outline()
+		"hailstone":   # Hail: a lumpy chunk of hail
+			for k in range(5):
+				var a12: float = float(k) * TAU / 5.0 + float(f) * 0.5
+				_disc(P, 4.0 + cos(a12) * 1.4, 4.0 + sin(a12) * 1.4, 2.0, "l")
+			_disc(P, 4, 4, 1.6, "w")
+			P.set_px(3, 3, "w")
+			P.outline()
+		"aircut":   # Air Cutter: thin twin wind blades
+			P.arc(2, 9, 8.0, -1.1, -0.3, "l")
+			P.arc(2, 9, 6.6, -1.1, -0.3, "w")
+			P.arc(5, 11, 6.0, -1.0, -0.3, "m")
+		"boulder":   # Rock Slide: a big tumbling boulder with cracks
+			for y in range(15):
+				for x in range(15):
+					var d7: float = Vector2(float(x) - 7.0, float(y) - 7.0).length() + (hh(x, y, 4) - 0.5) * 0.8
+					if d7 <= 6.6:
+						P.g[y][x] = "l" if (x + y < 12) else ("m" if d7 < 5.5 else "d")
+			P.line(5, 3 + f, 8, 8, "d")
+			P.line(8, 8, 11, 7 - f, "d")
+			P.set_px(4, 4, "w")
+			P.outline()
+		"cut":   # Slash: one long clean diagonal cut
+			P.line(1, 13, 13, 1, "w", true, "l")
+			P.line(2, 13, 13, 2, "m")
+			P.set_px(13, 1, "w")
+			P.set_px(1, 13, "m")

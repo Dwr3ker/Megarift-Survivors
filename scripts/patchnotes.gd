@@ -9,6 +9,23 @@ const UPD = preload("res://scripts/updater.gd")
 
 const ENTRIES := [
 	{
+		"ver": "0.1.3-alpha.1",
+		"date": "2026-11-01",
+		"title": "Megarift Survivors 0.1.3-alpha.1: a look for every move (test build)",
+		"new": [
+			"A look for every move: all 128 moves now have their own animation that fits the name, instead of another type's attack in a new colour. Body Slam squashes down, Karate Chop drops a hand-blade, Lick unrolls a tongue, Swords Dance circles you with swords, Harden closes steel plates in, Ice Beam grows ice crystals, Flash Cannon is a white-hot flare, Fire Spin throws rings of fire and Fire Lash is a whip of flame.",
+		],
+		"changes": [
+			"Pause > View now zooms from 70% to 250%.",
+			"Settings > Graphics > HUD size (60-140%) replaces Screen size: it scales only the run HUD, and menus, the pause screen and the level-up cards keep their size.",
+			"The pause screen has a single exit: Save and quit in Normal runs, Quit run in modes that can't be saved. If a Normal run can't be saved right now, it explains why and asks before quitting without saving.",
+		],
+		"fixes": [
+			"On Windows, the update notice now downloads the Windows version instead of the Android APK.",
+			"Grass Knot now raises roots and Petal Blizzard throws petals, matching their names.",
+		],
+	},
+	{
 		"ver": "0.1.2",
 		"date": "2026-11-01",
 		"title": "Megarift Survivors 0.1.2: defeat Arceus to unlock regions, new achievements",

@@ -21,6 +21,10 @@ const MAX_BEAMS := 36
 const MAX_SLASHES := 36
 const RING_DOTS := 150   # most dots one ring is drawn with
 const SLASH_STEPS := 110
+# Every melee style and beam style a move can name (VFX.for_move keys "melee" / "bstyle"); tools/tests/move_visuals_test.gd checks them.
+const MELEE_STYLES := ["impact", "jaws", "claw", "slashx", "kick", "fist", "hammer", "xmark", "pincer", "vine", "feather", "whip",
+	"slam", "chop", "tongue", "mandible", "shieldbash", "dustcloud", "stoneaxe", "blade", "cut"]
+const BEAM_STYLES := ["solid", "frost", "flare", "stream", "wave", "charged"]
 
 
 # v5.2.1: menos particulas en todo el juego para evitar lag (el nivel Alta ya no es el 100% de antes).
@@ -124,11 +128,14 @@ func ring(pos: Vector2, r0: float, r1: float, color: Color, life: float = 0.3, w
 func slash(pos: Vector2, angle: float, radius: float, arc: float, vis: Dictionary) -> void:
 	var pal: String = String(vis.get("pal", "normal"))
 	var melee: String = String(vis.get("melee", ""))
-	var life := 0.3 if melee == "vine" else 0.22
+	var whip: bool = melee == "vine" or melee == "whip"
+	var life := 0.3 if whip else 0.22
 	var tg = under if under != null else self
 	if tg.slashes.size() >= MAX_SLASHES:
 		tg.slashes.remove_at(0)
-	tg.slashes.append({"p": pos, "ang": angle, "r": radius, "arc": arc, "pal": pal, "t": 0.0, "life": life, "vine": melee == "vine", "seed": randf() * 100.0})
+	# "vine" is a grass vine ending in a leaf; "whip" is the same lash in the move's own colours (Fire Lash: a whip of flame)
+	tg.slashes.append({"p": pos, "ang": angle, "r": radius, "arc": arc, "pal": pal, "t": 0.0, "life": life, "vine": whip,
+		"wpal": "grass" if melee == "vine" else pal, "tip": "leaf" if melee == "vine" else "ember2", "seed": randf() * 100.0})
 	var m: Vector2 = pos + Vector2.from_angle(angle) * radius * 0.7
 	match melee:
 		"impact":
@@ -137,7 +144,24 @@ func slash(pos: Vector2, angle: float, radius: float, arc: float, vis: Dictionar
 			sp("jaws", pal, m, {"life": 0.24, "scale": 1.5, "fr": 9.0, "fade": false})
 		"claw":
 			sp("claw", pal, m, {"life": 0.2, "scale": 1.5, "angle": angle - PI / 4.0})
-		"slashx", "kick", "fist", "hammer", "xmark", "pincer":
+		"mandible":   # Bug Bite: two small jaws snapping twice
+			sp("mandible", pal, m, {"life": 0.26, "scale": 1.4, "fr": 14.0, "fade": false})
+		"slam":   # Body Slam: a heavy body squashing down, dust puffs rolling outward
+			sp("slam", pal, m, {"life": 0.24, "scale": 2.0, "fr": 9.0, "fade": true})
+			for i in range(6):
+				var a6: float = float(i) / 6.0 * TAU
+				sp("dustcloud", "normal", m + Vector2.from_angle(a6) * 10.0, {"v": Vector2.from_angle(a6) * 70.0, "life": 0.3, "scale": 0.6})
+		"chop":   # Karate Chop: the hand-blade drops straight down onto the target
+			sp("chop", pal, m + Vector2(0.0, -26.0), {"v": Vector2(0.0, 150.0), "life": 0.2, "scale": 1.8, "fade": true})
+			sp("impact", pal, m, {"life": 0.14, "scale": 0.9, "fr": 14.0})
+		"tongue":   # Lick: a long tongue unrolling toward the target
+			sp("tongue", pal, pos + Vector2.from_angle(angle) * radius * 0.45, {"life": 0.28, "scale": 1.8, "fr": 8.0, "angle": angle, "fade": true})
+		"cut":   # Slash: one long clean cut across the arc
+			sp("cut", pal, m, {"life": 0.2, "scale": 2.0, "angle": angle - PI / 4.0, "fade": true})
+		"dustcloud":   # Play Rough: a cartoon scuffle that keeps popping
+			for i in range(3):
+				sp("dustcloud", pal, m + Vector2(rnd(-14.0, 14.0), rnd(-10.0, 10.0)), {"life": 0.3, "scale": 1.4 - 0.25 * float(i), "fr": 10.0, "fade": true})
+		"slashx", "kick", "fist", "hammer", "xmark", "pincer", "shieldbash", "stoneaxe", "blade":
 			sp(melee, pal, m, {"life": 0.26, "scale": 2.0, "fr": 10.0, "fade": true, "spin": 0.0})
 			for i in range(3):
 				sp(melee, pal, pos + Vector2.from_angle(angle + rnd(-arc / 2.0, arc / 2.0)) * radius * rnd(0.55, 1.0), {"life": 0.2, "scale": 1.0, "fr": 10.0})
@@ -156,7 +180,8 @@ func beam(pos: Vector2, angle: float, length: float, width: float, vis: Dictiona
 	var tg = under if under != null else self
 	if tg.beams.size() >= MAX_BEAMS:
 		tg.beams.remove_at(0)
-	tg.beams.append({"p": pos, "ang": angle, "len": length, "w": width, "pal": pal, "shape": String(vis.get("beam", "")), "t": 0.0, "life": 0.2, "seed": randf() * 100.0})
+	tg.beams.append({"p": pos, "ang": angle, "len": length, "w": width, "pal": pal, "shape": String(vis.get("beam", "")), "style": String(vis.get("bstyle", "solid")),
+		"t": 0.0, "life": 0.2, "seed": randf() * 100.0})
 	var d := Vector2.from_angle(angle)
 	sp("impact", pal, pos + d * 10.0, {"life": 0.12, "scale": 1.0})
 	sp("impact", pal, pos + d * length, {"life": 0.18, "scale": 1.5})
@@ -257,25 +282,69 @@ func _draw_beam(b: Dictionary, now: float) -> void:
 			py = ny
 			d += seg
 	else:
+		var style: String = String(b.get("style", "solid"))
 		var d2 := 0.0
 		while d2 < length:
 			var wob: float = 0.7 + 0.3 * sin(d2 * 0.18 + now * 30.0 + seed_v)
-			var hw: float = maxf(PX, snap(width / 2.0 * wob * (0.6 + 0.4 * k)))
-			_rect(d2, -hw - PX, seg, hw * 2.0 + PX * 2.0, VFX.pc(pal, 1), al)
-			_rect(d2, -hw, seg, hw * 2.0, VFX.pc(pal, 2), al)
-			var h2: float = snap(hw * 0.55)
-			_rect(d2, -h2, seg, h2 * 2.0, VFX.pc(pal, 3), al)
-			_rect(d2, -PX, seg, PX * 2.0, VFX.pc(pal, 4), al)
+			var yo2 := 0.0
+			var wk := 1.0
+			match style:
+				"wave":   # a sinuous band that ripples along its length
+					yo2 = snap(sin(d2 * 0.07 - now * 22.0 + seed_v) * width * 0.55)
+					wk = 0.75
+				"stream":   # a thin current: what it carries is the star
+					wk = 0.45
+				"charged":   # the band throbs as the charge builds and lets go
+					wk = 0.8 + 0.35 * sin(now * 45.0 + d2 * 0.05)
+				"flare":   # a hard white-hot core
+					wob = 1.0
+			var hw: float = maxf(PX, snap(width / 2.0 * wob * wk * (0.6 + 0.4 * k)))
+			_rect(d2, yo2 - hw - PX, seg, hw * 2.0 + PX * 2.0, VFX.pc(pal, 1), al)
+			_rect(d2, yo2 - hw, seg, hw * 2.0, VFX.pc(pal, 2), al)
+			var h2: float = snap(hw * (0.8 if style == "flare" else 0.55))
+			_rect(d2, yo2 - h2, seg, h2 * 2.0, VFX.pc(pal, 3), al)
+			if style == "flare":
+				_rect(d2, yo2 - h2 + PX, seg, h2 * 2.0 - PX * 2.0, VFX.pc(pal, 4), al)
+			else:
+				_rect(d2, yo2 - PX, seg, PX * 2.0, VFX.pc(pal, 4), al)
 			d2 += seg
+		match style:
+			"frost":   # ice crystals grow out of the beam's sides as it lingers
+				var grow: float = (1.0 - k) * width * 0.9 + width * 0.3
+				var cd := 14.0
+				while cd < length:
+					var sd: float = 1.0 if int(cd / 18.0) % 2 == 0 else -1.0
+					var ln: float = maxf(PX * 2.0, snap(grow * (0.6 + 0.4 * VFX.hh(int(cd), int(seed_v), 3))))
+					var e0: float = snap(width * 0.4) * sd
+					var ys: float = minf(e0, e0 + ln * sd)
+					_rect(cd, ys, PX * 2.0, ln, VFX.pc(pal, 3), al)
+					_rect(cd, (ys + ln - PX * 2.0) if sd > 0.0 else ys, PX * 2.0, PX * 2.0, VFX.pc(pal, 4), al)
+					_rect(cd - PX * 2.0, snap(e0 + ln * 0.5 * sd), PX * 6.0, PX, VFX.pc(pal, 4), al * 0.8)
+					cd += 18.0
+			"flare":   # bright rings pulse outward along the beam
+				var pg := 34.0
+				var po: float = fmod(now * 300.0 + seed_v, pg)
+				while po < length:
+					var rh: float = snap(width * 0.9)
+					_rect(snap(po), -rh, PX * 2.0, rh * 2.0, VFX.pc(pal, 4), al * 0.85)
+					po += pg
+			"charged":   # little sparks crackle off the edges
+				for i in range(6):
+					var sx: float = snap(VFX.hh(i, int(now * 20.0), int(seed_v)) * length)
+					var sy: float = snap((VFX.hh(i, int(now * 20.0), 7) - 0.5) * width * 2.4)
+					_rect(sx, sy, PX * 2.0, PX, VFX.pc(pal, 4), al)
+					_rect(sx + PX, sy + PX, PX, PX * 2.0, VFX.pc(pal, 3), al)
 		var shape: String = String(b["shape"])
 		if shape != "":
-			var gap := 26.0
+			var gap := 14.0 if style == "stream" else 26.0
 			var off: float = fmod(now * 420.0, gap)
 			var dd: float = off
 			var dir := Vector2.from_angle(ang)
 			var perp := Vector2(-dir.y, dir.x)
 			while dd < length - 6.0:
-				var yo: float = sin(dd * 0.3 + seed_v) * width * 0.18
+				var yo: float = sin(dd * 0.3 + seed_v) * width * (0.5 if style == "stream" else 0.18)
+				if style == "wave":
+					yo = sin(dd * 0.07 - now * 22.0 + seed_v) * width * 0.55
 				VFX.draw(self, shape, pal, pos + dir * dd + perp * yo, ang, 1.5, int(dd / gap + now * 12.0), al, false)
 				dd += gap
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
@@ -324,6 +393,7 @@ func _draw_whip(s: Dictionary, now: float) -> void:
 	var len_px: float = radius * reach
 	var steps: int = maxi(4, int(len_px / PX))
 	var seed_v: float = float(s["seed"])
+	var wpal: String = String(s.get("wpal", "grass"))
 	var pts: Array = []
 	for i in range(steps + 1):
 		var f: float = float(i) / float(steps)
@@ -338,18 +408,18 @@ func _draw_whip(s: Dictionary, now: float) -> void:
 		var f2: float = float(i) / float(steps)
 		var w: float = PX * (2.0 if f2 < 0.55 else 1.0)
 		var q: Vector2 = pts[i]
-		_rect(snap(q.x) - PX, snap(q.y) - PX, w + PX * 2.0, w + PX * 2.0, VFX.pc("grass", 0), al)
+		_rect(snap(q.x) - PX, snap(q.y) - PX, w + PX * 2.0, w + PX * 2.0, VFX.pc(wpal, 0), al)
 	# cuerpo
 	for i in range(pts.size()):
 		var f3: float = float(i) / float(steps)
 		var w2: float = PX * (2.0 if f3 < 0.55 else 1.0)
 		var q2: Vector2 = pts[i]
 		var node: bool = (i % 5) == 0
-		_rect(snap(q2.x), snap(q2.y), w2, w2, VFX.pc("grass", 1 if node else 2), al)
+		_rect(snap(q2.x), snap(q2.y), w2, w2, VFX.pc(wpal, 1 if node else 2), al)
 		if not node and w2 > PX:
-			_rect(snap(q2.x), snap(q2.y), PX, PX, VFX.pc("grass", 3), al)
+			_rect(snap(q2.x), snap(q2.y), PX, PX, VFX.pc(wpal, 3), al)
 	# punta: hoja
 	if pts.size() > 1:
 		var tip: Vector2 = pts[pts.size() - 1]
 		var prev: Vector2 = pts[pts.size() - 2]
-		VFX.draw(self, "leaf", "grass", tip, (tip - prev).angle(), 1.5, 0, al)
+		VFX.draw(self, String(s.get("tip", "leaf")), wpal, tip, (tip - prev).angle(), 1.5, int(now * 10.0), al)

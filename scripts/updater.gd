@@ -15,7 +15,7 @@ const PAD = preload("res://scripts/pad.gd")
 # y tambien deben avisar. Una alpha es anterior a su version final: 0.1.0-alpha.11 < 0.1.0-alpha.12 < 0.1.0.
 # Con REPO vacio no se hace ninguna peticion de red.
 const REPO := "Dwr3ker/Megarift-Survivors"
-const FALLBACK_VERSION := "0.1.2"
+const FALLBACK_VERSION := "0.1.3-alpha.1"
 static var APP_VERSION: String = _current()
 
 

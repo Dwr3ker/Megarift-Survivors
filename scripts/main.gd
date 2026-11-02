@@ -3557,7 +3557,7 @@ func _pat(p: String, m: Dictionary) -> void:
 				shake = maxf(shake, 5.0))
 		"thrust":   # Espada Santa: estocada larguisima y fina
 			_p_hit_line(pos, aim, rad, 22.0, m, 1.0)
-			pfx.beam(pos + Vector2(0.0, -LIFT), aim, rad, 22.0, {"pal": String(vis["pal"]), "beam": "blade"})
+			pfx.beam(pos + Vector2(0.0, -LIFT), aim, rad, 22.0, {"pal": String(vis["pal"]), "beam": String(vis.get("beam", "blade"))})
 			shake = maxf(shake, 2.0)
 		"flamepath":   # Patada Ignea: embestida que deja un camino de brasas
 			var ln: float = rad
@@ -3721,7 +3721,7 @@ func _pat(p: String, m: Dictionary) -> void:
 				var r7: float = rad * float(rs[i])
 				_later(0.2 + 0.25 * float(i), func():
 					_p_hit_circle(c7, r7, m, float(ks[i]))
-					pfx.sp("bomb", String(vis["pal"]), c7 + Vector2(0.0, -10.0), {"v": Vector2(0.0, -80.0), "life": 0.3, "grav": 400.0}))
+					pfx.sp(String(vis["proj"]), String(vis["pal"]), c7 + Vector2(0.0, -10.0), {"v": Vector2(0.0, -80.0), "life": 0.3, "grav": 400.0}))
 				_p_tele(c7, r7, m, 0.2 + 0.25 * float(i))
 		"scatter":   # Dia de Pago: lluvia de monedas desordenada
 			for i in range(8):
@@ -3732,7 +3732,7 @@ func _pat(p: String, m: Dictionary) -> void:
 				_later(0.06 * float(i), func():
 					var ca: float = player.aim + float(offs[i])
 					_p_hit_line(player.position, ca, rad, 12.0, m, 0.7)
-					pfx.beam(player.position + Vector2(0.0, -LIFT), ca, rad, 8.0, {"pal": String(vis["pal"]), "beam": "blade"}))
+					pfx.beam(player.position + Vector2(0.0, -LIFT), ca, rad, 8.0, {"pal": String(vis["pal"]), "beam": String(vis.get("beam", "blade"))}))
 		"blink":   # Golpe Bajo: te teletransportas detras del enemigo y golpeas
 			var tt2: Array = _p_targets(1, _reach(m))
 			if tt2.is_empty():
@@ -3868,8 +3868,8 @@ func _beam(m: Dictionary) -> void:
 
 func _aura(m: Dictionary) -> void:
 	var rad: float = _f(m, "radius")
-	_ring(player.position, rad * 0.5, rad, _col(m), 0.28, 2.0)
 	var vis: Dictionary = VFX.for_move(String(m["id"]), String(m["type"]))
+	_ring(player.position, rad * 0.5, rad, VFX.pc(String(vis["pal"]), 3), 0.28, 2.0)   # the ring wears the move's own colours
 	if vis.has("aura"):
 		for i in range(5):
 			var a: float = randf() * TAU
@@ -3907,6 +3907,7 @@ func _buff(m: Dictionary) -> void:
 		add_text(player.position + Vector2(0.0, -player.body_h - 4.0), "+%d" % maxi(1, roundi(hv)), Color("#7dffb0"), 16)
 		Aud.sfx("heal")
 		_ring(player.position, player.radius * 2.4, player.radius * 1.1, _col(m), 0.35, 2.5)
+		_buff_sprites(m)
 		return
 	if player.buffs.has(stat):
 		var b: Dictionary = player.buffs[stat]
@@ -3925,9 +3926,35 @@ func _buff(m: Dictionary) -> void:
 		b["n"] = ts.size()
 		b["t"] = dur
 	_ring(player.position, player.radius * 2.4, player.radius * 1.1, _col(m), 0.35, 2.5)
+	_buff_sprites(m)
+
+
+# What a buff looks like (VFX.for_move "buff" sprite, "bmode" motion): orbit = circles you (Swords Dance's blades, Dragon Dance's
+# flames), inward = closes in on you (Harden's plates), streak = rushes past you (Agility), default = rises (Roost, Milk Drink).
+func _buff_sprites(m: Dictionary) -> void:
 	var bv: Dictionary = VFX.for_move(String(m["id"]), String(m["type"]))
-	for i in range(3):
-		pfx.sp(String(bv.get("buff", "arrow")), String(bv["pal"]), player.position + Vector2(randf_range(-player.radius * 1.4, player.radius * 1.4), -randf_range(0.0, player.body_h * 0.8)), {"v": Vector2(0.0, -70.0), "life": 0.6})
+	if not bv.has("buff"):
+		return
+	var sh: String = String(bv["buff"])
+	var pal: String = String(bv["pal"])
+	var c: Vector2 = player.position + Vector2(0.0, -player.body_h * 0.45)
+	var rr: float = player.radius * 2.0
+	match String(bv.get("bmode", "rise")):
+		"orbit":
+			for i in range(4):
+				var a: float = float(i) / 4.0 * TAU
+				pfx.sp(sh, pal, c + Vector2(cos(a) * rr, sin(a) * rr * 0.7), {"v": Vector2(-sin(a) * rr * 5.0, cos(a) * rr * 3.5), "life": 0.45, "angle": a + PI / 2.0})
+		"inward":
+			for i in range(4):
+				var a2: float = float(i) / 4.0 * TAU + PI / 4.0
+				pfx.sp(sh, pal, c + Vector2(cos(a2), sin(a2)) * rr * 1.6, {"v": -Vector2(cos(a2), sin(a2)) * rr * 3.2, "life": 0.3})
+		"streak":
+			var bk: Vector2 = -Vector2.from_angle(player.aim)
+			for i in range(3):
+				pfx.sp(sh, pal, c + Vector2(0.0, randf_range(-rr * 0.6, rr * 0.6)), {"v": bk * 260.0, "life": 0.3, "angle": bk.angle()})
+		_:
+			for i in range(3):
+				pfx.sp(sh, pal, player.position + Vector2(randf_range(-player.radius * 1.4, player.radius * 1.4), -randf_range(0.0, player.body_h * 0.8)), {"v": Vector2(0.0, -70.0), "life": 0.6})
 
 
 func _chain(m: Dictionary) -> void:

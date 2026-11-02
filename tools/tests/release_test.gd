@@ -12,7 +12,7 @@ func _init() -> void:
 	var UPD = load("res://scripts/updater.gd")
 	var PN = load("res://scripts/patchnotes.gd")
 	var L = load("res://scripts/lang.gd")
-	check("in-game version is 0.1.2", UPD.APP_VERSION == "0.1.2", UPD.APP_VERSION)
+	check("in-game version is 0.1.3-alpha.1", UPD.APP_VERSION == "0.1.3-alpha.1", UPD.APP_VERSION)
 	check("updater targets this project's repository", UPD.REPO == "Dwr3ker/Megarift-Survivors", UPD.REPO)
 	# version comparison (pure logic, no network): a newer tag is offered, the same or older is not
 	check("v0.1.1 is newer than 0.1.0", UPD.is_newer("v0.1.1", "0.1.0"))
@@ -46,7 +46,7 @@ func _init() -> void:
 	var every := true
 	for n in range(1, 11):   # the ten test builds before 0.1.0
 		every = every and vers.has("0.1.0-alpha.%d" % n)
-	check("What's new has this version, 0.1.0 and every alpha before it, newest first", every and vers.size() == 13 and vers[0] == UPD.APP_VERSION and vers.has("0.1.1") and vers.has("0.1.0") and vers[vers.size() - 1] == "0.1.0-alpha.1", str(vers))
+	check("What's new has this version, 0.1.0 and every alpha before it, newest first", every and vers.size() == 14 and vers[0] == UPD.APP_VERSION and vers.has("0.1.1") and vers.has("0.1.0") and vers[vers.size() - 1] == "0.1.0-alpha.1", str(vers))
 	# every line of every entry has a Spanish translation, and the newest entry is translated in every language
 	# (the English text is the translation key; entries up to alpha.10 were only ever translated to Spanish)
 	for code in ["es", "es_419", "fr", "it", "ja", "pt_BR", "pt_PT", "ru", "vi", "zh_CN", "zh_HK"]:
