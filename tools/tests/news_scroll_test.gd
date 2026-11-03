@@ -9,7 +9,20 @@ func _init() -> void:
 	var menu = (load("res://scenes/menu.tscn") as PackedScene).instantiate()
 	root.add_child(menu)
 	await process_frame
-	menu.news_sel = 1
+	# open the entry with the most text: it must not fit, so the article has to scroll
+	var PN = load("res://scripts/patchnotes.gd")
+	var longest := 0
+	var most := 0
+	for i in range(PN.ENTRIES.size()):
+		var e: Dictionary = PN.ENTRIES[i]
+		var n: int = 0
+		for k in ["new", "changes", "fixes"]:
+			for ln in e.get(k, []):
+				n += String(ln).length()
+		if n > most:
+			most = n
+			longest = i
+	menu.news_sel = longest
 	menu._show("news")
 	for i in range(6):
 		await process_frame

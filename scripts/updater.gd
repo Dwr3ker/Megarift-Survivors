@@ -15,7 +15,7 @@ const PAD = preload("res://scripts/pad.gd")
 # y tambien deben avisar. Una alpha es anterior a su version final: 0.1.0-alpha.11 < 0.1.0-alpha.12 < 0.1.0.
 # Con REPO vacio no se hace ninguna peticion de red.
 const REPO := "Dwr3ker/Megarift-Survivors"
-const FALLBACK_VERSION := "0.1.3-alpha.3"
+const FALLBACK_VERSION := "0.1.3-alpha.4"
 static var APP_VERSION: String = _current()
 
 
@@ -83,11 +83,26 @@ static func is_newer(tag: String, current: String) -> bool:
 	return pa > pb
 
 
-# The newest published (not draft) release in GitHub's list, alphas included; {} if none.
-static func newest(list: Array) -> Dictionary:
+# Test builds (pre-releases such as 0.1.3-alpha.2) are only offered to players who are already on a test build or who
+# turned on Settings > Account > Get test builds. Everyone else only hears about full releases.
+static func wants_test_builds() -> bool:
+	if pre_num(APP_VERSION) >= 0:
+		return true
+	SV.ensure()
+	return bool(SV.d["settings"].get("test_builds", false))
+
+
+static func is_test_build(r: Dictionary) -> bool:
+	return bool(r.get("prerelease", false)) or pre_num(String(r.get("tag_name", ""))) >= 0
+
+
+# The newest published (not draft) release in GitHub's list; {} if none. Test builds count only when allow_test is true.
+static func newest(list: Array, allow_test: bool = true) -> Dictionary:
 	var best := {}
 	for r in list:
 		if not (r is Dictionary) or bool(r.get("draft", false)):
+			continue
+		if not allow_test and is_test_build(r):
 			continue
 		if best.is_empty() or is_newer(String(r.get("tag_name", "")), String(best.get("tag_name", ""))):
 			best = r
@@ -110,7 +125,7 @@ func _done(result: int, code: int, _headers: PackedStringArray, body: PackedByte
 		queue_free()
 		return
 	var parsed = JSON.parse_string(body.get_string_from_utf8())
-	var j: Dictionary = newest(parsed) if parsed is Array else (parsed if parsed is Dictionary else {})
+	var j: Dictionary = newest(parsed, wants_test_builds()) if parsed is Array else (parsed if parsed is Dictionary else {})
 	if j.is_empty():
 		queue_free()
 		return

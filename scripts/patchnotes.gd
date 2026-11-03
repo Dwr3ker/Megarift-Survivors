@@ -9,6 +9,23 @@ const UPD = preload("res://scripts/updater.gd")
 
 const ENTRIES := [
 	{
+		"ver": "0.1.3-alpha.4",
+		"date": "2026-11-03",
+		"title": "Megarift Survivors 0.1.3-alpha.4: Legendary Banners, Shiny Charms, effects you can read (test build)",
+		"new": [
+			"Legendary Banners: 3 a week on the Gacha page, the same for everyone and new every Monday. Each banner's featured legendary is its only legendary, guaranteed by pull 60 (1.5% a pull, rising 5% a pull after pull 40). Banner pity is shared by all banners and kept between weeks, and a banner closes once you get its legendary.",
+			"Shiny Charms: own every Pokémon of a region to earn its Shiny Charm. That region's wild Pokémon are shiny 3 times as often, its rift legendaries twice as often, and its gacha gets +1% shiny chance.",
+			"Status effects you can read: asleep enemies show a Zzz, paralysed ones circling stars and confused ones a spiral. Critical hits flash with sparks, chests and parcels burst with sparkles, and XP from bosses, legendaries and Eternatus drops as glowing orbs.",
+		],
+		"changes": [
+			"Test builds only if you want them: the update notice only offers full releases, unless you already play a test version or turn on Settings > Account > Get test builds.",
+			"Boss fights in rifts and dens: the second HP bar at the bottom is gone, and the time left is shown under the boss bar at the top.",
+			"10 pulls and Max pull show each Pokémon's rarity ball, rarest first.",
+		],
+		"fixes": [
+		],
+	},
+	{
 		"ver": "0.1.3-alpha.3",
 		"date": "2026-11-02",
 		"title": "Megarift Survivors 0.1.3-alpha.3: What's new scrolls again (test build)",

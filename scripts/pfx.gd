@@ -2,6 +2,7 @@ extends Node2D
 # Efectos pixel art: port de js/entities/fx.js del original (particulas cuadradas,
 # anillos de puntos, golpes y rayos a bloques, sprites de G.VFX). Solo visual.
 const VFX = preload("res://scripts/vfx.gd")
+const SHX = preload("res://scripts/sheetfx.gd")
 const PX := 2.0
 
 var dens := 1.0
@@ -12,6 +13,8 @@ var sprs: Array = []
 var rings: Array = []
 var slashes: Array = []
 var beams: Array = []
+var sheets: Array = []   # one-shot sprite-sheet effects (scripts/sheetfx.gd): crit sparks, pickup bursts
+const MAX_SHEETS := 10
 # Rings, hit arcs and beams are ground effects: they go to this second layer, which is drawn UNDER the Pokémon and the
 # enemies (it lives below the y-sorted world), so attacks come out from under the sprite instead of covering it.
 var under = null
@@ -173,6 +176,13 @@ func slash(pos: Vector2, angle: float, radius: float, arc: float, vis: Dictionar
 					{"v": Vector2(cos(a) * 40.0, sin(a) * 40.0 + 20.0), "life": 0.45, "spin": rnd(-8.0, 8.0), "grav": 60.0})
 
 
+# A one-shot sprite-sheet effect (scripts/sheetfx.gd) at pos, scl world units per effect pixel. Capped: the oldest goes.
+func sheet(id: String, pos: Vector2, scl: float = 1.5) -> void:
+	if sheets.size() >= MAX_SHEETS:
+		sheets.remove_at(0)
+	sheets.append({"id": id, "p": pos, "t": 0.0, "scl": scl, "life": SHX.duration(id)})
+
+
 # (melee nuevos: ver slash_extra)
 # Rayo recto. vis.beam = forma que viaja por el o "lightning".
 func beam(pos: Vector2, angle: float, length: float, width: float, vis: Dictionary) -> void:
@@ -211,12 +221,12 @@ func _process(delta: float) -> void:
 		s["v"] = v2
 		s["p"] = Vector2(s["p"]) + v2 * delta
 		s["ang"] = float(s["ang"]) + float(s["spin"]) * delta
-	for arr in [rings, slashes, beams]:
+	for arr in [rings, slashes, beams, sheets]:
 		for i in range(arr.size() - 1, -1, -1):
 			arr[i]["t"] = float(arr[i]["t"]) + delta
 			if float(arr[i]["t"]) >= float(arr[i]["life"]):
 				arr.remove_at(i)
-	if parts.is_empty() and sprs.is_empty() and rings.is_empty() and slashes.is_empty() and beams.is_empty():
+	if parts.is_empty() and sprs.is_empty() and rings.is_empty() and slashes.is_empty() and beams.is_empty() and sheets.is_empty():
 		if _was_empty:
 			return
 		_was_empty = true
@@ -255,6 +265,8 @@ func _draw() -> void:
 	for s in sprs:
 		var k2: float = 1.0 - float(s["t"]) / float(s["life"])
 		VFX.draw(self, String(s["shape"]), String(s["pal"]), s["p"], float(s["ang"]), float(s["scale"]), int(float(s["t"]) * float(s["fr"])), step(k2) if bool(s["fade"]) else 1.0)
+	for sh in sheets:
+		SHX.draw(self, String(sh["id"]), sh["p"], float(sh["t"]), float(sh["scl"]))
 
 
 func _draw_beam(b: Dictionary, now: float) -> void:

@@ -4262,6 +4262,9 @@ func _hit_enemy(e, dmg: float, col: Color, dir: Vector2, knock: float, mtype: St
 		if _ch_on() and not _ch_rs("no_crit"):
 			ch_m["crits"] = int(ch_m["crits"]) + 1
 		add_text(e.position + Vector2(0.0, -e.body_h - 26.0), L.t("Critical!"), Color("#ffb347"), 16)
+		if run_time - crit_fx_t > 0.15:
+			crit_fx_t = run_time
+			pfx.sheet("crit_hit", e.position + Vector2(0.0, -e.body_h * 0.4), 1.2)
 	if _has_item("shellbell"):
 		bell_heal = minf(4.0, bell_heal + d_final * 0.04)
 	if mtype == "fighting" and _has_item("ti_fighting"):
@@ -4557,6 +4560,7 @@ func _load_data() -> void:
 	SV.ensure()
 	_dex_list = SV.dex_list
 	_dex_by = SV.dex_by
+	charm_gens = SV.charm_gens()   # Shiny Charms (completed region dexes), read once per run
 	_smeta = SV.smeta
 
 
@@ -4685,6 +4689,7 @@ static var _cand_cache: Dictionary = {}
 const REGION_MAP := {1: ["normal", "cave"], 2: ["bug", "ice"], 3: ["water", "fire"], 4: ["ice", "rock"], 5: ["dark", "ground"],
 	6: ["fairy", "steel"], 7: ["grass", "water"], 8: ["dragon", "fighting"], 9: ["ground", "flying"]}
 var region := 0
+var charm_gens := {}   # regions whose Shiny Charm you hold (SV.charm_gens, read at run start): their wild Pokemon shine more often
 var arceus_beaten := false   # Arceus (the 30-minute Judgment) defeated this run: clears a region map
 
 
@@ -5305,7 +5310,7 @@ func _spawn_one(angle: float = -999.0, near: bool = false) -> Enemy:
 		e.max_hp = roundf(e.max_hp * 1.3)
 		e.hp = e.max_hp
 		e.xp_val = roundf(e.xp_val * 1.5)
-	if bool(_sm(e.dex).get("sh", 0)) and randf() < SHINY_RATE:
+	if bool(_sm(e.dex).get("sh", 0)) and randf() < SHINY_RATE * _charm_k(e.dex):
 		e.make_shiny()
 		Aud.sfx("shiny")
 		_say(L.t("A shiny %s is nearby!") % e.enemy_name, 3.4)
@@ -5314,11 +5319,20 @@ func _spawn_one(angle: float = -999.0, near: bool = false) -> Enemy:
 	return e
 
 
+# Shiny Charm: x3 wild shiny odds for Pokemon of a region whose dex you completed.
+func _charm_k(dex: int) -> float:
+	return SV.CHARM_WILD if charm_gens.has(_gen_of(dex)) else 1.0
+
+
+func _gen_of(dex: int) -> int:
+	return int(_dex_by[dex].get("gen", 0)) if _dex_by.has(dex) else 0
+
+
 func _spawn_boss(b: Dictionary, t_v: float = -1.0):
 	var t: float = run_time if t_v < 0.0 else t_v
 	var sc := {"hp": (1.0 + t / 600.0) * _adapt_k(), "dmg": (1.0 + t / 600.0) * pow(_adapt_k(), 0.7), "spd": 1.0}
 	var e: Enemy = _make_enemy(b, _ring_point(randf() * TAU), sc, true)
-	if bool(_sm(e.dex).get("sh", 0)) and randf() < SHINY_RATE:
+	if bool(_sm(e.dex).get("sh", 0)) and randf() < SHINY_RATE * _charm_k(e.dex):
 		e.make_shiny()
 	Aud.sfx("boss")
 	_say(L.t("A wild %s%s appeared!") % [e.enemy_name, " shiny" if e.shiny else ""], 3.2)
@@ -6210,6 +6224,11 @@ func _update_enemies(delta: float) -> void:
 			e.para_t -= delta
 		if e.conf_t > 0.0:
 			e.conf_t -= delta
+		if e.status_over == null and (e.sleep_t > 0.0 or e.para_t > 0.0 or e.conf_t > 0.0):
+			e.status_over = StatusOver.new()
+			e.status_over.e = e
+			e.status_over.z_index = 1
+			e.add_child(e.status_over)   # after the sprite: drawn on top of the Pokémon
 		if e.charm_imm > 0.0:
 			e.charm_imm -= delta
 		if e.charm_t > 0.0:
@@ -7768,6 +7787,7 @@ const CHEST_HOLD := 3.5
 
 
 func _open_chest(p: Prop) -> void:
+	pfx.sheet("collect_burst", p.position + Vector2(0.0, -16.0), 1.5)
 	run_chests += 1
 	PG.event("chest")
 	Aud.sfx("chest")
@@ -8176,7 +8196,7 @@ func _spawn_orb(pos: Vector2, kind: String, value: float):
 		# Demasiados: el orbe de XP mas viejo se cobra al instante.
 		for i in range(orbs.size()):
 			var old = orbs[i]
-			if old.kind == "xp" or old.kind == "xpBig":
+			if old.kind == "xp" or old.kind == "xpBig" or old.kind == "xpRare":
 				_gain_xp(old.value)
 				old.queue_free()
 				orbs.remove_at(i)
@@ -8245,7 +8265,7 @@ func _drop(e) -> void:
 		var per: float = ceilf(e.xp_val / float(n))
 		for k in range(n):
 			var ang: float = randf() * TAU
-			_spawn_orb(e.position + Vector2.from_angle(ang) * randf_range(10.0, 70.0), "xpBig", per)
+			_spawn_orb(e.position + Vector2.from_angle(ang) * randf_range(10.0, 70.0), "xpRare", per)
 		if not e.judge:
 			_spawn_orb(e.position + Vector2(24.0, 0.0), "heal", 0.0)
 			_spawn_orb(e.position + Vector2(-24.0, 0.0), "magnet", 0.0)
@@ -8275,6 +8295,7 @@ func _drop(e) -> void:
 		_spawn_orb(e.position + off, "item", 0.0)
 
 
+var crit_fx_t := -9.0   # last critical-hit spark effect (they are throttled)
 var orb_prev_pp := Vector2.INF   # player position last frame (pickups check the whole path walked, not just where you stand)
 
 
@@ -8310,16 +8331,18 @@ func _update_orbs(delta: float) -> void:
 
 
 func _collect(kind: String, value: float) -> void:
-	if kind == "xp" or kind == "xpBig":
+	if kind == "xp" or kind == "xpBig" or kind == "xpRare":
 		_gain_xp(value)
 		Aud.xp()
+		if kind == "xpRare":
+			pfx.sheet("collect_burst", player.position + Vector2(0.0, -player.body_h * 0.5), 1.0)
 	elif kind == "heal":
 		Aud.sfx("heal")
 		player.hp = minf(player.max_hp, player.hp + player.max_hp * 0.3 * _rk("healmul"))
 		add_text(player.position + Vector2(0.0, -player.body_h - 4.0), L.t("+HP"), Color("#6fd08a"))
 	elif kind == "magnet":
 		for o in orbs:
-			if o.kind == "xp" or o.kind == "xpBig":
+			if o.kind == "xp" or o.kind == "xpBig" or o.kind == "xpRare":
 				o.pulled = true
 		add_text(player.position + Vector2(0.0, -player.body_h - 4.0), L.t("MAGNET!"), Color("#7fe0ff"))
 	elif kind == "coin":
@@ -8355,6 +8378,7 @@ func _collect(kind: String, value: float) -> void:
 		else:
 			add_text(player.position + Vector2(0.0, -player.body_h - 4.0), L.t("Poké Ball bag full"), Color("#c8d0dc"), 16)
 	elif kind == "item":
+		pfx.sheet("collect_burst", player.position + Vector2(0.0, -player.body_h * 0.5), 1.5)
 		_offer_item()
 	elif kind == "bomb":
 		Aud.sfx("ball")
@@ -9437,7 +9461,7 @@ func _open_rift(force_dex: int = -1, den: bool = false) -> void:
 	var ar: Node2D = ARENA.new()
 	ar.setup(ty, randi() % 100000)
 	ar.start_bake()
-	rift_info = {"dex": dex, "type": ty, "shiny": (not den) and bool(_sm(dex).get("sh", 0)) and randf() < 1.0 / 512.0, "arena": ar, "den": den, "mega": mega_rift}
+	rift_info = {"dex": dex, "type": ty, "shiny": (not den) and bool(_sm(dex).get("sh", 0)) and randf() < (SV.CHARM_RIFT if charm_gens.has(_gen_of(dex)) else 1.0) / 512.0, "arena": ar, "den": den, "mega": mega_rift}
 	Aud.sfx("rift")
 	if mega_rift:
 		_say(L.t("A Mega Rift has opened!"), 3.0)
@@ -9489,6 +9513,7 @@ func _update_threat_hud() -> void:
 func _update_rift_hud() -> void:
 	hud.rift_ttl = -1.0
 	hud.legend_frac = -1.0
+	hud.arena_left = -1.0   # only a rift or den fight shows its clock (under the boss bar): never a stale one afterwards
 	if arena != null:
 		hud.arena_left = maxf(0.0, ARENA_LIMIT - float(ainfo.get("t", 0.0))) if String(ainfo.get("phase", "")) == "fight" and not bool(ainfo.get("cave", false)) else -1.0
 		var b = ainfo.get("boss")
@@ -9742,7 +9767,7 @@ func _legend_down(e) -> void:
 	var per: float = ceilf(e.xp_val / float(n))
 	var made: Array = []
 	for k in range(n):
-		made.append(_spawn_orb(pos, "xpBig", per))
+		made.append(_spawn_orb(pos, "xpRare", per))
 	made.append(_spawn_orb(pos + Vector2(24.0, 0.0), "item", 0.0))
 	made.append(_spawn_orb(pos + Vector2(-24.0, 0.0), "ticket", 2.0))
 	if randf() < 0.3:
@@ -9776,7 +9801,7 @@ func _den_down(e) -> void:
 	var per: float = ceilf(e.xp_val / float(n))
 	var made: Array = []
 	for k in range(n):
-		made.append(_spawn_orb(pos, "xpBig", per))
+		made.append(_spawn_orb(pos, "xpRare", per))
 	made.append(_spawn_orb(pos + Vector2(24.0, 0.0), "item", 0.0))
 	made.append(_spawn_orb(pos + Vector2(-24.0, 0.0), "item", 0.0))
 	made.append(_spawn_orb(pos + Vector2(0.0, 24.0), "ticket", 1.0))
@@ -10407,6 +10432,42 @@ class BuffBadges extends Node2D:
 
 
 # Gotas de veneno que "sudan" por el cuerpo del enemigo envenenado y resbalan hacia abajo
+# Overhead status effect (pixelfx sheets, scripts/sheetfx.gd): Zzz while asleep, circling stars while paralysed, a
+# spiral and question marks while confused. Created the first time an enemy gets one of those; idle (hidden, not
+# redrawn) the rest of the time. Freeze, burn and poison keep their tint on the Pokémon itself.
+class StatusOver extends Node2D:
+	const SHX = preload("res://scripts/sheetfx.gd")
+	const SCL := 1.8   # world units per effect pixel (about 3 screen pixels at the usual camera zoom)
+	var e = null
+	var id := ""
+	var t := 0.0
+
+	static func pick(en) -> String:
+		if en == null or en.dead:
+			return ""
+		if en.sleep_t > 0.0:
+			return "sleep"
+		if en.para_t > 0.0:
+			return "paralysis"
+		if en.conf_t > 0.0:
+			return "confused"
+		return ""
+
+	func _process(delta: float) -> void:
+		var nid: String = pick(e)
+		if nid != id:
+			id = nid
+			t = float(get_instance_id() % 97) * 0.05   # each enemy starts at a different point of the loop
+			visible = id != ""
+		if id != "":
+			t += delta
+			queue_redraw()
+
+	func _draw() -> void:
+		if id != "" and e != null:
+			SHX.draw(self, id, Vector2(0.0, -e.body_h + 4.0), t, SCL, 1.0, true)
+
+
 class PoisonSweat extends Node2D:
 	var e = null
 
@@ -10503,6 +10564,7 @@ class Enemy extends Actor:
 		burn_t = 3.0
 
 	var sweat: Node2D = null
+	var status_over: Node2D = null   # overhead Zzz / stars / spiral (StatusOver)
 
 	func apply_poison(n: int) -> void:
 		poison = mini(6, poison + n)
@@ -11384,10 +11446,22 @@ class Slots extends Node2D:
 # Orbe de experiencia / objeto que suelta un enemigo
 # ---------------------------------------------------------------
 class Orb extends Node2D:
+	const SHX = preload("res://scripts/sheetfx.gd")
 	var kind := "xp"
 	var value := 20.0
 	var vel := Vector2.ZERO
 	var pulled := false
+	var _t := 0.0
+
+	# Rare XP (bosses, legendaries, Eternatus) is an animated wisp (pixelfx XP orb, in the game's cyan): only these few
+	# redraw every frame; normal crystals stay still and cheap.
+	func _ready() -> void:
+		set_process(kind == "xpRare")
+		_t = float(get_instance_id() % 53) * 0.03
+
+	func _process(delta: float) -> void:
+		_t += delta
+		queue_redraw()
 
 	# Small cyan diamond with a soft glow (Doofcraft-style XP drop). k = size; cyan so it never reads as money.
 	func _xp_diamond(c: Vector2, k: float) -> void:
@@ -11402,13 +11476,16 @@ class Orb extends Node2D:
 		draw_rect(Rect2(gc + Vector2(-1.0, -h * 0.55), Vector2(1.6 * k, 1.6 * k)), Color(1, 1, 1, 0.95))
 
 	func _draw() -> void:
+		if kind == "xpRare":
+			if SHX.draw(self, "xp_orb", Vector2.ZERO, _t, 1.8):
+				return
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2(1.0, 0.42))
 		draw_circle(Vector2.ZERO, 6.0, Color(0, 0, 0, 0.3))
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		var c := Vector2(0.0, -9.0)
 		if kind == "xp":
 			_xp_diamond(c, 0.8 if value < 30.0 else 1.0)
-		elif kind == "xpBig":
+		elif kind == "xpBig" or kind == "xpRare":
 			_xp_diamond(c, 1.45)
 		else:
 			var icn := "coin"
@@ -12859,7 +12936,7 @@ class Hud extends Node2D:
 		if thief_notice >= 0.0 or rift_notice >= 0.0:
 			y = maxf(y, notice_cy(vp) + 34.0 + 28.0)   # under the notice box
 		if boss_max > 0.0:
-			y = maxf(y, boss_bar_y(vp) + 44.0)
+			y = maxf(y, boss_bar_y(vp) + (68.0 if arena_left >= 0.0 else 44.0))   # room for the fight clock under the bar
 		return y
 
 	# The boss HP bar sits at the very bottom of the centre-top stack: under the clock, counters, Dynamax bar and notices.
@@ -12873,6 +12950,7 @@ class Hud extends Node2D:
 
 	func draw_boss_bar(font: Font, vp: Vector2) -> void:
 		if boss_max <= 0.0:
+			_draw_arena_clock(font, vp, boss_bar_y(vp))
 			return
 		var w: float = minf(420.0, vp.x - 420.0)
 		var x0: float = vp.x * 0.5 - w * 0.5
@@ -12884,6 +12962,16 @@ class Hud extends Node2D:
 		var lab: String = "%s  %d%%" % [L.t(boss_name).to_upper(), ceili(fr * 100.0)]
 		_dso(font, Vector2(x0, y + 18.0), lab, HORIZONTAL_ALIGNMENT_CENTER, w, 15, 3, Color(UIS.INK, 0.9))
 		_ds(font, Vector2(x0, y + 18.0), lab, HORIZONTAL_ALIGNMENT_CENTER, w, 15, Color.WHITE)
+		_draw_arena_clock(font, vp, y + 30.0)
+
+	# Time left in a rift or den fight, centred under the boss bar (it used to sit on a second HP bar at the bottom).
+	func _draw_arena_clock(font: Font, vp: Vector2, y: float) -> void:
+		if arena_left < 0.0:
+			return
+		var txt: String = "%02d:%02d" % [int(arena_left) / 60, int(arena_left) % 60]
+		var col: Color = Color("#ffd65c") if arena_left > 20.0 else Color("#ff6b7a")
+		_dso(font, Vector2(vp.x * 0.5 - 60.0, y + 18.0), txt, HORIZONTAL_ALIGNMENT_CENTER, 120.0, 20, 4, Color(UIS.INK, 0.9))
+		_ds(font, Vector2(vp.x * 0.5 - 60.0, y + 18.0), txt, HORIZONTAL_ALIGNMENT_CENTER, 120.0, 20, col)
 
 	func draw_thief_notice(font: Font, vp: Vector2) -> void:
 		if thief_notice < 0.0:
@@ -13084,14 +13172,7 @@ class Hud extends Node2D:
 				var l2: String = "%s %d s" % [lbl, ceili(rift_ttl)]
 				_dso(font, p + Vector2(-100.0, -22.0), l2, HORIZONTAL_ALIGNMENT_CENTER, 200.0, 15, 5, Color(0, 0, 0, 0.85))
 				_ds(font, p + Vector2(-100.0, -22.0), l2, HORIZONTAL_ALIGNMENT_CENTER, 200.0, 15, tcol)
-		if legend_frac >= 0.0:
-			var w: float = minf(440.0, vp.x - 360.0)
-			var x0: float = vp.x * 0.5 - w * 0.5
-			draw_rect(Rect2(x0 - 2.0, vp.y - 148.0, w + 4.0, 22.0), Color(0, 0, 0, 0.6))
-			draw_rect(Rect2(x0, vp.y - 146.0, w * clampf(legend_frac, 0.0, 1.0), 18.0), Color("#b06bff"))
-			_ds(font, Vector2(x0, vp.y - 154.0), legend_name, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 18, Color("#e6d4ff"))
-			if arena_left >= 0.0:
-				_ds(font, Vector2(x0, vp.y - 154.0), "%02d:%02d" % [int(arena_left) / 60, int(arena_left) % 60], HORIZONTAL_ALIGNMENT_RIGHT, w, 18, Color("#ffd65c") if arena_left > 20.0 else Color("#ff6b7a"))
+		# (rift and den fights: the boss's HP is the top boss bar; the time left is drawn under it, see draw_boss_bar)
 
 	var team: Array = []
 	var swap_cd := 0.0

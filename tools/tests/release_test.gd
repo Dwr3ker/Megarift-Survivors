@@ -12,7 +12,7 @@ func _init() -> void:
 	var UPD = load("res://scripts/updater.gd")
 	var PN = load("res://scripts/patchnotes.gd")
 	var L = load("res://scripts/lang.gd")
-	check("in-game version is 0.1.3-alpha.3", UPD.APP_VERSION == "0.1.3-alpha.3", UPD.APP_VERSION)
+	check("in-game version is 0.1.3-alpha.4", UPD.APP_VERSION == "0.1.3-alpha.4", UPD.APP_VERSION)
 	check("updater targets this project's repository", UPD.REPO == "Dwr3ker/Megarift-Survivors", UPD.REPO)
 	# version comparison (pure logic, no network): a newer tag is offered, the same or older is not
 	check("v0.1.1 is newer than 0.1.0", UPD.is_newer("v0.1.1", "0.1.0"))
@@ -26,6 +26,23 @@ func _init() -> void:
 	var nw: Dictionary = UPD.newest(rels)
 	check("the update check finds the newest published build, alphas included", String(nw.get("tag_name", "")) == "v0.1.4-alpha.2" and UPD.is_newer(String(nw["tag_name"]), UPD.APP_VERSION))
 	check("older builds see this release as an update", UPD.is_newer("v" + UPD.APP_VERSION, "0.1.0-alpha.10") and UPD.is_newer("v" + UPD.APP_VERSION, "0.1.0"))
+	# test builds only reach players on a test build or who turned on Settings > Get test builds
+	var rels2: Array = [{"tag_name": "v0.1.2", "draft": false, "prerelease": false}, {"tag_name": "v0.1.4-alpha.1", "draft": false, "prerelease": true}]
+	check("players on a full release are only offered full releases", String(UPD.newest(rels2, false).get("tag_name", "")) == "v0.1.2")
+	check("test builds are offered when allowed", String(UPD.newest(rels2, true).get("tag_name", "")) == "v0.1.4-alpha.1")
+	var real_ver: String = UPD.APP_VERSION
+	var real_tb = SV.d["settings"].get("test_builds", false)
+	UPD.APP_VERSION = "0.1.2"
+	SV.d["settings"]["test_builds"] = false
+	var off_full: bool = UPD.wants_test_builds()
+	SV.d["settings"]["test_builds"] = true
+	var on_full: bool = UPD.wants_test_builds()
+	SV.d["settings"]["test_builds"] = false
+	UPD.APP_VERSION = "0.1.3-alpha.3"
+	var off_test: bool = UPD.wants_test_builds()
+	UPD.APP_VERSION = real_ver
+	SV.d["settings"]["test_builds"] = real_tb
+	check("Get test builds: off on a full release, on when switched on, always on a test build", not off_full and on_full and off_test)
 	check("it offers this platform's download", UPD.asset_url(nw, "page") == ("zip" if OS.get_name() == "Windows" else ("apk" if OS.get_name() == "Android" else "page")))
 	# no outbound link may point at the original port author's repository or donation page
 	var bad: Array = []
@@ -46,7 +63,7 @@ func _init() -> void:
 	var every := true
 	for n in range(1, 11):   # the ten test builds before 0.1.0
 		every = every and vers.has("0.1.0-alpha.%d" % n)
-	check("What's new has this version, 0.1.0 and every alpha before it, newest first", every and vers.size() == 16 and vers[0] == UPD.APP_VERSION and vers.has("0.1.1") and vers.has("0.1.0") and vers[vers.size() - 1] == "0.1.0-alpha.1", str(vers))
+	check("What's new has this version, 0.1.0 and every alpha before it, newest first", every and vers.size() == 17 and vers[0] == UPD.APP_VERSION and vers.has("0.1.1") and vers.has("0.1.0") and vers[vers.size() - 1] == "0.1.0-alpha.1", str(vers))
 	# every line of every entry has a Spanish translation, and the newest entry is translated in every language
 	# (the English text is the translation key; entries up to alpha.10 were only ever translated to Spanish)
 	for code in ["es", "es_419", "fr", "it", "ja", "pt_BR", "pt_PT", "ru", "vi", "zh_CN", "zh_HK"]:

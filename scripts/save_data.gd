@@ -120,10 +120,10 @@ const GOALS := [
 
 static func default_data() -> Dictionary:
 	return {
-		"v": 1, "created": int(Time.get_unix_time_from_system()), "title": "", "nick": "", "favs": [0, 0, 0], "coins": 600, "tickets": 10, "tickets10": 3, "lshards": 0, "regions_migrated": true, "regions_rule2": true, "pity": {}, "legends": {}, "arenas": {}, "lshiny": {}, "owned": {}, "selected": 25, "shiny_on": false,
+		"v": 1, "created": int(Time.get_unix_time_from_system()), "title": "", "nick": "", "favs": [0, 0, 0], "coins": 600, "tickets": 10, "tickets10": 3, "lshards": 0, "regions_migrated": true, "regions_rule2": true, "pity": {}, "bpity": 0, "charms": {}, "banners_claimed": {}, "legends": {}, "arenas": {}, "lshiny": {}, "owned": {}, "selected": 25, "shiny_on": false,
 		"fusions": [], "upgrades": {}, "pup": {}, "claimed": {}, "pban": {}, "pbind": {}, "ptm": {}, "pz": {},
 		"stats": {"runs": 0, "kills": 0, "best_time": 0, "best_level": 1, "bosses": 0, "chests": 0, "pulls": 0, "shinies": 0, "total_time": 0, "coins_total": 0, "defeated_runs": 0, "rifts": 0},
-		"settings": {"master": 80, "music": 70, "sfx": 80, "dmg_numbers": true, "vibration": true, "shake": true, "stick": 1, "stick_fixed": false, "manual_aim": false, "lang": "en", "view": 100, "fov": 165, "pad": 0, "padmap": {}, "mute": false, "quality": 0, "fps": false, "stats_box": true, "stats_mode": 0, "mirror": false, "hud_scale": 100, "colorblind": false, "adaptive": true, "mono_bonus": false, "fx_op": 1, "act_side": 0, "text_sz": 0, "show_map": true},
+		"settings": {"master": 80, "music": 70, "sfx": 80, "dmg_numbers": true, "vibration": true, "shake": true, "stick": 1, "stick_fixed": false, "manual_aim": false, "lang": "en", "view": 100, "fov": 165, "pad": 0, "padmap": {}, "mute": false, "quality": 0, "fps": false, "stats_box": true, "stats_mode": 0, "mirror": false, "hud_scale": 100, "colorblind": false, "adaptive": true, "mono_bonus": false, "fx_op": 1, "act_side": 0, "text_sz": 0, "show_map": true, "test_builds": false},
 	}
 
 
@@ -603,9 +603,41 @@ static func region_completion(region: int) -> float:
 	return float(have) / float(all.size())
 
 
-# The more of a region you own, the likelier its missing Pokemon and shinies become.
+# ---- Shiny Charm: one per region, earned by owning every Pokemon of that region. It only boosts that region's Pokemon:
+# wild shinies x3, its rift legendaries x2 and +1% shiny chance on its gacha (banners drawing from it included).
+const CHARM_WILD := 3.0
+const CHARM_RIFT := 2.0
+const CHARM_PULL := 0.01
+
+
+static func shiny_charm(region: int) -> bool:
+	return region >= 1 and region <= REGIONS.size() and region_completion(region) >= 1.0
+
+
+# Regions whose charm you hold, as {gen: true} (worked out once per run: wild spawns look it up per Pokemon).
+static func charm_gens() -> Dictionary:
+	var out := {}
+	for r in range(1, REGIONS.size() + 1):
+		if shiny_charm(r):
+			out[r] = true
+	return out
+
+
+# Charms earned since the last call (to announce them once). Marks them as seen.
+static func new_charms() -> Array:
+	var seen: Dictionary = d.get("charms", {})
+	var out: Array = []
+	for r in range(1, REGIONS.size() + 1):
+		if not seen.has(str(r)) and shiny_charm(r):
+			seen[str(r)] = true
+			out.append(r)
+	d["charms"] = seen
+	return out
+
+
+# The more of a region you own, the likelier its missing Pokemon and shinies become (plus the region's Shiny Charm).
 static func shiny_pull(region: int) -> float:
-	return lerpf(SHINY_PULL, SHINY_PULL_DONE, region_completion(region))
+	return lerpf(SHINY_PULL, SHINY_PULL_DONE, region_completion(region)) + (CHARM_PULL if shiny_charm(region) else 0.0)
 
 
 static func missing_mul(region: int) -> float:
@@ -743,6 +775,110 @@ static func _roll_rarity(minr: int = 1) -> int:
 	return 5
 
 
+# ---- Legendary Banners: 3 a week, the same for everyone ----
+# Each banner features one legendary; it is the only legendary that banner can give, and the rest of its pulls come from
+# that legendary's region. Banner pity is one counter shared by all banners and kept from week to week: 1.5% (the normal
+# legendary rate) up to BANNER_SOFT pulls, then +BANNER_STEP per pull, and pull BANNER_HARD is the featured legendary.
+# Once you get a banner's legendary, that banner closes for you until the next rotation (one guaranteed legendary each).
+# In pull() and the menu, banner k (0..2) is "region" BANNER_BASE + k.
+const BANNER_BASE := 100
+const BANNER_COUNT := 3
+const BANNER_SOFT := 40
+const BANNER_STEP := 0.05
+const BANNER_HARD := 60
+
+
+# Week number, rolling over on Monday 00:00 Puerto Rico time (the daily challenge's clock). The Unix epoch is a Thursday.
+static func week_id(now: int = -1) -> int:
+	var t: int = (int(Time.get_unix_time_from_system()) if now < 0 else now) - 4 * 3600
+	return int(floor((float(t) / 86400.0 + 3.0) / 7.0))
+
+
+static func week_left(now: int = -1) -> int:
+	var t: int = (int(Time.get_unix_time_from_system()) if now < 0 else now) - 4 * 3600
+	var next_start: float = (float(week_id(now) + 1) * 7.0 - 3.0) * 86400.0
+	return maxi(0, int(next_start) - t)
+
+
+# The week's 3 featured legendaries (dex numbers): a seeded shuffle of every legendary with sprites, from different
+# generations when possible.
+static func banner_dexes(w: int = -1) -> Array:
+	if w < 0:
+		w = week_id()
+	var legs: Array = []
+	for p in dex_list:
+		if bool(p.get("leg", false)) and smeta.has(str(int(p["dex"]))):
+			legs.append(p)
+	legs.sort_custom(func(a, b): return int(a["dex"]) < int(b["dex"]))
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash("megarift-banner-%d" % w)
+	for i in range(legs.size() - 1, 0, -1):
+		var j: int = rng.randi_range(0, i)
+		var tmp = legs[i]
+		legs[i] = legs[j]
+		legs[j] = tmp
+	var out: Array = []
+	var gens := {}
+	for p in legs:
+		if out.size() >= BANNER_COUNT:
+			break
+		if not gens.has(int(p["gen"])):
+			gens[int(p["gen"])] = true
+			out.append(int(p["dex"]))
+	for p in legs:
+		if out.size() >= BANNER_COUNT:
+			break
+		if not out.has(int(p["dex"])):
+			out.append(int(p["dex"]))
+	return out
+
+
+static func is_banner(region: int) -> bool:
+	return region >= BANNER_BASE and region < BANNER_BASE + BANNER_COUNT
+
+
+static func banner_dex(region: int) -> int:
+	var bd: Array = banner_dexes()
+	var k: int = region - BANNER_BASE
+	return int(bd[k]) if k >= 0 and k < bd.size() else 0
+
+
+# The region a pull page draws from: a banner uses its legendary's generation.
+static func banner_region(region: int) -> int:
+	if not is_banner(region):
+		return region
+	var dx: int = banner_dex(region)
+	return int(dex_by[dx]["gen"]) if dex_by.has(dx) else 1
+
+
+static func banner_id(region: int) -> String:
+	return "%d_%d" % [week_id(), banner_dex(region)]
+
+
+static func banner_claimed(region: int) -> bool:
+	return bool(d.get("banners_claimed", {}).get(banner_id(region), false))
+
+
+# Chance that banner pull number `n` (counting since the last banner legendary) is the featured legendary.
+static func banner_leg_p(n: int) -> float:
+	if n >= BANNER_HARD:
+		return 1.0
+	return float(PULL_RATES[4]) / 100.0 + float(maxi(0, n - BANNER_SOFT)) * BANNER_STEP
+
+
+# Rarity 1..4 at the normal relative odds (the legendary roll is done separately on banners).
+static func _roll_rarity_no_leg() -> int:
+	var total := 0.0
+	for i in range(4):
+		total += PULL_RATES[i]
+	var x: float = randf() * total
+	for i in range(4):
+		x -= PULL_RATES[i]
+		if x <= 0.0:
+			return i + 1
+	return 4
+
+
 # n tiradas: x1 (1 ticket), x10 (10 tickets o 1 ticket x10). Devuelve [] si no hay tickets.
 const Z_CRYSTAL_P := 0.03   # probabilidad de cristal Z por tirada de 10
 const Z_CRYSTAL_P_PURPLE := 0.06   # con el ticket morado ×10 se dobla
@@ -754,6 +890,15 @@ static func pull(region: int, n: int = 1, use: String = "t1") -> Array:
 	last_crystal = ""
 	if not can_pull(n, use):
 		return []
+	var banner_on: bool = is_banner(region)
+	var feat: int = 0
+	var bkey := ""
+	if banner_on:
+		if banner_claimed(region):
+			return []   # this banner's legendary is already yours this week
+		feat = banner_dex(region)
+		bkey = banner_id(region)
+		region = banner_region(region)
 	var purple: bool = n == 10 and use == "t10"
 	if purple:
 		d["tickets10"] = int(d["tickets10"]) - 1
@@ -767,13 +912,25 @@ static func pull(region: int, n: int = 1, use: String = "t1") -> Array:
 	var miss_mul: float = missing_mul(region)
 	var sh_p: float = shiny_pull(region)
 	for i in range(n):
-		d["pity"][key] = int(d["pity"][key]) + 1
 		var want: int
 		var got4 := false
 		for r in out:
 			if int(r["rarity"]) >= 4:
 				got4 = true
-		if int(d["pity"][key]) >= PITY_5:
+		if not banner_on:
+			d["pity"][key] = int(d["pity"][key]) + 1
+		if banner_on:
+			# banner pity (shared, kept between weeks) instead of the region's
+			d["bpity"] = int(d.get("bpity", 0)) + 1
+			if randf() < banner_leg_p(int(d["bpity"])):
+				want = 5
+			elif purple and i == n - 1:
+				want = 5 if randf() < PURPLE_LEGEND_P else 4
+			elif n == 10 and i == n - 1 and not got4:
+				want = _roll_rarity(4)
+			else:
+				want = _roll_rarity_no_leg()
+		elif int(d["pity"][key]) >= PITY_5:
 			want = 5
 		elif purple and i == n - 1:
 			want = 5 if randf() < PURPLE_LEGEND_P else 4   # la ultima del ticket morado: legendaria o, como minimo, Muy raro
@@ -781,11 +938,20 @@ static func pull(region: int, n: int = 1, use: String = "t1") -> Array:
 			want = _roll_rarity(4)
 		else:
 			want = _roll_rarity()
-		var list: Array = _pool_near(want, region)
-		var rarity: int = int(list[0]["rarity"])
-		if rarity == 5:
-			d["pity"][key] = 0
+		var list: Array = _pool_near(mini(want, 4) if banner_on else want, region)
+		if banner_on and want == 5:
+			list = [dex_by[feat]]   # the featured legendary is the banner's only legendary
+		var rarity: int = int(list[0]["rarity"]) if not (banner_on and want == 5) else 5
 		var sp: Dictionary = _pick_weighted(list, miss_mul)
+		if rarity == 5 and banner_on:
+			d["bpity"] = 0
+			var bc: Dictionary = d.get("banners_claimed", {})
+			bc[bkey] = true
+			d["banners_claimed"] = bc
+			d["stats"]["bannerLegends"] = int(d["stats"].get("bannerLegends", 0)) + 1
+			banner_on = false   # claimed: the rest of this pull uses the region's normal rules
+		elif rarity == 5:
+			d["pity"][key] = 0
 		var dex: int = int(sp["dex"])
 		var shiny: bool = randf() < sh_p and bool(smeta[str(dex)].get("sh", 0))
 		var shiny_owned: bool = owns(dex) and bool(d["owned"][str(dex)]["shiny"])

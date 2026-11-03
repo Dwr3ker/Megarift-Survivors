@@ -253,6 +253,8 @@ func claim(it: Item) -> bool:
 		_fx_anim(p, ["fx_x0", "fx_x1", "fx_x2", "fx_x3"])
 	elif it.kind == "potion":
 		_fx_anim(p, ["fx_p0", "fx_p1", "fx_p2", "fx_p3"])
+	if it.kind == "pack" or it.kind == "crate":
+		m.pfx.sheet("collect_burst", p + Vector2(0, -16), 1.5)
 	if it.kind == "pack":
 		_fx_open(p, "packr_o" if it.sub == "rare" else "pack_o")
 	elif it.kind == "crate":

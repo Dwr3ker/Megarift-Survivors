@@ -829,6 +829,7 @@ func _build_theme() -> void:
 
 
 func _ready() -> void:
+	_announce_charms.call_deferred()   # a region completed during a run (catches) earns its charm here
 	if not bool(Engine.get_meta("menu_overlay", false)) and CR.take_crash_flag():
 		_show_crash_report.call_deferred()
 	if "--autorun" in OS.get_cmdline_args():   # test hook: start a normal run a few seconds after launch (never used by a normal launch)
@@ -1374,6 +1375,17 @@ func _update_top() -> void:
 	mute_top.icon = IC.tex(mn, IC.scale_for(mn, 26))
 
 
+# Announces Shiny Charms earned since last time (a region's dex completed by a pull, a Legend Pick or a catch in a run).
+func _announce_charms() -> void:
+	var got: Array = SV.new_charms()
+	if got.is_empty():
+		return
+	SV.save()
+	Aud.sfx("shinyGet")
+	for r in got:
+		toast(L.t("Shiny Charm earned: %s! More shinies of this region from now on.") % L.t(SV.REGIONS[int(r) - 1]))
+
+
 func toast(msg: String) -> void:
 	toast_lbl.text = msg
 	toast_t = 2.6
@@ -1731,7 +1743,8 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventJoypadButton and event.pressed and cur == "gacha" and not (gacha_result != null and gacha_result.visible):
 		if event.button_index == PAD.btn("prev") or event.button_index == PAD.btn("next"):
 			var d := -1 if event.button_index == PAD.btn("prev") else 1
-			gacha_region = posmod(gacha_region - 1 + d, SV.REGIONS.size()) + 1
+			var order: Array = _gacha_order()
+			gacha_region = int(order[posmod(order.find(gacha_region) + d, order.size())])
 			_refresh_gacha()
 			get_viewport().set_input_as_handled()
 			return
@@ -5467,9 +5480,15 @@ func _build_gacha() -> void:
 	var rail := PanelContainer.new()
 	rail.custom_minimum_size = Vector2(250, 0)
 	grow.add_child(rail)
+	# banners + regions are taller than the screen: the list scrolls on its own (and follows the gamepad focus)
+	var rsc := ScrollContainer.new()
+	rsc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	rsc.follow_focus = true
+	rail.add_child(rsc)
 	gacha_rail = VBoxContainer.new()
+	gacha_rail.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	gacha_rail.add_theme_constant_override("separation", 6)
-	rail.add_child(gacha_rail)
+	rsc.add_child(gacha_rail)
 	gacha_box = VBoxContainer.new()
 	gacha_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	gacha_box.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -5635,6 +5654,20 @@ const RARITY_COL := ["#f2e9d8", "#6fd08a", "#5fa8ff", "#c47bff", "#ffd65c"]
 const RARITY_BALL := ["ball", "ball2", "ball3", "ball4", "ballLux"]
 
 
+# Gacha pages in rail order: this week's Legendary Banners, then the regions.
+func _gacha_order() -> Array:
+	var out: Array = []
+	for k in range(SV.BANNER_COUNT):
+		out.append(SV.BANNER_BASE + k)
+	for r in range(1, SV.REGIONS.size() + 1):
+		out.append(r)
+	return out
+
+
+func _left_text(secs: int) -> String:
+	return L.t("Ends in %d d %d h") % [secs / 86400, (secs % 86400) / 3600] if secs >= 86400 else L.t("Ends in %d h %d min") % [secs / 3600, (secs % 3600) / 60]
+
+
 func _region_counts(region: int) -> Vector2i:
 	var pool: Array = SV.region_pool(region)
 	var n := 0
@@ -5650,9 +5683,32 @@ func _refresh_gacha() -> void:
 	# --- pestanas de region
 	_clear(gacha_rail)
 	tab_row = gacha_rail
+	if not (SV.is_banner(gacha_region) or (gacha_region >= 1 and gacha_region <= SV.REGIONS.size())):
+		gacha_region = 1
+	var bl := _label("Legendary Banners", 18, UIS.GOLD)
+	bl.autowrap_mode = TextServer.AUTOWRAP_OFF
+	gacha_rail.add_child(bl)
+	for k in range(SV.BANNER_COUNT):
+		var br: int = SV.BANNER_BASE + k
+		var bdx: int = SV.banner_dex(br)
+		if bdx <= 0 or not SV.dex_by.has(bdx):
+			continue
+		var bb := _btn(("✓ " if SV.banner_claimed(br) else "★ ") + L.t(String(SV.dex_by[bdx]["name"])), func(): gacha_region = br; _refresh_gacha(); _gf(tab_sel), Vector2(0, 52))
+		bb.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		bb.add_theme_font_size_override("font_size", 20)
+		bb.add_theme_color_override("font_color", UIS.GOLD if not SV.banner_claimed(br) else Color("#8f88b8"))
+		if br == gacha_region:
+			for st in ["normal", "hover", "pressed"]:
+				bb.add_theme_stylebox_override(st, _sb(UIS.PANEL_HI, UIS.GOLD, 3, 0))
+			first = bb
+			tab_sel = bb
+		gacha_rail.add_child(bb)
+	var rl := _label("Regions", 18, UIS.MUTED)
+	rl.autowrap_mode = TextServer.AUTOWRAP_OFF
+	gacha_rail.add_child(rl)
 	for i in range(1, 10):
 		var r: int = i
-		var tb := _btn("%s · %s" % [L.t(SV.REGIONS[r - 1]), L.t("Gen %d") % r], func(): gacha_region = r; _refresh_gacha(); _gf(tab_sel), Vector2(0, 52))
+		var tb := _btn(("✨ " if SV.shiny_charm(r) else "") + "%s · %s" % [L.t(SV.REGIONS[r - 1]), L.t("Gen %d") % r], func(): gacha_region = r; _refresh_gacha(); _gf(tab_sel), Vector2(0, 52))
 		tb.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		tb.add_theme_font_size_override("font_size", 20)
 		if r == gacha_region:
@@ -5670,14 +5726,18 @@ func _refresh_gacha() -> void:
 	left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	left.add_theme_constant_override("separation", 12)
 	main.add_child(left)
-	var bd: Dictionary = BANNERS[gacha_region - 1]
+	var is_bn: bool = SV.is_banner(gacha_region)
+	var greg: int = SV.banner_region(gacha_region)   # a banner draws from its legendary's region
+	var feat: int = SV.banner_dex(gacha_region) if is_bn else 0
+	var claimed: bool = is_bn and SV.banner_claimed(gacha_region)
+	var bd: Dictionary = BANNERS[greg - 1]
 	var banner := Banner.new()
 	banner.c1 = Color.html(String(bd["c1"]))
 	banner.c2 = Color.html(String(bd["c2"]))
 	banner.custom_minimum_size = Vector2(0, 270)   # everything on the page fits without scrolling
 	banner.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	left.add_child(banner)
-	var cnt: Vector2i = _region_counts(gacha_region)
+	var cnt: Vector2i = _region_counts(greg)
 	var tx := VBoxContainer.new()
 	tx.set_anchors_preset(Control.PRESET_TOP_WIDE)
 	tx.offset_left = 20
@@ -5685,28 +5745,38 @@ func _refresh_gacha() -> void:
 	tx.offset_right = -20
 	tx.add_theme_constant_override("separation", 2)
 	banner.add_child(tx)
-	var ttl := _label(L.t("%s Mystery") % L.t(SV.REGIONS[gacha_region - 1]), 32, C_GOLD)
-	ttl.autowrap_mode = TextServer.AUTOWRAP_OFF
-	tx.add_child(ttl)
-	tx.add_child(_label(L.t("The %d Pokémon of generation %d. The legendaries await!") % [cnt.y, gacha_region], 18))
-	tx.add_child(_label(L.t("You have %d of %d") % [cnt.x, cnt.y], 17, Color("#f2e9d8")))
-	banner.add_mon(int(bd["legs"][0]), 3.2, 0.0, 0.36)
-	banner.add_mon(int(bd["star"]), 3.2, 0.34, 0.66)
-	banner.add_mon(int(bd["legs"][1]), 3.2, 0.64, 1.0)
+	if is_bn:
+		var fname: String = L.t(String(SV.dex_by[feat]["name"]))
+		var ttl2 := _label(L.t("%s Banner") % fname, 32, C_GOLD)
+		ttl2.autowrap_mode = TextServer.AUTOWRAP_OFF
+		tx.add_child(ttl2)
+		tx.add_child(_label(L.t("%s is the only legendary here, guaranteed within %d pulls. The other Pokémon come from %s.") % [fname, SV.BANNER_HARD, L.t(SV.REGIONS[greg - 1])], 18))
+		tx.add_child(_label(_left_text(SV.week_left()) + ("  ·  " + L.t("You own it: a duplicate gives a Legend Shard") if SV.owns(feat) else ""), 17, Color("#f2e9d8")))
+		banner.add_mon(feat, 4.2, 0.25, 0.75)
+	else:
+		var ttl := _label(L.t("%s Mystery") % L.t(SV.REGIONS[gacha_region - 1]), 32, C_GOLD)
+		ttl.autowrap_mode = TextServer.AUTOWRAP_OFF
+		tx.add_child(ttl)
+		tx.add_child(_label(L.t("The %d Pokémon of generation %d. The legendaries await!") % [cnt.y, gacha_region], 18))
+		tx.add_child(_label(L.t("You have %d of %d") % [cnt.x, cnt.y], 17, Color("#f2e9d8")))
+		banner.add_mon(int(bd["legs"][0]), 3.2, 0.0, 0.36)
+		banner.add_mon(int(bd["star"]), 3.2, 0.34, 0.66)
+		banner.add_mon(int(bd["legs"][1]), 3.2, 0.64, 1.0)
 	# --- botones de tirada: two rows of three (single pulls, then Max pulls and Legend Pick)
 	var brow := GridContainer.new()
 	brow.columns = 3
 	brow.add_theme_constant_override("h_separation", 8)
 	brow.add_theme_constant_override("v_separation", 8)
 	left.add_child(brow)
-	var b1 := _cost_btn(L.t("Pull ×1"), "1", "", "ticket", func(): _do_pull(1, "t1"), Vector2(0, 44), SV.can_pull(1, "t1"), false, true)
-	var b10 := _cost_btn(L.t("Pull ×10"), "10", "", "ticket", func(): _do_pull(10, "t1"), Vector2(0, 44), SV.can_pull(10, "t1"), false, true)
-	var bt := _cost_btn(L.t("Purple ×10 pull"), "1", "", "ticket10", func(): _do_pull(10, "t10"), Vector2(0, 44), SV.can_pull(10, "t10"), false, true)
+	var open: bool = not claimed
+	var b1 := _cost_btn(L.t("Pull ×1"), "1", "", "ticket", func(): _do_pull(1, "t1"), Vector2(0, 44), open and SV.can_pull(1, "t1"), false, true)
+	var b10 := _cost_btn(L.t("Pull ×10"), "10", "", "ticket", func(): _do_pull(10, "t1"), Vector2(0, 44), open and SV.can_pull(10, "t1"), false, true)
+	var bt := _cost_btn(L.t("Purple ×10 pull"), "1", "", "ticket10", func(): _do_pull(10, "t10"), Vector2(0, 44), open and SV.can_pull(10, "t10"), false, true)
 	# Max pull: every gold ticket in batches of 10, or every purple ticket (×10 each), in one go
 	var mx: int = int(SV.d["tickets"]) / 10
 	var mp: int = int(SV.d.get("tickets10", 0))
-	var bmx := _cost_btn(L.t("Max pull ×%d") % (mx * 10), str(mx * 10), "", "ticket", func(): _confirm_max_pull("t1"), Vector2(0, 44), mx >= 1, false, true)
-	var bmp := _cost_btn(L.t("Max purple ×%d") % (mp * 10), str(mp), "", "ticket10", func(): _confirm_max_pull("t10"), Vector2(0, 44), mp >= 1, false, true)
+	var bmx := _cost_btn(L.t("Max pull ×%d") % (mx * 10), str(mx * 10), "", "ticket", func(): _confirm_max_pull("t1"), Vector2(0, 44), open and mx >= 1, false, true)
+	var bmp := _cost_btn(L.t("Max purple ×%d") % (mp * 10), str(mp), "", "ticket10", func(): _confirm_max_pull("t10"), Vector2(0, 44), open and mp >= 1, false, true)
 	# Legend Pick: Legend Shards (legendary duplicates, Eternatus) buy any legendary you don't own; the button shows the count
 	var shards: int = int(SV.d.get("lshards", 0))
 	var blp := _cost_btn(L.t("Legend Pick"), "%d/%d" % [shards, SV.SHARD_COST], "", "ballLux", func(): _legend_picker(), Vector2(0, 44),
@@ -5718,32 +5788,46 @@ func _refresh_gacha() -> void:
 		for lb in b.find_children("*", "Label", true, false):   # three to a row: smaller text so long labels fit
 			(lb as Label).add_theme_font_size_override("font_size", 18)
 		brow.add_child(b)
-	var pity: int = int(SV.d["pity"].get(str(gacha_region), 0))
+	var pity: int = int(SV.d.get("bpity", 0)) if is_bn else int(SV.d["pity"].get(str(gacha_region), 0))
 	var pcard := PanelContainer.new()
 	pcard.add_theme_stylebox_override("panel", UIS.frame(UIS.PANEL, UIS.EDGE))
 	left.add_child(pcard)
 	var pv := VBoxContainer.new()
 	pv.add_theme_constant_override("separation", 6)
 	pcard.add_child(pv)
-	pv.add_child(_label(L.t("Pulls without a legendary in %s: %d / %d") % [L.t(SV.REGIONS[gacha_region - 1]), pity, SV.PITY_5], 18, UIS.TEXT))
+	if claimed:
+		pv.add_child(_label(L.t("You got %s from this banner! New banners every Monday.") % L.t(String(SV.dex_by[feat]["name"])), 18, UIS.GOLD))
+	elif is_bn:
+		pv.add_child(_label(L.t("Banner pity: %d / %d (shared by all banners, kept between weeks)") % [pity, SV.BANNER_HARD], 18, UIS.TEXT))
+	else:
+		pv.add_child(_label(L.t("Pulls without a legendary in %s: %d / %d") % [L.t(SV.REGIONS[gacha_region - 1]), pity, SV.PITY_5], 18, UIS.TEXT))
 	var pbar := ProgressBar.new()
 	pbar.min_value = 0
-	pbar.max_value = SV.PITY_5
-	pbar.value = pity
+	pbar.max_value = SV.BANNER_HARD if is_bn else SV.PITY_5
+	pbar.value = SV.BANNER_HARD if claimed else pity
 	pbar.show_percentage = false
 	pbar.custom_minimum_size = Vector2(0, 18)
 	pbar.add_theme_stylebox_override("fill", _sb(UIS.GOLD, Color.TRANSPARENT, 0))
 	pv.add_child(pbar)
 	# completion bonus: the more of the region you own, the likelier the missing ones and shinies
-	pv.add_child(_label(L.t("Completion %d%%: missing Pokémon ×%.1f · shiny %.1f%%") % [roundi(SV.region_completion(gacha_region) * 100.0),
-		SV.missing_mul(gacha_region), SV.shiny_pull(gacha_region) * 100.0], 18, Color("#7fe8ff")))
+	if is_bn and not claimed:
+		pv.add_child(_label(L.t("From pull %d the legendary chance rises %d%% a pull; pull %d is %s.") % [SV.BANNER_SOFT + 1, roundi(SV.BANNER_STEP * 100.0), SV.BANNER_HARD, L.t(String(SV.dex_by[feat]["name"]))], 18, Color("#ffcb3d")))
+	else:
+		pv.add_child(_label(L.t("Completion %d%%: missing Pokémon ×%.1f · shiny %.1f%%") % [roundi(SV.region_completion(greg) * 100.0),
+			SV.missing_mul(greg), SV.shiny_pull(greg) * 100.0], 18, Color("#7fe8ff")))
+		if SV.shiny_charm(greg):
+			pv.add_child(_icon_label("shiny", L.t("%s Shiny Charm: wild %s Pokémon are shiny ×3 as often, its rift legendaries ×2, and +1%% here.") % [L.t(SV.REGIONS[greg - 1]), L.t(SV.REGIONS[greg - 1])], 17, UIS.GOLD, 22.0))
+		else:
+			pv.add_child(_label(L.t("Own every Pokémon of %s to earn its Shiny Charm (more shinies of this region only).") % L.t(SV.REGIONS[greg - 1]), 16, UIS.MUTED))
 	if first == null:
 		first = b1
 	# --- panel de probabilidades
-	var pool: Array = SV.region_pool(gacha_region)
+	var pool: Array = SV.region_pool(greg)
 	var counts: Array = [0, 0, 0, 0, 0]
 	for p in pool:
 		counts[clampi(int(p["rarity"]) - 1, 0, 4)] += 1
+	if is_bn:
+		counts[4] = 1   # the featured legendary only
 	var op := PanelContainer.new()
 	op.custom_minimum_size = Vector2(300, 0)
 	op.add_theme_stylebox_override("panel", UIS.frame(UIS.PANEL, UIS.EDGE))
@@ -5765,7 +5849,7 @@ func _refresh_gacha() -> void:
 		rn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		rn.autowrap_mode = TextServer.AUTOWRAP_OFF
 		rr.add_child(rn)
-		var pc := _label("%s%% · %d" % [str(SV.PULL_RATES[j]), int(counts[j])], 20, Color("#fff7d6"))
+		var pc := _label(("%s%%+ · %d" if is_bn and j == 4 else "%s%% · %d") % [str(SV.PULL_RATES[j]), int(counts[j])], 20, Color("#fff7d6"))
 		pc.autowrap_mode = TextServer.AUTOWRAP_OFF
 		rr.add_child(pc)
 		ov.add_child(rr)
@@ -5775,7 +5859,7 @@ func _refresh_gacha() -> void:
 	var sn := _label("Shiny", 20)
 	sn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	sr.add_child(sn)
-	var s32 := _label(String.num(SV.shiny_pull(gacha_region) * 100.0, 1) + "%", 20, Color("#fff7d6"))   # rises with region completion
+	var s32 := _label(String.num(SV.shiny_pull(greg) * 100.0, 1) + "%", 20, Color("#fff7d6"))   # rises with region completion
 	s32.autowrap_mode = TextServer.AUTOWRAP_OFF
 	sr.add_child(s32)
 	ov.add_child(sr)
@@ -5807,6 +5891,7 @@ func _refresh_gacha() -> void:
 	var qb := _btn("? " + L.t("Rules"), func(): rules.visible = not rules.visible, Vector2(0, 40))
 	ov.add_child(qb)
 	ov.add_child(rules)
+	rules.add_child(_label(L.t("· Legendary Banners: 3 a week, the same for everyone, new every Monday. The featured legendary is the banner's only legendary. Banner pity: %s%% up to pull %d, then +%d%% a pull, and pull %d is guaranteed. It is shared by all banners and kept between weeks. Once you get a banner's legendary, that banner closes until the next week.") % [str(SV.PULL_RATES[4]), SV.BANNER_SOFT, roundi(SV.BANNER_STEP * 100.0), SV.BANNER_HARD], 16, Color("#ffcb3d")))
 	rules.add_child(_label(L.t("· The ×10 pull guarantees at least one very rare Pokémon."), 16, Color("#f2e9d8")))
 	rules.add_child(_label(L.t("· Purple ×10 ticket: the last pull has a %d%% chance to be legendary (otherwise Very Rare or better) and the Z-Crystal chance rises to %d%%.") % [roundi(SV.PURPLE_LEGEND_P * 100.0), roundi(SV.Z_CRYSTAL_P_PURPLE * 100.0)], 16, Color("#d9a8ff")))
 	rules.add_child(_label(L.t("· After %d pulls without a legendary on a banner, the next one is.") % SV.PITY_5, 16, Color("#f2e9d8")))
@@ -5828,6 +5913,7 @@ func _do_pull(n: int, use: String) -> void:
 		return
 	var results: Array = SV.pull(gacha_region, n, use)
 	SV.save()
+	_announce_charms()
 	_update_top()
 	_play_slots(results)
 
@@ -5913,6 +5999,7 @@ func _legend_confirm(dex: int) -> void:
 			Aud.sfx("legend")
 			PG.check()
 			toast(L.t("%s joins your collection!") % _name_of(dex))
+			_announce_charms()
 		gacha_result.visible = false
 		_update_top()
 		_refresh_gacha(), Vector2(220, 54))
@@ -5983,6 +6070,7 @@ func _do_max_pull(use: String) -> void:
 	Aud.sfx("burst%d" % best)
 	if anyshiny:
 		Aud.sfx("shinyGet")
+	_announce_charms()
 	_show_batch(results, crystals)
 
 
@@ -6026,8 +6114,10 @@ func _show_batch(results: Array, crystals: Array) -> void:
 	if keep.is_empty():
 		v.add_child(_label(L.t("Nothing new this time: every Pokémon was a duplicate."), 18, Color("#b4aed6")))
 	else:
+		# rarest first (then shinies), so a legendary from a Max pull is never buried at the end of the list
+		keep.sort_custom(func(a, b): return [int(a["rarity"]), int(bool(a["shiny"]))] > [int(b["rarity"]), int(bool(b["shiny"]))])
 		var sc := ScrollContainer.new()
-		sc.custom_minimum_size = Vector2(880, mini(3, ceili(float(keep.size()) / 8.0)) * 128)
+		sc.custom_minimum_size = Vector2(880, mini(3, ceili(float(keep.size()) / 8.0)) * 130)
 		sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 		v.add_child(sc)
 		var grid := GridContainer.new()
@@ -6044,8 +6134,10 @@ func _show_batch(results: Array, crystals: Array) -> void:
 			var nm := _label(L.t(String(r["name"])) + (" ✨" if bool(r["shiny"]) else ""), 14)
 			nm.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 			cell.add_child(nm)
-			var tl := _label("NEW!" if bool(r["new"]) else "Shiny", 13, Color("#6fd08a") if bool(r["new"]) else Color("#ffd65c"))
-			tl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			# rarity as its ball icon only (no name), next to NEW! / Shiny
+			var rar: int = clampi(int(r["rarity"]), 1, 5)
+			var tl := _icon_label(String(["ball", "ball2", "ball3", "ball4", "ballLux"][rar - 1]), "NEW!" if bool(r["new"]) else "Shiny", 13, Color("#6fd08a") if bool(r["new"]) else Color("#ffd65c"), 20.0)
+			tl.alignment = BoxContainer.ALIGNMENT_CENTER
 			cell.add_child(tl)
 	for zc in crystals:
 		var zrow := _icon_label("zc:" + String(zc), L.t("Z-Crystal found! You unlock: %s") % L.t(String(ZM.DEF[String(zc)]["name"])), 18, Color("#ffd65c"), 32.0)
@@ -8621,6 +8713,8 @@ func _set_account() -> void:
 	var rd := _btn("Redeem", redeem_fn, Vector2(0, 50))
 	code_in.text_submitted.connect(func(_t: String): redeem_fn.call())
 	_sadd(rd)
+	_sec("Updates")
+	_srow("Get test builds", "Also offer test versions in the update notice. They have the newest features first but may have bugs. Off: only full releases. If you already play a test version, newer test versions are always offered.", _toggle_set("test_builds"))
 	_sec("Danger zone")
 	var rb := _btn("Erase all progress", func(): pass, Vector2(0, 50))
 	_danger(rb)
@@ -8652,7 +8746,7 @@ func _set_about() -> void:
 	_sadd(ver)
 	_sadd(_label("Fan game free and non-profit: no ads or purchases. Pokémon and its characters are owned by Nintendo, Creatures and GAME FREAK; this project is not affiliated with them.", 20, Color("#f2e9d8")))
 	_sec("Credits")
-	for line in ["• Original game (web): PokéSurvivor, by JPTER78.", "• Android port (Godot): JayElDragon.", "• This edition: Dwr3ker.", "• Inspired by PokeSurvivor Doofcraft (not affiliated); the dash, by PokeTide.", "• Sprites: PMD SpriteCollab and its artists (CC BY-NC 4.0).", "• Pokémon data: PokéAPI.", "• Font: Pixelify Sans (OFL)."]:
+	for line in ["• Original game (web): PokéSurvivor, by JPTER78.", "• Android port (Godot): JayElDragon.", "• This edition: Dwr3ker.", "• Inspired by PokeSurvivor Doofcraft (not affiliated); the dash, by PokeTide.", "• Sprites: PMD SpriteCollab and its artists (CC BY-NC 4.0).", "• Pokémon data: PokéAPI.", "• Font: Pixelify Sans (OFL).", "• Effects (status icons, critical hits, pickups, rare XP): pixelfx by Patch and Hugo Duprez (MIT)."]:
 		_sadd(_label(line, 20))
 	var hb := HFlowContainer.new()
 	hb.add_theme_constant_override("h_separation", 10)
