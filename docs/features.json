@@ -108,5 +108,12 @@
  ],
  "Pickups that shine": [
   "screens/pickups.jpg"
+ ],
+ "Username": [
+  "screens/username_prompt.jpg"
+ ],
+ "Pokémon list filters": [
+  "screens/pokemon_list_small_grid.jpg",
+  "screens/pokemon_list_type_filter.jpg"
  ]
 }

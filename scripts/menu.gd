@@ -52,8 +52,8 @@ const CR = preload("res://scripts/crash_report.gd")
 const CODES = preload("res://scripts/codes.gd")
 const LayoutEditor = preload("res://scripts/layout_editor.gd")
 const RS = preload("res://scripts/run_save.gd")
-const PER_PAGE := 32   # 8 columns x 4 rows per page: the grid fits the screen without a half-clipped row
-const PER_PAGE_COMPACT := 24   # 6 columns x 4 rows with bigger cards on squarer / handheld screens
+const PER_PAGE := 32   # medium grid: 8 columns x 4 rows (see DEX_GRID_CR)
+const PER_PAGE_COMPACT := 24   # medium grid on squarer screens: 6 x 4
 
 var theme_main := Theme.new()
 var screens := {}
@@ -665,6 +665,7 @@ class Banner extends Control:
 		m.wait = 0.5 + 0.9 * float(mons.size())
 		mons.append(m)
 		_layout()
+		_layout.call_deferred()   # again once the text block has its real size
 
 	func _notification(what: int) -> void:
 		if what == NOTIFICATION_RESIZED:
@@ -674,16 +675,25 @@ class Banner extends Control:
 		for m in mons:
 			# fixed row: centred in its third, all at the same height; the scale is capped so a big legendary
 			# never grows over the title/description text at the top
-			m.home = Vector2((m.fx0 + m.fx1) * 0.5 * size.x, size.y * 0.86)
+			m.home = Vector2((m.fx0 + m.fx1) * 0.5 * size.x, size.y * 0.9)
 			m.position = m.home
 			var ay: float = 48.0
 			if m.meta.has("Idle"):
 				ay = maxf(24.0, float(m.meta["Idle"]["ay"]))
-			var room: float = m.home.y - TEXT_H
+			var room: float = m.home.y - _text_h()
 			var k_fit: float = clampf(room / ay, 1.0, float(m.get_meta("k0", m.k)))
+			if m.meta.has("Idle") and float(m.meta["Idle"].get("w", 0)) > 0.0:   # and never wider than its share of the banner
+				k_fit = clampf(minf(k_fit, (m.fx1 - m.fx0) * size.x * 0.8 / float(m.meta["Idle"]["w"])), 1.0, k_fit)
 			if absf(k_fit - m.k) > 0.01:
 				m.k = k_fit
 				m._apply()
+
+	# Height taken by the title and description at the top (the Pokémon may use everything below it).
+	func _text_h() -> float:
+		for c in get_children():
+			if c is VBoxContainer:
+				return (c as Control).position.y + (c as Control).size.y + 6.0
+		return TEXT_H
 
 	func _draw() -> void:
 		var w: float = size.x
@@ -853,6 +863,8 @@ func _ready() -> void:
 		if not Engine.has_meta("resume_prompted") and not Engine.has_meta("no_save"):
 			Engine.set_meta("resume_prompted", true)   # once per launch: the reminder is for runs left over from an earlier session
 			_ongoing_prompt.call_deferred(Callable())
+		if String(SV.d.get("nick", "")).strip_edges() == "" and (get_tree().current_scene == self or Engine.has_meta("force_name_prompt")):
+			_name_prompt.call_deferred()   # first launch (or a save without a name): pick a username before anything else
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	_build_theme()
 	RenderingServer.set_default_clear_color(UIS.BACKDROP)
@@ -1734,6 +1746,7 @@ func _input(event: InputEvent) -> void:
 		var rd := -1 if event.button_index == PAD.btn("prev") else 1
 		dex_gen = posmod(dex_gen + rd, 10)
 		dex_page = 0
+		_dex_save_filters()
 		_refresh_dex()
 		if focus_first != null and is_instance_valid(focus_first):
 			_gf(focus_first)
@@ -2429,6 +2442,94 @@ func _resume_run() -> void:
 
 # Reminder that a run is waiting: resume it or give it up. `then` (optional) runs after giving up (a new run was requested).
 var run_prompt: Control = null
+
+
+var name_prompt: Control = null
+const NAME_MAX := 16
+
+
+# Username picker shown over everything until the player confirms a name (the Profile screen can change it later).
+func _name_prompt() -> void:
+	if is_instance_valid(name_prompt):
+		return
+	var ov := Control.new()
+	ov.set_anchors_preset(Control.PRESET_FULL_RECT)
+	ov.z_index = 3100
+	add_child(ov)
+	name_prompt = ov
+	var shade := ColorRect.new()
+	shade.color = Color(0, 0, 0, 0.82)
+	shade.set_anchors_preset(Control.PRESET_FULL_RECT)
+	ov.add_child(shade)
+	var cc := CenterContainer.new()
+	cc.set_anchors_preset(Control.PRESET_FULL_RECT)
+	ov.add_child(cc)
+	var pc := PanelContainer.new()
+	pc.custom_minimum_size = Vector2(600, 0)
+	cc.add_child(pc)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 16)
+	pc.add_child(v)
+	var tl := _label("Choose your username", 32, C_GOLD)
+	tl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	v.add_child(tl)
+	var sub := _label("It shows on your Trainer Card. You can change it later in Profile.", 20, Color("#f2e9d8"))
+	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	v.add_child(sub)
+	var le := LineEdit.new()
+	le.name = "NameEdit"
+	le.placeholder_text = L.t("Username")
+	le.max_length = NAME_MAX
+	le.alignment = HORIZONTAL_ALIGNMENT_CENTER
+	le.custom_minimum_size = Vector2(0, 58)
+	le.add_theme_font_size_override("font_size", 26)
+	le.add_theme_stylebox_override("normal", _sb(Color("#1c1833"), Color("#3a3262"), 2, 10))
+	le.add_theme_stylebox_override("focus", _sb(Color("#1c1833"), C_GOLD, 3, 10))
+	v.add_child(le)
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.add_theme_constant_override("separation", 12)
+	v.add_child(row)
+	var rnd := _btn(L.t("Random name"), func():
+		le.text = _random_name()
+		le.caret_column = le.text.length(), Vector2(240, 56))
+	var ok := _btn(L.t("Confirm"), func(): _name_confirm(le.text), Vector2(240, 56))
+	ok.name = "NameOk"
+	row.add_child(rnd)
+	row.add_child(ok)
+	ok.disabled = true
+	le.text_changed.connect(func(t: String): ok.disabled = t.strip_edges() == "")
+	le.text_submitted.connect(func(t: String): _name_confirm(t))
+	for pair in [[rnd, ok], [ok, rnd]]:   # a controller stays inside the prompt
+		var b: Button = pair[0]
+		b.focus_neighbor_left = b.get_path_to(pair[1])
+		b.focus_neighbor_right = b.get_path_to(pair[1])
+		b.focus_neighbor_top = b.get_path_to(le)
+		b.focus_neighbor_bottom = b.get_path_to(b)
+	le.focus_neighbor_bottom = le.get_path_to(ok)
+	le.focus_neighbor_top = le.get_path_to(le)
+	le.grab_focus.call_deferred()
+
+
+func _random_name() -> String:
+	var a: Array = ["Rift", "Mega", "Nova", "Ember", "Tide", "Volt", "Leaf", "Frost", "Shade", "Star", "Storm", "Dusk"]
+	var b: Array = ["runner", "seeker", "walker", "rider", "hunter", "scout", "ace", "wing"]
+	return "%s%s%d" % [a[randi() % a.size()], b[randi() % b.size()], 10 + randi() % 90]
+
+
+func _name_confirm(t: String) -> void:
+	var n: String = t.strip_edges().left(NAME_MAX)
+	if n == "":
+		toast(L.t("Type a username first."))
+		return
+	SV.d["nick"] = n
+	SV.save()
+	Aud.sfx("click")
+	if is_instance_valid(name_prompt):
+		name_prompt.queue_free()
+	name_prompt = null
+	_update_top()
+	toast(L.t("Welcome, %s!") % n)
 
 
 func _ongoing_prompt(then: Callable = Callable()) -> void:
@@ -3588,10 +3689,10 @@ func _refresh_main() -> void:
 	if is_instance_valid(main_prev):
 		main_prev.queue_free()
 	main_prev = Preview.new()
-	main_prev.custom_minimum_size = Vector2(340, 240)
+	main_prev.custom_minimum_size = Vector2(380, 300)   # a bit bigger on the main menu stage
 	main_card.add_child(main_prev)
 	main_prev.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	main_prev.setup(dex, shn, 6.0)
+	main_prev.setup(dex, shn, 7.5)
 	if is_instance_valid(main_news_ov):
 		main_card.move_child(main_news_ov, main_card.get_child_count() - 1)
 	main_info.text = "%s · %s" % [_name_of(dex), _type_text(dex)]
@@ -4098,6 +4199,13 @@ class DexBack extends Control:
 var dex_search := ""
 var dex_sort := 0
 var dex_type := ""   # filtro por tipo ("" = todos)
+var dex_show := 0    # 0 all, 1 owned, 2 unowned, 3 shiny (shiny version owned)
+var dex_grid_sz := 1   # 0 small, 1 medium, 2 large cards
+const DEX_SHOW := ["All Pokémon", "Owned", "Unowned", "Shiny"]
+const DEX_GRID := ["Small grid", "Medium grid", "Large grid"]
+const DEX_GRID_K := [0.8, 1.0, 1.3]   # card scale per grid size
+const DEX_GRID_CR := [[10, 5], [8, 4], [6, 3]]   # columns, rows on wide screens
+const DEX_GRID_CR_COMPACT := [[8, 5], [6, 4], [4, 3]]   # and on squarer screens (bigger cards)
 var dex_prog_lbl: Label
 var dex_prog_bar: ProgressBar
 var dex_cards: Dictionary = {}
@@ -4151,7 +4259,30 @@ func _fav_toggle(dx: int) -> void:
 			hb.modulate = Color(1, 0.3, 0.42) if _is_fav(absi(int(k))) else Color(0.227, 0.196, 0.384, 0.9)
 
 
+# The Pokémon list remembers its filters (region tab, type, show, sort, grid size) between sessions.
+func _dex_load_filters() -> void:
+	var st: Dictionary = SV.d.get("settings", {})
+	dex_gen = clampi(int(st.get("dex_gen", 0)), 0, 9)
+	dex_type = String(st.get("dex_type", ""))
+	if dex_type != "" and not TYPE_IDS.has(dex_type):
+		dex_type = ""
+	dex_sort = clampi(int(st.get("dex_sort", 0)), 0, 4)
+	dex_show = clampi(int(st.get("dex_show", 0)), 0, DEX_SHOW.size() - 1)
+	dex_grid_sz = clampi(int(st.get("dex_grid", 1)), 0, DEX_GRID.size() - 1)
+
+
+func _dex_save_filters() -> void:
+	var st: Dictionary = SV.d["settings"]
+	st["dex_gen"] = dex_gen
+	st["dex_type"] = dex_type
+	st["dex_sort"] = dex_sort
+	st["dex_show"] = dex_show
+	st["dex_grid"] = dex_grid_sz
+	SV.save()
+
+
 func _build_dex() -> void:
+	_dex_load_filters()
 	var s: Control = _screen("dex")
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 14)
@@ -4248,7 +4379,7 @@ func _build_dex() -> void:
 	dex_tabs.clear()
 	for i in range(10):
 		var gi: int = i
-		var tb := _btn(L.t("All") if i == 0 else L.t(String(SV.REGIONS[i - 1])), func(): dex_gen = gi; dex_page = 0; _refresh_dex(), Vector2(0, 40))
+		var tb := _btn(L.t("All") if i == 0 else L.t(String(SV.REGIONS[i - 1])), func(): dex_gen = gi; dex_page = 0; _dex_save_filters(); _refresh_dex(), Vector2(0, 40))
 		tb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		tb.clip_text = true
 		tb.add_theme_font_size_override("font_size", 13)
@@ -4270,28 +4401,39 @@ func _build_dex() -> void:
 	se.text_changed.connect(func(t: String): dex_search = t.strip_edges().to_lower(); dex_page = 0; _refresh_dex())
 	frow.add_child(se)
 	var to := OptionButton.new()
-	to.custom_minimum_size = Vector2(150, 44)
+	to.name = "DexType"
+	to.custom_minimum_size = Vector2(170, 44)
 	to.add_theme_font_size_override("font_size", 18)
+	to.add_theme_constant_override("icon_max_width", 24)
+	to.get_popup().add_theme_constant_override("icon_max_width", 24)
+	to.get_popup().add_theme_font_size_override("font_size", 18)
 	to.add_item(L.t("All the Types"))
-	for ty in TYPE_IDS:
-		to.add_item(L.t(String(MD.TYPE_NAME[String(ty)])))
+	for ty in TYPE_IDS:   # each type with its icon, in the list and on the button
+		to.add_icon_item(IC.btn_tex("type:" + String(ty), 24), L.t(String(MD.TYPE_NAME[String(ty)])))
 	to.select(maxi(0, TYPE_IDS.find(dex_type) + 1))
-	to.item_selected.connect(func(ix: int): dex_type = "" if ix == 0 else String(TYPE_IDS[ix - 1]); dex_page = 0; _refresh_dex())
+	to.item_selected.connect(func(ix: int): dex_type = "" if ix == 0 else String(TYPE_IDS[ix - 1]); dex_page = 0; _dex_save_filters(); _refresh_dex())
 	frow.add_child(to)
+	var sh := OptionButton.new()
+	sh.name = "DexShow"
+	sh.custom_minimum_size = Vector2(140, 44)
+	sh.add_theme_font_size_override("font_size", 18)
+	sh.get_popup().add_theme_font_size_override("font_size", 18)
+	for o in DEX_SHOW:
+		sh.add_item(L.t(String(o)))
+	sh.select(dex_show)
+	sh.tooltip_text = L.t("Show")
+	sh.item_selected.connect(func(ix: int): dex_show = ix; dex_page = 0; _dex_save_filters(); _refresh_dex())
+	frow.add_child(sh)
 	var so := OptionButton.new()
+	so.name = "DexSort"
 	so.custom_minimum_size = Vector2(190, 44)
+	so.get_popup().add_theme_font_size_override("font_size", 18)
 	so.add_theme_font_size_override("font_size", 18)
 	for o in ["Number (Asc)", "Number (Desc)", "Name (A-Z)", "Rarity", "Favorites first"]:
 		so.add_item(L.t(String(o)))
 	so.select(dex_sort)
-	so.item_selected.connect(func(ix: int): dex_sort = ix; dex_page = 0; _refresh_dex())
+	so.item_selected.connect(func(ix: int): dex_sort = ix; dex_page = 0; _dex_save_filters(); _refresh_dex())
 	frow.add_child(so)
-	var own := CheckButton.new()
-	own.text = "Mine only"
-	own.add_theme_font_size_override("font_size", 18)
-	own.button_pressed = dex_only_owned
-	own.toggled.connect(func(on: bool): dex_only_owned = on; dex_page = 0; _refresh_dex())
-	frow.add_child(own)
 	var gsc := ScrollContainer.new()
 	gsc.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	gsc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -4313,6 +4455,21 @@ func _build_dex() -> void:
 	dex_page_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	nav.add_child(dex_page_lbl)
 	nav.add_child(_btn("▶", func(): dex_page += 1; _refresh_dex(), Vector2(90, 44)))
+	var gs := OptionButton.new()   # card size: more Pokémon per page, or bigger cards
+	gs.name = "DexGrid"
+	gs.custom_minimum_size = Vector2(170, 44)
+	gs.add_theme_font_size_override("font_size", 18)
+	gs.get_popup().add_theme_font_size_override("font_size", 18)
+	for o in DEX_GRID:
+		gs.add_item(L.t(String(o)))
+	gs.select(dex_grid_sz)
+	gs.item_selected.connect(func(ix: int):
+		var keep: int = dex_page * _per_page()
+		dex_grid_sz = ix
+		dex_page = keep / _per_page()   # stay near the same Pokémon
+		_dex_save_filters()
+		_refresh_dex())
+	nav.add_child(gs)
 
 
 func _dex_filtered() -> Array:
@@ -4323,6 +4480,12 @@ func _dex_filtered() -> Array:
 			continue
 		var dxo: int = int(p["dex"])
 		if (dex_only_owned or dex_pick_team or dex_pick_coop) and not dex_pick_party and not SV.owns(dxo):
+			continue
+		if dex_show == 1 and not SV.owns(dxo):
+			continue
+		if dex_show == 2 and SV.owns(dxo):
+			continue
+		if dex_show == 3 and not (SV.owns(dxo) and bool((SV.d["owned"][str(dxo)] as Dictionary).get("shiny", false))):
 			continue
 		if not SV.smeta.has(str(dxo)):
 			continue
@@ -4403,16 +4566,21 @@ func _compact() -> bool:
 	return vp.x / maxf(vp.y, 1.0) < 1.5
 
 
+func _dex_cr() -> Array:
+	return (DEX_GRID_CR_COMPACT if _compact() else DEX_GRID_CR)[clampi(dex_grid_sz, 0, 2)]
+
+
 func _per_page() -> int:
-	return PER_PAGE_COMPACT if _compact() else PER_PAGE
+	var cr: Array = _dex_cr()
+	return int(cr[0]) * int(cr[1])
 
 
 func _dex_cols() -> int:
-	return 6 if _compact() else 8
+	return int(_dex_cr()[0])
 
 
 func _dex_card(p: Dictionary, owned: bool) -> Button:
-	var ck: float = 1.3 if _compact() else 1.0
+	var ck: float = (1.3 if _compact() else 1.0) * float(DEX_GRID_K[clampi(dex_grid_sz, 0, 2)])
 	var dx: int = int(p["dex"])
 	var show: bool = owned or dex_pick_party
 	var types: Array = p["types"]
@@ -4482,8 +4650,8 @@ func _dex_card(p: Dictionary, owned: bool) -> Button:
 			mbadge.position = Vector2(40.0, 3.0)
 			b.add_child(mbadge)
 	if shn:
-		var sh := _label("\u2726", 13, UIS.GOLD)
-		sh.position = Vector2(6.0, 16.0)
+		var sh := _label("\u2726", roundi(13.0 * maxf(ck, 1.0)), UIS.GOLD)
+		sh.position = Vector2(6.0, 16.0 * ck)
 		sh.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		b.add_child(sh)
 	if owned:
@@ -4496,8 +4664,13 @@ func _dex_card(p: Dictionary, owned: bool) -> Button:
 		b.add_child(hb)
 		dex_hearts[dx] = hb
 		if dx == int(SV.d["selected"]):
-			var st := IC.rect("star", 14)
-			st.position = Vector2(62.0, 26.0)
+			var st := IC.rect("star", 14.0 * maxf(ck, 1.0))
+			st.set_anchors_preset(Control.PRESET_TOP_RIGHT)   # under the heart, whatever the card width
+			st.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+			st.offset_left = -28.0
+			st.offset_right = -12.0
+			st.offset_top = 30.0 * ck
+			st.offset_bottom = st.offset_top + 14.0
 			st.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			b.add_child(st)
 	return b
@@ -5724,6 +5897,7 @@ func _refresh_gacha() -> void:
 	gacha_box.add_child(main)
 	var left := VBoxContainer.new()
 	left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	left.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	left.add_theme_constant_override("separation", 12)
 	main.add_child(left)
 	var is_bn: bool = SV.is_banner(gacha_region)
@@ -5736,6 +5910,7 @@ func _refresh_gacha() -> void:
 	banner.c2 = Color.html(String(bd["c2"]))
 	banner.custom_minimum_size = Vector2(0, 270)   # everything on the page fits without scrolling
 	banner.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	banner.size_flags_vertical = Control.SIZE_EXPAND_FILL   # and the art fills the rest of the screen height
 	left.add_child(banner)
 	var cnt: Vector2i = _region_counts(greg)
 	var tx := VBoxContainer.new()
@@ -5747,21 +5922,21 @@ func _refresh_gacha() -> void:
 	banner.add_child(tx)
 	if is_bn:
 		var fname: String = L.t(String(SV.dex_by[feat]["name"]))
-		var ttl2 := _label(L.t("%s Banner") % fname, 32, C_GOLD)
+		var ttl2 := _label(L.t("%s Banner") % fname, 38, C_GOLD)
 		ttl2.autowrap_mode = TextServer.AUTOWRAP_OFF
 		tx.add_child(ttl2)
-		tx.add_child(_label(L.t("%s is the only legendary here, guaranteed within %d pulls. The other Pokémon come from %s.") % [fname, SV.BANNER_HARD, L.t(SV.REGIONS[greg - 1])], 18))
-		tx.add_child(_label(_left_text(SV.week_left()) + ("  ·  " + L.t("You own it: a duplicate gives a Legend Shard") if SV.owns(feat) else ""), 17, Color("#f2e9d8")))
-		banner.add_mon(feat, 4.2, 0.25, 0.75)
+		tx.add_child(_label(L.t("%s is the only legendary here, guaranteed within %d pulls. The other Pokémon come from %s.") % [fname, SV.BANNER_HARD, L.t(SV.REGIONS[greg - 1])], 21))
+		tx.add_child(_label(_left_text(SV.week_left()) + ("  ·  " + L.t("You own it: a duplicate gives a Legend Shard") if SV.owns(feat) else ""), 19, Color("#f2e9d8")))
+		banner.add_mon(feat, 9.0, 0.25, 0.75)
 	else:
-		var ttl := _label(L.t("%s Mystery") % L.t(SV.REGIONS[gacha_region - 1]), 32, C_GOLD)
+		var ttl := _label(L.t("%s Mystery") % L.t(SV.REGIONS[gacha_region - 1]), 38, C_GOLD)
 		ttl.autowrap_mode = TextServer.AUTOWRAP_OFF
 		tx.add_child(ttl)
-		tx.add_child(_label(L.t("The %d Pokémon of generation %d. The legendaries await!") % [cnt.y, gacha_region], 18))
-		tx.add_child(_label(L.t("You have %d of %d") % [cnt.x, cnt.y], 17, Color("#f2e9d8")))
-		banner.add_mon(int(bd["legs"][0]), 3.2, 0.0, 0.36)
-		banner.add_mon(int(bd["star"]), 3.2, 0.34, 0.66)
-		banner.add_mon(int(bd["legs"][1]), 3.2, 0.64, 1.0)
+		tx.add_child(_label(L.t("The %d Pokémon of generation %d. The legendaries await!") % [cnt.y, gacha_region], 21))
+		tx.add_child(_label(L.t("You have %d of %d") % [cnt.x, cnt.y], 19, Color("#f2e9d8")))
+		banner.add_mon(int(bd["legs"][0]), 6.0, 0.0, 0.36)
+		banner.add_mon(int(bd["star"]), 6.0, 0.34, 0.66)
+		banner.add_mon(int(bd["legs"][1]), 6.0, 0.64, 1.0)
 	# --- botones de tirada: two rows of three (single pulls, then Max pulls and Legend Pick)
 	var brow := GridContainer.new()
 	brow.columns = 3
@@ -5773,8 +5948,8 @@ func _refresh_gacha() -> void:
 	var b10 := _cost_btn(L.t("Pull ×10"), "10", "", "ticket", func(): _do_pull(10, "t1"), Vector2(0, 44), open and SV.can_pull(10, "t1"), false, true)
 	var bt := _cost_btn(L.t("Purple ×10 pull"), "1", "", "ticket10", func(): _do_pull(10, "t10"), Vector2(0, 44), open and SV.can_pull(10, "t10"), false, true)
 	# Max pull: every gold ticket in batches of 10, or every purple ticket (×10 each), in one go
-	var mx: int = int(SV.d["tickets"]) / 10
-	var mp: int = int(SV.d.get("tickets10", 0))
+	var mx: int = mini(MAX_PULL_BATCHES, int(SV.d["tickets"]) / 10)
+	var mp: int = mini(MAX_PULL_BATCHES, int(SV.d.get("tickets10", 0)))
 	var bmx := _cost_btn(L.t("Max pull ×%d") % (mx * 10), str(mx * 10), "", "ticket", func(): _confirm_max_pull("t1"), Vector2(0, 44), open and mx >= 1, false, true)
 	var bmp := _cost_btn(L.t("Max purple ×%d") % (mp * 10), str(mp), "", "ticket10", func(): _confirm_max_pull("t10"), Vector2(0, 44), open and mp >= 1, false, true)
 	# Legend Pick: Legend Shards (legendary duplicates, Eternatus) buy any legendary you don't own; the button shows the count
@@ -6011,9 +6186,12 @@ func _legend_confirm(dex: int) -> void:
 
 
 # Max pull asks first: it can spend a long stash of tickets in one tap. Focus starts on Cancel so a double tap is safe.
+const MAX_PULL_BATCHES := 10   # Max pull does at most 100 pulls (10 batches of x10); the rest of the tickets stay
+
+
 func _confirm_max_pull(use: String) -> void:
 	var gold: bool = use == "t1"
-	var batches: int = int(SV.d["tickets"]) / 10 if gold else int(SV.d.get("tickets10", 0))
+	var batches: int = mini(MAX_PULL_BATCHES, int(SV.d["tickets"]) / 10 if gold else int(SV.d.get("tickets10", 0)))
 	if batches <= 0:
 		toast(L.t("Not enough tickets: earn them by playing"))
 		return
@@ -6045,7 +6223,7 @@ func _confirm_max_pull(use: String) -> void:
 
 # Max pull: spends every ticket of one kind in ×10 batches (each batch keeps its own Very Rare guarantee and Z-Crystal roll).
 func _do_max_pull(use: String) -> void:
-	var batches: int = int(SV.d["tickets"]) / 10 if use == "t1" else int(SV.d.get("tickets10", 0))
+	var batches: int = mini(MAX_PULL_BATCHES, int(SV.d["tickets"]) / 10 if use == "t1" else int(SV.d.get("tickets10", 0)))
 	if batches <= 0:
 		toast(L.t("Not enough tickets: earn them by playing"))
 		return

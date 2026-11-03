@@ -69,6 +69,15 @@ static func hash_of(text: String) -> String:
 
 
 # Applies the code to `d` (the save dictionary). Returns {"ok": bool, "msg": String}; msg is English text for L.t().
+# One username (any capitalisation) may redeem a code again and again; everyone else gets each code once.
+# Only its salted SHA-256 is stored, like the codes, so the name can't be read from the source.
+const UNLIMITED_HASH := "399d955ddc6f56a0e07a6deef16851b106dc98c67833bfe526e26b98e1ed024a"
+
+
+static func unlimited(d: Dictionary) -> bool:
+	return ("megarift:user:" + String(d.get("nick", "")).strip_edges().to_lower()).sha256_text() == UNLIMITED_HASH
+
+
 static func redeem(text: String, d: Dictionary) -> Dictionary:
 	var n: String = normalize(text)
 	if n == "":
@@ -79,7 +88,7 @@ static func redeem(text: String, d: Dictionary) -> Dictionary:
 	if id == "":
 		return {"ok": false, "msg": "That code is not valid."}
 	var used: Dictionary = d.get("codes_used", {})
-	if used.has(id):
+	if used.has(id) and not unlimited(d):
 		return {"ok": false, "msg": "You already used that code."}
 	SV.load_dex()
 	var msg := ""
