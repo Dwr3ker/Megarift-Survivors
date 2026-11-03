@@ -73,7 +73,8 @@ class Item extends Node2D:
 			var al: float = clampf(ttl / 0.9, 0.0, 1.0)
 			P.draw_tex(self, sub, 0.6, (1.0 - al) * 26.0, al)
 			return
-		draw_circle(Vector2(0, 2), 10.0 if kind != "crate" else 16.0, Color(0, 0, 0, 0.28))
+		var PKF = load("res://scripts/pickup_fx.gd")
+		PKF.shadow(self, 12.0 if kind != "crate" else 20.0, 0.0 if kind == "crate" else 4.0 + bob)
 		var tn := ""
 		match kind:
 			"pouch": tn = "pouch"
@@ -83,11 +84,21 @@ class Item extends Node2D:
 			"crate": tn = {"medical": "sup_med", "resource": "sup_res", "rare": "sup_rare", "golden": "sup_gold"}[sub]
 		if tn != "" and P.tex(tn) != null:
 			var kk: float = 0.6
+			# a soft glow in the item's colour (rare parcels blue, crates their supply colour)
+			var gc: Color = {"pouch": Color("#ff6b6b"), "xp": Color("#59c8ff"), "potion": Color("#c47bff"), "pack": Color("#5ab0ff") if sub == "rare" else Color("#ffd65c")}.get(kind, Color.WHITE)
+			if kind == "crate":
+				gc = Color.html(String(SUPPLY_TYPES[sub]["col"]))
+			PKF.glow(self, Vector2(0, -24 if kind != "crate" else -28), 30.0 if kind != "crate" else 40.0, gc, t, 0.9)
 			if kind == "crate":
 				var col0: Color = Color.html(String(SUPPLY_TYPES[sub]["col"]))
 				draw_arc(Vector2(0, -22), 30.0 + 3.0 * sin(t * 5.0), 0, TAU, 32, Color(col0.r, col0.g, col0.b, 0.5), 3.0)
 				draw_arc(Vector2(0, -22), 38.0, -PI * 0.5, -PI * 0.5 + TAU * clampf(ttl / 30.0, 0.0, 1.0), 32, Color.WHITE, 3.0)
 			P.draw_tex(self, tn, kk, 4.0 + bob if kind != "crate" else 2.0)
+			var tsz: Vector2 = Vector2(P.tex(tn).get_width(), P.tex(tn).get_height()) * kk
+			var lift: float = 4.0 + bob if kind != "crate" else 2.0
+			if kind == "pack" or kind == "crate":   # boxes catch a light sweep now and then
+				PKF.shine(self, Rect2(Vector2(-tsz.x * 0.5 + 3.0, -tsz.y - lift + 3.0), tsz - Vector2(6.0, 6.0)), t, 3.0, float(uid % 7) * 0.4)
+			PKF.sparkles(self, Vector2(0, -tsz.y * 0.5 - lift), tsz.x * 0.6, tsz.y * 0.45, t, 3 if (kind == "crate" or sub == "rare") else 2, gc.lightened(0.5))
 			if kind == "pack":
 				P.draw_tex(self, "i_qr" if sub == "rare" else "i_q", 0.6, 62.0 + bob * 2.0)
 			elif kind == "crate":

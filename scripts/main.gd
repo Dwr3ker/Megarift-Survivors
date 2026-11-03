@@ -24,6 +24,7 @@ const DM = preload("res://scripts/doom.gd")
 const CAL = preload("res://scripts/calamity.gd")
 const CR = preload("res://scripts/crash_report.gd")
 const HL = preload("res://scripts/hud_layout.gd")
+const PKF = preload("res://scripts/pickup_fx.gd")
 const RS = preload("res://scripts/run_save.gd")
 const PL = preload("res://scripts/plates.gd")
 const ZC = preload("res://scripts/zcrystal.gd")
@@ -900,7 +901,7 @@ func _manual_aim_vec() -> Vector2:
 			return rv.normalized()
 	if aim_touch != -1 and aim_touch_dir != Vector2.ZERO:
 		return aim_touch_dir
-	if aim_touch == -1 and run_time - aim_mouse_t < 3.0 * time_k and not DisplayServer.is_touchscreen_available():
+	if aim_touch == -1 and run_time - aim_mouse_t < 3.0 * time_k and not OS.has_feature("mobile"):
 		var sp: Vector2 = player.get_global_transform_with_canvas().origin + Vector2(0.0, -player.body_h * 0.5)
 		var d: Vector2 = get_viewport().get_mouse_position() - sp
 		if d.length() > 18.0:
@@ -1308,6 +1309,7 @@ func _on_skip() -> void:
 	pending_levels = maxi(0, pending_levels - 1)
 	add_text(player.position + Vector2(0.0, -player.body_h - 8.0), "+%d XP" % roundi(gain), Color("#7fe0ff"), 20)
 	Aud.sfx("confirm")
+	_chain_note(L.t("Skipped (+25% XP)"))
 	cards.hide_cards()
 	choosing = false
 
@@ -1397,6 +1399,8 @@ func _fx_cap() -> int:
 
 
 func _process(delta: float) -> void:
+	if hud != null:
+		hud.modulate.a = 0.25 if (cards != null and cards.open) else 1.0   # the run's HUD steps back behind the cards
 	hud.paused = paused
 	if not settings_open:
 		var want_ui: bool = paused and not player.dead
@@ -8443,7 +8447,7 @@ func _offer() -> Array:
 			var nd: Dictionary = MD.MOVES[nid]
 			pool.append({"cat": "new", "id": nid, "key": "new:" + nid, "w": 10.0, "title": String(nd["name"]),
 				"desc": _move_desc(nd), "icon": "move:" + nid, "tag": String(MD.TYPE_NAME[String(nd["type"])]),
-				"color": Color.html(String(MD.TYPE_COLOR[String(nd["type"])]))})
+				"color": Color.html(String(MD.TYPE_COLOR[String(nd["type"])])), "badges": _card_badges(nid, "new")})
 
 	# --- evoluciones: movimiento al maximo + su condicion cumplida ---
 	for m in player.moves:
@@ -8467,7 +8471,8 @@ func _offer() -> Array:
 		var ladder: Array = MD.LADDERS[String(m["kind"])]
 		pool.append({"cat": "up", "id": String(m["id"]), "key": "up:" + String(m["id"]), "w": 8.0,
 			"title": String(m["name"]), "icon": "move:" + String(m["id"]), "desc": String(ladder[int(m["lvl"]) - 1]["t"]),
-			"tag": L.t("Lv.%d > %d") % [int(m["lvl"]), int(m["lvl"]) + 1], "color": _col(m)})
+			"tag": L.t("Lv.%d > %d") % [int(m["lvl"]), int(m["lvl"]) + 1], "color": _col(m),
+			"rows": _up_rows(m), "badges": _card_badges(String(m["id"]), "up")})
 
 	# --- estadisticas (las que desbloquean una evolucion salen siempre) ---
 	var cand_s: Array = []
@@ -9031,6 +9036,116 @@ func _fuse_hint() -> void:
 		get_tree().create_timer(2.8).timeout.connect(func(): _say(why, 3.4))
 
 
+# What a move-upgrade card changes, as [label, before, after] rows (at most 3): the next level of its ladder applied to
+# a copy of the move. Labels are translated when drawn.
+const ROW_KEYS := [["dmg", "Damage"], ["cd", "Cooldown"], ["count", "Projectiles"], ["pierce", "Pierce"], ["radius", "Area"],
+	["size", "Size"], ["speed", "Speed"], ["dur", "Duration"], ["amount", "Bonus"], ["width", "Width"], ["stacks", "Stacks"], ["heal", "Healing"]]
+
+
+func _up_rows(m: Dictionary) -> Array:
+	var ladder: Array = MD.LADDERS[String(m["kind"])]
+	var lv: int = int(m["lvl"])
+	if lv - 1 >= ladder.size():
+		return []
+	var nx: Dictionary = m.duplicate(true)
+	_apply_mods(nx, ladder[lv - 1]["m"])
+	var out: Array = []
+	for kk in ROW_KEYS:
+		var k: String = String(kk[0])
+		if not nx.has(k) or not (nx[k] is float or nx[k] is int):
+			continue
+		var a: float = float(m.get(k, 0.0))
+		var b: float = float(nx[k])
+		if absf(a - b) < 0.0001:
+			continue
+		out.append([String(kk[1]), _fmt_stat(k, a), _fmt_stat(k, b)])
+		if out.size() >= 3:
+			break
+	return out
+
+
+func _fmt_stat(k: String, v: float) -> String:
+	if k == "cd" or k == "dur":
+		return "%.2f s" % v
+	if (k == "amount" or k == "heal") and v < 3.0:
+		return "%d%%" % roundi(v * 100.0)
+	if k == "dmg" or k == "count" or k == "pierce" or k == "stacks":
+		return str(roundi(v))   # whole numbers, like the rest of the game
+	return str(roundi(v)) if absf(v - roundf(v)) < 0.05 else "%.1f" % v
+
+
+# Small facts shown on a move card: your type's damage bonus, and the level the move can evolve at.
+func _card_badges(id: String, cat: String) -> Array:
+	var out: Array = []
+	if not MD.MOVES.has(id):
+		return out
+	var ty: String = String(MD.MOVES[id]["type"])
+	if player.types.has(ty):
+		out.append([L.t("Your type +%d%%") % roundi((STAB_K - 1.0) * 100.0), Color.html(String(MD.TYPE_COLOR.get(ty, "#ffd65c")))])
+	if MD.EVO.has(id):
+		var evolved := false
+		for m in player.moves:
+			if String(m["id"]) == id and bool(m.get("evolved", false)):
+				evolved = true
+		if not evolved:
+			out.append([L.t("Evolves at Lv %d") % _max_lvl(MD.MOVES[id]), Color("#c47bff")])
+	return out
+
+
+# The move previews on the cards show your Pokémon (facing right) and up to three wild Pokémon nearby (facing left).
+func _card_preview_sprites() -> void:
+	cards.pl_tex = _facing_frame(player, 2)[0]
+	cards.pl_reg = _facing_frame(player, 2)[1]
+	cards.foe_tex = []
+	var near: Array = enemies.filter(func(e): return is_instance_valid(e) and not e.dead)
+	near.sort_custom(func(x, y): return x.position.distance_squared_to(player.position) < y.position.distance_squared_to(player.position))
+	for e in near.slice(0, 3):
+		var ff: Array = _facing_frame(e, 6)
+		if ff[0] != null:
+			cards.foe_tex.append(ff)
+
+
+# [texture, region] of an actor's current animation frame, turned to row `row` (2 = right, 6 = left) when the sheet has it.
+func _facing_frame(ac, row: int) -> Array:
+	var sp: Sprite2D = ac.sprite
+	if sp == null or sp.texture == null:
+		return [null, Rect2()]
+	var reg: Rect2 = sp.region_rect
+	var rows: int = maxi(1, int(round(float(sp.texture.get_height()) / maxf(1.0, reg.size.y))))
+	reg.position.y = float(mini(row, rows - 1)) * reg.size.y
+	return [sp.texture, reg]
+
+
+# The strip under the level-up cards: your move slots and items; each card says which slot it lights up.
+func _card_build(picks: Array) -> Dictionary:
+	var slots: Array = []
+	var sl: Array = _slot_list()
+	for g in sl:
+		var first: Dictionary = g[0]
+		var nm: String = L.t(String(first["name"]))
+		if g.size() > 1:
+			nm += " +%d" % (g.size() - 1)
+		slots.append({"icon": "move:" + String(first["id"]), "name": nm, "lvl": int(first["lvl"]), "evolved": bool(first.get("evolved", false))})
+	for c in picks:
+		var hl := -1
+		var cid: String = String(c.get("id", ""))
+		match String(c.get("cat", "")):
+			"up", "evo":
+				for i in range(sl.size()):
+					for mm in sl[i]:
+						if String(mm["id"]) == cid:
+							hl = i
+			"new":
+				if sl.size() < _max_moves():
+					hl = sl.size()
+		c["slot_hl"] = hl
+	var its: Array = []
+	for it in [item, item2, item3]:
+		if String(it) != "":
+			its.append(String(it))
+	return {"slots": slots, "max": _max_moves(), "items": its, "item_cap": 3 if has_bag3 else (2 if has_bag else 1)}
+
+
 func _open_cards() -> void:
 	var picks: Array = _offer()
 	if picks.is_empty():
@@ -9040,8 +9155,12 @@ func _open_cards() -> void:
 	Aud.sfx("levelup")
 	cards.rerolls = rerolls
 	cards.bans = bans
+	if cards.chain_taken.is_empty():
+		cards.chain_total = maxi(1, pending_levels)   # several level-ups at once: "Level up! xN", picked one after another
 	cards.show_cards(picks, L.t("Level %d - choose an upgrade") % player.level)
 	cards.can_skip = true
+	cards.build = _card_build(picks)
+	_card_preview_sprites()
 
 
 func _on_card_chosen(idx: int) -> void:
@@ -9187,8 +9306,18 @@ func _on_card_chosen(idx: int) -> void:
 		ch_m["upgrades"] = int(ch_m.get("upgrades", 0)) + 1   # las mejoras de las cartas cuentan como mejoras compradas
 	Aud.sfx("confirm")
 	pending_levels = maxi(0, pending_levels - 1)
+	_chain_note(L.t(String(c.get("title", id))))
 	cards.hide_cards()
 	choosing = false
+
+
+# Running list of what a multi-level-up gave you; cleared when the last of those level-ups is picked.
+func _chain_note(what: String) -> void:
+	if pending_levels > 0 and cards.chain_total > 1:
+		cards.chain_taken.append(what)
+	else:
+		cards.chain_taken = []
+		cards.chain_total = 1
 
 
 # ---------------------------------------------------------------
@@ -10906,9 +11035,22 @@ class Prop extends Node2D:
 				var tnm: String = "ch%d" % POI.paid_tier if sub == "paid" else ("trapv" if sub == "trapv" else "trapd")
 				if POI.draw_tex(self, tnm, POI.SC, 0.0):
 					return
-			var okc: bool = _spr("chest_open" if used else "chest_closed")
 			if big:
 				draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+			var kb: float = 1.25 if big else 1.0
+			var gcol: Color = Color("#ffd65c") if big else Color("#ffb45a")
+			if not used:
+				PKF.glow(self, Vector2(0.0, -24.0 * kb), 36.0 * kb, gcol, t, 1.3 if big else 1.0)
+			PKF.shadow(self, 28.0 * kb, 0.0)
+			if big:
+				draw_set_transform(Vector2.ZERO, 0.0, Vector2(kb, kb))
+			var okc: bool = _spr(("chest_big_" if big else "chest_") + ("open" if used else "closed"))
+			if big:
+				draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+			if okc and not used:
+				var csz := Vector2(24.0, 21.0) * WTex.SC * kb
+				PKF.shine(self, Rect2(Vector2(-csz.x * 0.5 + 4.0, -csz.y + 6.0), csz - Vector2(8.0, 6.0)), t, 3.2, v * 3.0)
+				PKF.sparkles(self, Vector2(0.0, -26.0 * kb), 34.0 * kb, 22.0 * kb, t, 5 if big else 3, Color("#fff1a8"))
 			if okc:
 				if not used:
 					draw_circle(Vector2(0.0, (-88.0 if big else -58.0) - 3.0 * sin(t * 3.0)), 3.0, Color(1.0, 0.9, 0.4, 0.8))
@@ -10919,10 +11061,7 @@ class Prop extends Node2D:
 						draw_arc(Vector2(0.0, -26.0), 28.0, 0.0, TAU, 32, Color(1.0, 0.25, 0.25, 0.45 + 0.25 * sin(t * 6.0)), 2.0)
 						draw_circle(Vector2(-6.0, -30.0), 2.0, Color(1.0, 0.2, 0.2))
 						draw_circle(Vector2(6.0, -30.0), 2.0, Color(1.0, 0.2, 0.2))
-					if big:
-						draw_rect(Rect2(-7.0, -34.0, 14.0, 11.0), Color("#f2c443"))
-						draw_rect(Rect2(-7.0, -34.0, 14.0, 11.0), Color("#1e0f06"), false, 2.0)
-						draw_arc(Vector2(0.0, -34.0), 5.0, PI, TAU, 10, Color("#9aa6b5"), 2.5)
+					if big:   # the big chest's lock is on its sprite now; the ring shows the charge to open it
 						draw_arc(Vector2(0.0, -40.0), 34.0, 0.0, TAU, 40, Color(1, 0.82, 0.25, 0.25), 2.0)
 						if charge > 0.0:
 							draw_arc(Vector2(0.0, -40.0), 34.0, -PI * 0.5, -PI * 0.5 + TAU * clampf(charge / 3.5, 0.0, 1.0), 40, Color(1, 0.85, 0.25, 0.95), 4.0)
@@ -11455,8 +11594,10 @@ class Orb extends Node2D:
 
 	# Rare XP (bosses, legendaries, Eternatus) is an animated wisp (pixelfx XP orb, in the game's cyan): only these few
 	# redraw every frame; normal crystals stay still and cheap.
+	const FANCY := ["ticket", "ticket10", "gcoin", "gcoin_gold", "item", "heal", "magnet", "bomb", "ball"]
+
 	func _ready() -> void:
-		set_process(kind == "xpRare")
+		set_process(kind == "xpRare" or FANCY.has(kind))
 		_t = float(get_instance_id() % 53) * 0.03
 
 	func _process(delta: float) -> void:
@@ -11488,6 +11629,9 @@ class Orb extends Node2D:
 		elif kind == "xpBig" or kind == "xpRare":
 			_xp_diamond(c, 1.45)
 		else:
+			var fancy: bool = FANCY.has(kind)
+			if fancy:
+				c.y -= 2.0 + sin(_t * 3.2) * 2.5   # a gentle bob for the rarer drops
 			var icn := "coin"
 			var glow := Color("#ffd65c")
 			if kind == "ticket":
@@ -11515,6 +11659,9 @@ class Orb extends Node2D:
 				icn = "berry"
 				glow = Color("#6fd08a")
 			draw_circle(c + Vector2(0.0, -4.0), 15.0, Color(glow.r, glow.g, glow.b, 0.22))
+			if fancy:
+				PKF.glow(self, c + Vector2(0.0, -4.0), 20.0, glow, _t, 0.8)
+				PKF.sparkles(self, c + Vector2(0.0, -4.0), 15.0, 12.0, _t, 2, glow.lightened(0.5))
 			if icn == "ball":
 				var bt: Texture2D = ALP.ball_tex()
 				if bt != null:
@@ -11556,6 +11703,25 @@ class Cards extends Node2D:
 	var block_name := ""
 	# Proteccion contra pulsaciones del combate: al abrirse cartas nuevas no se acepta ninguna entrada durante GRACE segundos.
 	const GRACE := 0.7
+	const SHX = preload("res://scripts/sheetfx.gd")
+	# v0.1.3 redesign: cards deal in and flip (the deal is the grace time), rarity frames, exact numbers, a strip of your
+	# build that shows where the highlighted card goes, tap once to look and again to choose, swipe, hold for details,
+	# and "Level up! xN" with a running tally when several level-ups come at once.
+	var build: Dictionary = {}      # level-up only (main._card_build): {"slots", "max", "items", "item_cap"}
+	var chain_total := 1
+	var chain_taken: Array = []
+	var grace_now := GRACE
+	var detail_i := -1
+	var _press_i := -1
+	var _press_sel := -1
+	var _press_t := 0.0
+	var _press_x := 0.0
+	var _down := false
+	var _swiped := false
+	var _tapped := -1   # touch: the card highlighted by a first tap (a second tap on it chooses it)
+	const HOLD := 0.45
+	const FRAMES := {"common": [Color("#b07a45"), Color("#e0a86a")], "rare": [Color("#8fa3c4"), Color("#e8f0ff")],
+		"epic": [Color("#8f4fd8"), Color("#e0b8ff")], "legend": [Color("#d9a520"), Color("#fff1a8")]}
 
 	func _has_skip() -> bool:
 		return can_skip and extras and not item_mode
@@ -11564,9 +11730,10 @@ class Cards extends Node2D:
 	# los visibles (centrados); los demas quedan fuera de pantalla para que no reciban toques.
 	func _btn_rects() -> Array:
 		var vp: Vector2 = get_viewport_rect().size
-		var w := 220.0
+		var w := 230.0
 		var gap := 16.0
-		var y: float = vp.y * 0.5 - 130.0 + 322.0 + 10.0
+		var rs0: Array = _rects()
+		var y: float = (vp.y - 64.0) if not build.is_empty() else ((rs0[0] as Rect2).end.y + 16.0 if not rs0.is_empty() else vp.y * 0.5 + 200.0)
 		var vis: Array = [true, true] if item_mode else [rerolls > 0, bans > 0, _has_skip()]
 		var n := 0
 		for v in vis:
@@ -11577,7 +11744,7 @@ class Cards extends Node2D:
 		var k := 0
 		for v in vis:
 			if v:
-				out.append(Rect2(x0 + float(k) * (w + gap), y, w, 58.0))
+				out.append(Rect2(x0 + float(k) * (w + gap), y, w, 38.0 if not build.is_empty() else 52.0))
 				k += 1
 			else:
 				out.append(Rect2(-9999.0, -9999.0, 1.0, 1.0))
@@ -11616,23 +11783,31 @@ class Cards extends Node2D:
 		open = true
 		age = 0.0
 		_axis_free = false
+		detail_i = -1
+		_down = false
+		_tapped = -1
+		grace_now = GRACE if chain_taken.is_empty() else 0.4   # later picks of a chain deal in faster
+		build = {}
 		queue_redraw()
 
 	func hide_cards() -> void:
 		open = false
 		item_new = {}
 		can_skip = false
+		build = {}
+		detail_i = -1
 		queue_redraw()
 
 	func _rects() -> Array:
 		var vp: Vector2 = get_viewport_rect().size
 		var n: int = items.size()
-		var gap := 20.0
-		var w: float = minf(300.0, (vp.x - 80.0 - gap * float(n - 1)) / float(maxi(n, 1)))
-		var h := 322.0
+		var gap := 28.0
+		var w: float = minf(280.0, (vp.x - 80.0 - gap * float(n - 1)) / float(maxi(n, 1)))
+		var strip: bool = not build.is_empty()
+		var h: float = clampf(vp.y - 128.0 - 212.0, 300.0, 386.0) if strip else 360.0
 		var total: float = w * float(n) + gap * float(n - 1)
 		var x0: float = (vp.x - total) * 0.5
-		var y0: float = vp.y * 0.5 - 130.0
+		var y0: float = 128.0 if strip else vp.y * 0.5 - 160.0   # clear of the title and its banner
 		var out: Array = []
 		for i in range(n):
 			out.append(Rect2(x0 + float(i) * (w + gap), y0, w, h))
@@ -11641,7 +11816,16 @@ class Cards extends Node2D:
 	func _process(delta: float) -> void:
 		if open:
 			age += delta
+			if _down and _press_i >= 0 and not _swiped and detail_i < 0:
+				_press_t += delta
+				if _press_t >= HOLD:
+					detail_i = _press_i   # held: show the full card
 			queue_redraw()
+
+	# Where card i is in its deal-in: 0 = not dealt yet .. 1 = face up and still.
+	func _deal_k(i: int) -> float:
+		var start: float = float(i) * grace_now * 0.16
+		return clampf((age - start) / maxf(0.05, grace_now * 0.62), 0.0, 1.0)
 
 	func _move(step: int) -> void:
 		if items.is_empty():
@@ -11649,134 +11833,242 @@ class Cards extends Node2D:
 		sel = posmod(sel + step, items.size())
 		queue_redraw()
 
-	# Looping sketch of how a move attacks, drawn in a small arena on its card: the Pokémon on the left,
-	# three foes on the right, and the move's pattern (by kind) in its type colour. Purely visual.
-	func _move_preview(a: Rect2, kind: String, col: Color, tt: float) -> void:
+	# Looping preview of how a move attacks, drawn in a small arena on its card: your Pokémon on the left, three wild
+	# Pokémon from the run on the right, and the move's own art from VFX.for_move (its sprite, palette and beam / melee /
+	# buff look), moving the way the move does (by kind). Purely visual.
+	var pl_tex: Texture2D = null   # your Pokémon's current frame (set by main when the cards open)
+	var pl_reg := Rect2()
+	var foe_tex: Array = []        # up to 3 [Texture2D, Rect2] of wild Pokémon nearby
+	var _pv_area := Rect2()        # the preview being drawn: effects outside it are skipped (no spilling over the card)
+	var _xf := Transform2D.IDENTITY   # the card's own drawing transform (its flip): preview sprites are drawn inside it
+
+	func _pv_sprite(tex: Texture2D, reg: Rect2, c: Vector2, h: float, mod: Color = Color.WHITE) -> void:
+		var k: float = h / maxf(1.0, reg.size.y)
+		draw_texture_rect_region(tex, Rect2(c - Vector2(reg.size.x * k * 0.5, reg.size.y * k * 0.62), reg.size * k), reg, mod)
+
+	func _pv_fx(shape: String, pal: String, at: Vector2, ang: float, scl: float, fr: int, al: float = 1.0) -> void:
+		if shape == "" or shape == "lightning" or not _pv_area.grow(-6.0).has_point(at):
+			return
+		# like VFX.draw, but composed with the card's transform (VFX.draw resets the transform, which would undo the card's)
+		var tex: Texture2D = VFX.sprite(shape, pal, fr)
+		var kk: float = VFX.PX * scl
+		var rot: float = ang if VFX.is_dir(shape) else (age * 6.0 if VFX.spins(shape) else 0.0)
+		draw_set_transform_matrix(_xf * Transform2D(rot, Vector2(kk, kk), 0.0, at))
+		draw_texture(tex, -tex.get_size() / 2.0, Color(1, 1, 1, al))
+		draw_set_transform_matrix(_xf)
+
+	func _move_preview(a: Rect2, kind: String, col: Color, tt: float, mid: String = "") -> void:
 		var T := 1.5
 		var k: float = fposmod(tt, T) / T   # 0..1, loops
-		var cy: float = a.get_center().y
-		var p := Vector2(a.position.x + 44.0, cy + 4.0)   # clear of the move icon in the top-left corner
-		var foes: Array = [Vector2(a.end.x - 26.0, cy - 18.0), Vector2(a.end.x - 44.0, cy + 2.0), Vector2(a.end.x - 22.0, cy + 20.0)]
-		var c := Color(col.r, col.g, col.b, 1.0)
-		var soft := Color(col.r, col.g, col.b, 0.35)
-		var hit := {}   # foe index -> flash 0..1
+		var fr: int = int(tt * 12.0)
+		_pv_area = a
+		var cy: float = a.get_center().y + 6.0
+		var p := Vector2(a.position.x + 40.0, cy)   # clear of the move icon in the top-left corner
+		var foes: Array = [Vector2(a.end.x - 30.0, cy - 16.0), Vector2(a.end.x - 54.0, cy + 6.0), Vector2(a.end.x - 26.0, cy + 22.0)]
+		var vis: Dictionary = VFX.for_move(mid, String(MD.MOVES[mid]["type"])) if MD.MOVES.has(mid) else {"proj": "ball", "pal": "normal"}
+		var pal: String = String(vis.get("pal", "normal"))
+		var proj: String = String(vis.get("proj", "ball"))
+		var c1: Color = VFX.pc(pal, 2)
+		var c2: Color = VFX.pc(pal, 3)
+		var c3: Color = VFX.pc(pal, 4)
+		var hit := {}   # foe index -> hit this frame
+		# ground line and soft floor
+		draw_rect(Rect2(a.position.x, cy + 8.0, a.size.x, a.end.y - cy - 8.0), Color(1, 1, 1, 0.03))
+		var front: Array = []   # effects drawn over the Pokémon: [callable]
 		match kind:
 			"projectile":
 				for i in range(3):
-					var s: float = fposmod(k * 1.0 - float(i) * 0.22, 1.0)
+					var sk: float = fposmod(k * 1.2 - float(i) * 0.3, 1.2)
+					if sk > 1.0:
+						continue
 					var tgt: Vector2 = foes[i]
-					var pt: Vector2 = p.lerp(tgt, s)
-					draw_line(p.lerp(tgt, maxf(0.0, s - 0.12)), pt, soft, 3.0)
-					draw_circle(pt, 3.5, c)
-					if s > 0.9:
-						hit[i] = 1.0
+					var pt: Vector2 = p.lerp(tgt, sk)
+					for g in range(3):
+						draw_rect(Rect2(p.lerp(tgt, maxf(0.0, sk - 0.05 * float(g + 1))) - Vector2(1.5, 1.5), Vector2(3, 3)), Color(c2.r, c2.g, c2.b, 0.5 - 0.15 * float(g)))
+					_pv_fx(proj, pal, pt, (tgt - p).angle(), 0.85, fr)
+					if sk > 0.92:
+						hit[i] = true
 			"beam":
-				var on: float = clampf(k * 3.0, 0.0, 1.0) * clampf((1.0 - k) * 3.0, 0.0, 1.0)
-				var end := Vector2(a.end.x - 4.0, cy)
-				draw_line(p, end, Color(col.r, col.g, col.b, 0.35 * on), 12.0)
-				draw_line(p, end, Color(1, 1, 1, 0.85 * on), 3.0)
+				var on: float = clampf(k * 4.0, 0.0, 1.0) * clampf((1.0 - k) * 3.0, 0.0, 1.0)
+				var end := Vector2(a.end.x - 6.0, cy)
+				var style: String = String(vis.get("bstyle", "solid"))
+				if String(vis.get("beam", "")) == "lightning":
+					var pts := PackedVector2Array()
+					for j in range(9):
+						pts.append(p.lerp(end, float(j) / 8.0) + Vector2(0.0, 0.0 if j == 0 or j == 8 else (VFX.hh(j, int(tt * 20.0), 3) - 0.5) * 14.0))
+					draw_polyline(pts, Color(c2.r, c2.g, c2.b, on), 5.0)
+					draw_polyline(pts, Color(c3.r, c3.g, c3.b, on), 2.0)
+				else:
+					var wv: float = 7.0 if style != "stream" else 3.0
+					if style == "wave":
+						var pw := PackedVector2Array()
+						for j in range(17):
+							var q: Vector2 = p.lerp(end, float(j) / 16.0)
+							pw.append(q + Vector2(0.0, sin(float(j) * 0.9 - tt * 14.0) * 6.0))
+						draw_polyline(pw, Color(c1.r, c1.g, c1.b, on), 9.0)
+						draw_polyline(pw, Color(c3.r, c3.g, c3.b, on), 3.0)
+					else:
+						draw_line(p, end, Color(c1.r, c1.g, c1.b, on), wv * 2.0)
+						draw_line(p, end, Color(c2.r, c2.g, c2.b, on), wv)
+						draw_line(p, end, Color(c3.r, c3.g, c3.b, on), maxf(2.0, wv * 0.4))
+					if style == "frost":
+						for j in range(5):
+							var fx: float = p.x + 24.0 + float(j) * 30.0
+							draw_line(Vector2(fx, cy), Vector2(fx + 4.0, cy - 10.0 * on), Color(c3.r, c3.g, c3.b, on), 2.0)
+					var bs: String = String(vis.get("beam", ""))
+					if bs != "":
+						for j in range(3):
+							var off: float = fposmod(tt * 2.2 + float(j) / 3.0, 1.0)
+							_pv_fx(bs, pal, p.lerp(end, off), 0.0, 0.7, fr, on)
 				if on > 0.5:
-					hit[1] = 1.0
+					hit[1] = true
+					hit[0] = true
 			"cone":
-				var w: float = k * 0.9
-				var reach: float = (a.size.x - 30.0) * minf(1.0, k * 1.4)
-				draw_colored_polygon(PackedVector2Array([p, p + Vector2.from_angle(-w) * reach, p + Vector2.from_angle(w) * reach]), Color(col.r, col.g, col.b, 0.45 * (1.0 - k)))
-				if k > 0.55:
-					hit[0] = 1.0
-					hit[1] = 1.0
+				# a fan: three waves of the move's sprite, each spreading wider as it travels
+				for w2 in range(3):
+					var kw: float = fposmod(k + float(w2) / 3.0, 1.0)
+					var reach: float = 14.0 + (a.end.x - p.x - 40.0) * kw
+					for j in range(3):
+						var an: float = (-0.32 + 0.32 * float(j)) * (0.4 + kw)
+						_pv_fx(proj, pal, p + Vector2(cos(an) * reach, sin(an) * reach * 0.8), an, 0.55 + 0.3 * kw, fr + j, 1.0 - kw * 0.7)
+				if k > 0.5:
+					hit[0] = true
+					hit[1] = true
 			"melee":
-				var sw: float = -1.2 + k * 2.4
-				var rr: float = 30.0
-				draw_arc(p, rr, sw - 0.8, sw, 10, Color(col.r, col.g, col.b, 1.0 - k), 4.0)
-				draw_arc(p, rr - 6.0, sw - 0.6, sw, 10, Color(1, 1, 1, 0.7 * (1.0 - k)), 2.0)
+				var ms: String = String(vis.get("melee", "impact"))
+				var spr: String = ms if (VFX.META.has(ms) or VFX.V2.META.has(ms)) else ({"vine": "leaf", "feather": "feather", "whip": "ember2"}.get(ms, "impact"))
+				p = p.lerp(Vector2(foes[1].x - 46.0, cy), sin(k * PI) * 0.8)   # steps in to hit
+				var sw: float = -1.0 + k * 2.0
+				draw_arc(p, 30.0, sw - 0.9, sw, 12, Color(c2.r, c2.g, c2.b, 1.0 - k), 4.0)
+				draw_arc(p, 25.0, sw - 0.7, sw, 12, Color(c3.r, c3.g, c3.b, 0.8 * (1.0 - k)), 2.0)
+				if k > 0.3 and k < 0.75:
+					var hp: Vector2 = p + Vector2(30.0, 0.0)
+					front.append(func(): _pv_fx(spr, pal, hp, 0.0, 1.3, int((k - 0.3) * 20.0)))
+					hit[1] = true
 			"aura":
-				var ar: float = 26.0 + 4.0 * sin(tt * 6.0)
-				draw_circle(p, ar, Color(col.r, col.g, col.b, 0.18))
-				draw_arc(p, ar, 0.0, TAU, 24, c, 2.0)
+				var ar: float = 30.0 + 3.0 * sin(tt * 6.0)
+				draw_arc(p, ar, 0.0, TAU, 28, Color(c2.r, c2.g, c2.b, 0.8), 2.0)
+				var asp: String = String(vis.get("aura", proj))
+				for j in range(4):
+					var aa: float = tt * 2.5 + float(j) * TAU / 4.0
+					var rr: float = ar * (0.6 + 0.4 * fposmod(k + float(j) * 0.25, 1.0))
+					if vis.has("inward"):
+						rr = ar * (1.0 - fposmod(k + float(j) * 0.25, 1.0))
+					var ap: Vector2 = p + Vector2(cos(aa), sin(aa) * 0.7) * rr
+					if vis.has("rise"):
+						ap = p + Vector2(-18.0 + float(j) * 12.0, 12.0 - fposmod(k + float(j) * 0.25, 1.0) * 34.0)
+					_pv_fx(asp, pal, ap, aa, 0.6, fr + j)
 			"nova":
-				var nr: float = 6.0 + k * (a.size.y * 0.9)
-				draw_arc(p, nr, 0.0, TAU, 28, Color(col.r, col.g, col.b, 1.0 - k), 3.0)
-				draw_arc(p, nr * 0.7, 0.0, TAU, 28, Color(1, 1, 1, 0.5 * (1.0 - k)), 2.0)
+				# an expanding ring that stays inside the arena (wide but flat, like the ground it rolls over)
+				var nx: float = 8.0 + k * (a.end.x - p.x - 30.0)
+				var ny: float = 4.0 + k * (a.size.y * 0.36)
+				for j in range(8):
+					var an2: float = float(j) * TAU / 8.0
+					_pv_fx(proj, pal, p + Vector2(cos(an2) * nx, sin(an2) * ny), an2, 0.55, fr, 1.0 - k * 0.7)
+				if nx > a.size.x * 0.55:
+					hit[1] = true
 			"dash":
-				var dx: float = sin(k * PI) * (a.size.x - 70.0)
+				var dx: float = sin(k * PI) * (a.size.x - 100.0)
 				for g in range(3):
-					draw_circle(p + Vector2(dx - float(g) * 10.0, 0.0), 6.0, Color(col.r, col.g, col.b, 0.35 - float(g) * 0.1))
+					if pl_tex != null:
+						_pv_sprite(pl_tex, pl_reg, p + Vector2(dx - float(g + 1) * 14.0, 0.0), 52.0, Color(c2.r, c2.g, c2.b, 0.35 - float(g) * 0.1))
+				_pv_fx(proj, pal, p + Vector2(dx + 18.0, 0.0), 0.0, 0.8, fr)
 				p = p + Vector2(dx, 0.0)
 				if k > 0.35 and k < 0.65:
-					hit[1] = 1.0
+					hit[1] = true
 			"buff":
-				draw_circle(p, 12.0 + 3.0 * sin(tt * 8.0), Color(col.r, col.g, col.b, 0.3))
-				for i in range(3):
-					var ay: float = fposmod(k + float(i) / 3.0, 1.0)
-					var ax: float = p.x - 10.0 + float(i) * 10.0
-					var yy: float = p.y + 10.0 - ay * 30.0
-					draw_polyline(PackedVector2Array([Vector2(ax - 4.0, yy + 4.0), Vector2(ax, yy), Vector2(ax + 4.0, yy + 4.0)]), Color(col.r, col.g, col.b, 1.0 - ay), 2.0)
+				var bsp: String = String(vis.get("buff", "arrow"))
+				var bm: String = String(vis.get("bmode", "rise"))
+				draw_circle(p, 18.0 + 3.0 * sin(tt * 8.0), Color(c2.r, c2.g, c2.b, 0.22))
+				for j in range(3):
+					var ph: float = fposmod(k + float(j) / 3.0, 1.0)
+					var bp: Vector2
+					match bm:
+						"orbit":
+							var oa: float = tt * 4.0 + float(j) * TAU / 3.0
+							bp = p + Vector2(cos(oa) * 24.0, sin(oa) * 14.0 - 6.0)
+						"inward":
+							var ia: float = float(j) * TAU / 3.0 + 0.5
+							bp = p + Vector2(cos(ia), sin(ia)) * 34.0 * (1.0 - ph)
+						"streak":
+							bp = p + Vector2(30.0 - ph * 70.0, -10.0 + float(j) * 10.0)
+						_:
+							bp = p + Vector2(-12.0 + float(j) * 12.0, 8.0 - ph * 34.0)
+					front.append(func(): _pv_fx(bsp, pal, bp, 0.0, 0.6, fr, 1.0 - ph * 0.5))
 			"boomerang":
-				var bx: float = sin(k * PI) * (a.size.x - 60.0)
+				var bx: float = sin(k * PI) * (a.size.x - 90.0)
 				var by: float = sin(k * TAU) * 14.0
-				var bp := p + Vector2(bx, by)
-				draw_arc(bp, 6.0, tt * 12.0, tt * 12.0 + 4.0, 6, c, 3.0)
-				if bx > a.size.x - 90.0:
-					hit[1] = 1.0
+				_pv_fx(proj, pal, p + Vector2(bx, by), tt * 12.0, 0.8, fr)
+				if bx > a.size.x - 130.0:
+					hit[1] = true
 			"meteor":
 				for i in range(3):
 					var s2: float = fposmod(k - float(i) * 0.25, 1.0)
 					var tgt2: Vector2 = foes[i]
 					if s2 < 0.6:
-						var mp: Vector2 = tgt2 + Vector2(-18.0, -40.0).lerp(Vector2.ZERO, s2 / 0.6)
-						draw_circle(mp, 4.5, c)
-						draw_line(mp, mp + Vector2(-8.0, -14.0), soft, 3.0)
+						var top: float = maxf(a.position.y + 10.0, tgt2.y - 34.0)
+						_pv_fx(proj, pal, Vector2(tgt2.x - 14.0, top).lerp(tgt2 + Vector2(0.0, -6.0), s2 / 0.6), 1.2, 0.7, fr)
 					else:
-						draw_arc(tgt2, 4.0 + (s2 - 0.6) * 40.0, 0.0, TAU, 16, Color(col.r, col.g, col.b, 1.0 - (s2 - 0.6) / 0.4), 2.0)
-						hit[i] = 1.0
+						draw_arc(tgt2, 4.0 + (s2 - 0.6) * 40.0, 0.0, TAU, 16, Color(c2.r, c2.g, c2.b, 1.0 - (s2 - 0.6) / 0.4), 2.0)
+						hit[i] = true
 			"mine":
 				for i in range(3):
-					var mp2 := Vector2(p.x + 34.0 + float(i) * 22.0, cy + (float(i) - 1.0) * 12.0)
-					var blink: float = 0.5 + 0.5 * sin(tt * 10.0 + float(i))
+					var mp2 := Vector2(p.x + 44.0 + float(i) * 26.0, cy + (float(i) - 1.0) * 10.0)
 					if k > 0.75 and i == 2:
-						draw_arc(mp2, (k - 0.75) * 80.0, 0.0, TAU, 16, Color(col.r, col.g, col.b, 1.0 - (k - 0.75) * 4.0), 3.0)
+						draw_arc(mp2, (k - 0.75) * 90.0, 0.0, TAU, 16, Color(c2.r, c2.g, c2.b, 1.0 - (k - 0.75) * 4.0), 3.0)
+						hit[1] = true
 					else:
-						draw_circle(mp2, 4.0, Color(col.r, col.g, col.b, 0.5 + 0.5 * blink))
+						_pv_fx(proj, pal, mp2, 0.0, 0.6, fr, 0.6 + 0.4 * sin(tt * 8.0 + float(i)))
 			"orbit":
 				for i in range(3):
-					var oa: float = tt * 4.0 + float(i) * TAU / 3.0
-					var op: Vector2 = p + Vector2(cos(oa) * 22.0, sin(oa) * 14.0)
-					draw_circle(op, 4.0, c)
-					draw_circle(op, 7.0, soft)
+					var oa2: float = tt * 4.0 + float(i) * TAU / 3.0
+					var op: Vector2 = p + Vector2(cos(oa2) * 26.0, sin(oa2) * 14.0 - 4.0)
+					if sin(oa2) < 0.0:
+						_pv_fx(proj, pal, op, oa2 + PI / 2.0, 0.65, fr)
+					else:
+						front.append(func(): _pv_fx(proj, pal, op, oa2 + PI / 2.0, 0.65, fr))
 			"trail":
-				var tx2: float = sin(k * TAU) * 0.5 + 0.5
-				var head: Vector2 = Vector2(a.position.x + 20.0 + tx2 * (a.size.x - 80.0), cy + cos(k * TAU) * 10.0)
-				for g2 in range(8):
-					var kk: float = fposmod(k - float(g2) * 0.03, 1.0)
-					var tp := Vector2(a.position.x + 20.0 + (sin(kk * TAU) * 0.5 + 0.5) * (a.size.x - 80.0), cy + cos(kk * TAU) * 10.0)
-					draw_circle(tp, 5.0 - float(g2) * 0.5, Color(col.r, col.g, col.b, 0.6 - float(g2) * 0.07))
+				var hx: float = sin(k * TAU) * 0.5 + 0.5
+				var head: Vector2 = Vector2(a.position.x + 30.0 + hx * (a.size.x - 110.0), cy + cos(k * TAU) * 8.0)
+				for g2 in range(6):
+					var kk: float = fposmod(k - float(g2 + 1) * 0.05, 1.0)
+					var tp := Vector2(a.position.x + 30.0 + (sin(kk * TAU) * 0.5 + 0.5) * (a.size.x - 110.0), cy + 6.0 + cos(kk * TAU) * 8.0)
+					_pv_fx(proj, pal, tp, 0.0, 0.5, fr + g2, 0.9 - float(g2) * 0.13)
 				p = head
 			"turret":
-				var tp2 := Vector2(a.get_center().x - 10.0, cy)
-				draw_rect(Rect2(tp2 - Vector2(6.0, 6.0), Vector2(12.0, 12.0)), c)
+				var tp2 := Vector2(a.get_center().x - 6.0, cy)
+				_pv_fx(proj, pal, tp2, 0.0, 0.9, fr)
 				var s3: float = fposmod(k * 2.0, 1.0)
-				var tg: Vector2 = foes[int(k * 2.0) % 3]
-				draw_circle(tp2.lerp(tg, s3), 3.0, Color(1, 1, 1, 0.9))
+				var ti: int = int(k * 2.0) % 3
+				var tg: Vector2 = foes[ti]
+				draw_rect(Rect2(tp2.lerp(tg, s3) - Vector2(2, 2), Vector2(4, 4)), c3)
 				if s3 > 0.85:
-					hit[int(k * 2.0) % 3] = 1.0
+					hit[ti] = true
 			"chain":
 				if k < 0.6:
-					var pts: Array = [p, foes[1], foes[0], foes[2]]
+					var pts2: Array = [p, foes[1], foes[0], foes[2]]
 					var n: int = 1 + int(k / 0.2)
 					for j in range(mini(n, 3)):
-						var a0: Vector2 = pts[j]
-						var a1: Vector2 = pts[j + 1]
-						var mid2: Vector2 = a0.lerp(a1, 0.5) + Vector2(0.0, 6.0 if j % 2 == 0 else -6.0)
-						draw_polyline(PackedVector2Array([a0, mid2, a1]), Color(1, 1, 0.85, 0.9), 2.0)
-						draw_polyline(PackedVector2Array([a0, mid2, a1]), soft, 5.0)
-						hit[[1, 0, 2][j]] = 1.0
-		# foes (small dark bodies that flash white when hit) and the Pokémon
+						var a0: Vector2 = pts2[j]
+						var a1: Vector2 = pts2[j + 1]
+						var md: Vector2 = a0.lerp(a1, 0.5) + Vector2(0.0, 7.0 if j % 2 == 0 else -7.0)
+						draw_polyline(PackedVector2Array([a0, md, a1]), c1, 5.0)
+						draw_polyline(PackedVector2Array([a0, md, a1]), c3, 2.0)
+						hit[[1, 0, 2][j]] = true
+		# the wild Pokémon (flash white when hit), then yours
 		for i in range(3):
 			var fp: Vector2 = foes[i]
-			draw_circle(fp, 6.5, Color(1, 1, 1, 0.9) if hit.has(i) else Color(0.55, 0.22, 0.28))
-			draw_circle(fp + Vector2(-2.0, -2.0), 1.5, Color(0, 0, 0, 0.6))
-		draw_circle(p, 7.5, Color(0.95, 0.93, 0.85))
-		draw_circle(p, 7.5, c, false, 2.0)
+			var flash: Color = Color(2.2, 2.2, 2.2) if hit.has(i) else Color.WHITE
+			if i < foe_tex.size():
+				_pv_sprite(foe_tex[i][0], foe_tex[i][1], fp, 44.0, flash)
+			else:
+				draw_circle(fp, 6.5, Color(1, 1, 1, 0.9) if hit.has(i) else Color(0.55, 0.22, 0.28))
+		if pl_tex != null:
+			_pv_sprite(pl_tex, pl_reg, p, 52.0)
+		else:
+			draw_circle(p, 7.5, Color(0.95, 0.93, 0.85))
+		for f in front:
+			(f as Callable).call()
 
 	func _pick(i: int) -> void:
 		if i >= 0 and i < items.size():
@@ -11797,6 +12089,28 @@ class Cards extends Node2D:
 				_axis_free = false
 				_move(1 if event.axis_value > 0.0 else -1)
 			return
+		if event is InputEventScreenDrag and _down and not _swiped and age >= grace_now:
+			if absf(event.position.x - _press_x) > 70.0:
+				_swiped = true
+				_move(1 if event.position.x < _press_x else -1)   # swipe left: next card
+			get_viewport().set_input_as_handled()
+			return
+		if event is InputEventScreenTouch and not event.pressed:
+			if _down:
+				get_viewport().set_input_as_handled()
+				_down = false
+				if detail_i >= 0:
+					detail_i = -1   # letting go of a held card only closes its details
+					return
+				if not _swiped and _press_i >= 0 and age >= grace_now:
+					# phones: the first tap highlights, a second tap on the same card chooses it; with a mouse one click chooses
+					if _tapped == _press_i or ban_mode or not OS.has_feature("mobile"):
+						_pick(_press_i)
+					else:
+						_tapped = _press_i
+						sel = _press_i
+						Aud.sfx("click")
+			return
 		var pressed := false
 		if event is InputEventScreenTouch:
 			pressed = event.pressed
@@ -11808,7 +12122,7 @@ class Cards extends Node2D:
 			return
 		# Tragamos las pulsaciones (no las sueltas) mientras hay cartas.
 		get_viewport().set_input_as_handled()
-		if age < GRACE:
+		if age < grace_now:
 			return
 		if event is InputEventScreenTouch:
 			var brs: Array = _btn_rects()
@@ -11830,9 +12144,18 @@ class Cards extends Node2D:
 				return
 			var rs: Array = _rects()
 			for i in range(rs.size()):
-				if rs[i].has_point(event.position):
-					_pick(i)
+				if (rs[i] as Rect2).grow(6.0).has_point(event.position):
+					_down = true
+					_swiped = false
+					_press_i = i
+					_press_sel = sel
+					_press_t = 0.0
+					_press_x = event.position.x
 					return
+			_down = true   # a press outside the cards can still start a swipe
+			_swiped = false
+			_press_i = -1
+			_press_x = event.position.x
 		elif event is InputEventKey:
 			match event.keycode:
 				KEY_1:
@@ -11877,96 +12200,63 @@ class Cards extends Node2D:
 			return
 		var font := ThemeDB.fallback_font
 		var vp: Vector2 = get_viewport_rect().size
-		draw_rect(Rect2(Vector2.ZERO, vp), Color(0, 0, 0, 0.6))
-		draw_string(font, Vector2(0.0, vp.y * 0.5 - 174.0 - (30.0 if not item_new.is_empty() else 0.0)), L.t(headline), HORIZONTAL_ALIGNMENT_CENTER, vp.x, 40, Color("#ffd65c"))
+		# the run freezes behind: darker, with a soft light on your Pokemon in the middle
+		draw_rect(Rect2(Vector2.ZERO, vp), Color(0.03, 0.02, 0.07, 0.74))
+		for i in range(5):
+			draw_circle(vp * 0.5, 170.0 - float(i) * 28.0, Color(1.0, 0.9, 0.6, 0.02))
+		var strip: bool = not build.is_empty()
+		var hy: float = 54.0 if strip else vp.y * 0.5 - 222.0 - (30.0 if not item_new.is_empty() else 0.0)
+		var head: String = L.t(headline) + ("  ×%d" % chain_total if chain_total > 1 else "")
+		_ds2(font, Vector2(0.0, hy), head, HORIZONTAL_ALIGNMENT_CENTER, vp.x, 40, Color("#ffd65c"))
+		var sub_y: float = hy + 42.0   # a clear gap between the title and its banner
 		if ban_mode:
-			draw_string(font, Vector2(0.0, vp.y * 0.5 - 142.0), L.t("Pick a new move to ban it"), HORIZONTAL_ALIGNMENT_CENTER, vp.x, 22, Color("#ff9aa5"))
+			_ds2(font, Vector2(0.0, sub_y), L.t("Pick a new move to ban it"), HORIZONTAL_ALIGNMENT_CENTER, vp.x, 22, Color("#ff9aa5"))
+		elif item_new.is_empty():
+			# "Level 12 - choose an upgrade": its own banner, so it reads over any background
+			var sub: String = L.t(title)
+			var sfs := 23
+			var sw: float = font.get_string_size(sub, HORIZONTAL_ALIGNMENT_LEFT, -1.0, sfs).x
+			var cw := 0.0
+			var ctxt := ""
+			if chain_total > 1:
+				ctxt = L.t("Choice %d of %d") % [mini(chain_taken.size() + 1, chain_total), chain_total]
+				cw = font.get_string_size(ctxt, HORIZONTAL_ALIGNMENT_LEFT, -1.0, sfs).x + 36.0
+			var bw: float = minf(vp.x - 40.0, sw + cw + 48.0)
+			var sb := Rect2(vp.x * 0.5 - bw * 0.5, sub_y - 26.0, bw, 38.0)
+			draw_rect(sb.grow(2.0), Color(0, 0, 0, 0.5))
+			draw_rect(sb, Color(0.09, 0.06, 0.2, 0.96))
+			draw_rect(sb, Color("#ffd65c"), false, 2.0)
+			draw_string(font, Vector2(sb.position.x + 24.0, sub_y + 1.0), sub, HORIZONTAL_ALIGNMENT_LEFT, sw + 4.0, sfs, Color.WHITE)
+			if ctxt != "":
+				var cx0: float = sb.position.x + 24.0 + sw + 18.0
+				draw_rect(Rect2(cx0 - 10.0, sb.position.y + 6.0, 2.0, sb.size.y - 12.0), Color("#5a5099"))
+				draw_string(font, Vector2(cx0 + 6.0, sub_y + 1.0), ctxt, HORIZONTAL_ALIGNMENT_LEFT, cw, sfs, Color("#ffd65c"))
 		else:
-			if item_new.is_empty():
-				draw_string(font, Vector2(0.0, vp.y * 0.5 - 142.0), L.t(title), HORIZONTAL_ALIGNMENT_CENTER, vp.x, 20, Color.WHITE)
-			else:
-				# new item banner: icon, name and what it does, with a hint for the cards below
-				var bw: float = minf(vp.x - 40.0, 720.0)
-				var br := Rect2(vp.x * 0.5 - bw * 0.5, vp.y * 0.5 - 186.0, bw, 36.0)
-				draw_rect(br.grow(2.0), Color("#ffd65c"))
-				draw_rect(br, Color("#2a1f4d"))
-				IC.draw_in(self, String(item_new["id"]), br.position + Vector2(22.0, 18.0), 28.0)
-				var head: String = "%s: %s" % [L.t("NEW"), String(item_new["name"])]
-				draw_string(font, br.position + Vector2(46.0, 16.0), head, HORIZONTAL_ALIGNMENT_LEFT, bw - 56.0, 17, Color("#ffd65c"))
-				draw_string(font, br.position + Vector2(46.0, 31.0), String(item_new["desc"]), HORIZONTAL_ALIGNMENT_LEFT, bw - 56.0, 13, Color("#f2e9d8"))
+			# new item banner: icon, name and what it does, with a hint for the cards below
+			var bw: float = minf(vp.x - 40.0, 720.0)
+			var br := Rect2(vp.x * 0.5 - bw * 0.5, sub_y - 26.0, bw, 36.0)
+			draw_rect(br.grow(2.0), Color("#ffd65c"))
+			draw_rect(br, Color("#2a1f4d"))
+			IC.draw_in(self, String(item_new["id"]), br.position + Vector2(22.0, 18.0), 28.0)
+			var hd: String = "%s: %s" % [L.t("NEW"), String(item_new["name"])]
+			draw_string(font, br.position + Vector2(46.0, 16.0), hd, HORIZONTAL_ALIGNMENT_LEFT, bw - 56.0, 17, Color("#ffd65c"))
+			draw_string(font, br.position + Vector2(46.0, 31.0), String(item_new["desc"]), HORIZONTAL_ALIGNMENT_LEFT, bw - 56.0, 13, Color("#f2e9d8"))
+		if chain_total > 1:
+			# what this run of level-ups has given you so far
+			var tb := Rect2(vp.x - 268.0, 26.0, 244.0, 30.0 + 20.0 * float(maxi(1, mini(4, chain_taken.size()))))
+			draw_rect(tb, Color(0.08, 0.06, 0.16, 0.92))
+			draw_rect(tb, Color("#5a5099"), false, 2.0)
+			draw_string(font, tb.position + Vector2(12.0, 21.0), L.t("Taken this level-up"), HORIZONTAL_ALIGNMENT_LEFT, tb.size.x - 20.0, 15, Color("#b4aed6"))
+			if chain_taken.is_empty():
+				draw_string(font, tb.position + Vector2(12.0, 42.0), "—", HORIZONTAL_ALIGNMENT_LEFT, -1.0, 16, Color("#8f88b8"))
+			for k in range(mini(4, chain_taken.size())):
+				draw_string(font, tb.position + Vector2(12.0, 42.0 + 20.0 * float(k)), "✓ " + String(chain_taken[k]), HORIZONTAL_ALIGNMENT_LEFT, tb.size.x - 20.0, 15, Color("#6fd08a"))
 		var rs: Array = _rects()
 		for i in range(rs.size()):
-			var r: Rect2 = rs[i]
-			var it: Dictionary = items[i]
-			var tag_col: Color = it["color"]
-			var chosen_now: bool = i == sel
-			var border: Color = tag_col
-			if chosen_now:
-				border = Color("#ffd65c")
-			var paper: bool = bool(it.get("paper", false))
-			draw_rect(r.grow(4.0 if chosen_now else 1.5), border)
-			draw_rect(r, Color("#1c1833"))
-			var legend: bool = bool(it.get("legend", false))
-			if legend:
-				_draw_legend_bg(r)
-			if paper:
-				draw_rect(r, Color("#ecd9a6"))
-				draw_rect(r.grow(-6.0), Color("#8a6a3a"), false, 2.0)
-				draw_line(Vector2(r.position.x + 24.0, r.end.y - 22.0), Vector2(r.position.x + r.size.x * 0.55, r.end.y - 22.0), Color("#6b4a2b"), 2.0)
-				draw_circle(Vector2(r.end.x - 40.0, r.end.y - 34.0), 15.0, Color("#a8281c"))
-				draw_circle(Vector2(r.end.x - 40.0, r.end.y - 34.0), 9.0, Color("#c0392b"))
-			draw_rect(Rect2(r.position, Vector2(r.size.x, 32.0)), Color(tag_col.r, tag_col.g, tag_col.b, 0.35))
-			draw_string(font, r.position + Vector2(10.0, 22.0), L.t(String(it["tag"])), HORIZONTAL_ALIGNMENT_LEFT, r.size.x - 40.0, 16, Color("#2b1a00") if legend else Color.WHITE)
-			draw_string(font, r.position + Vector2(r.size.x - 24.0, 22.0), str(i + 1), HORIZONTAL_ALIGNMENT_LEFT, -1.0, 18, Color("#8fa8cc"))
-			if String(it["cat"]) == "stat" and it.has("tier"):
-				# rareza tambien por forma: 1 a 4 rombos (Comun, Rara, Epica, Legendaria), ademas del color y del nombre
-				var pips: int = int(it["tier"]) + 1
-				for pk in range(pips):
-					var pc := Vector2(r.position.x + r.size.x - 44.0 - float(pk) * 11.0, r.position.y + 16.0)
-					draw_colored_polygon(PackedVector2Array([pc + Vector2(0, -5), pc + Vector2(4.5, 0), pc + Vector2(0, 5), pc + Vector2(-4.5, 0)]), Color("#2b1a00") if legend else Color.WHITE)
-			var ic_c: Vector2 = r.position + Vector2(r.size.x * 0.5, 72.0)
-			var mid: String = String(it.get("id", ""))
-			if String(it["cat"]) == "new" and MD.MOVES.has(mid):
-				# a new move: a little looping preview of how it attacks, with its icon in the corner
-				var pa := Rect2(r.position.x + 10.0, ic_c.y - 34.0, r.size.x - 20.0, 68.0)
-				draw_rect(pa, Color(0.05, 0.04, 0.10, 0.92))
-				draw_rect(pa, Color(tag_col.r, tag_col.g, tag_col.b, 0.7), false, 2.0)
-				_move_preview(pa.grow(-3.0), String(MD.MOVES[mid]["kind"]), tag_col, age)
-				IC.draw_in(self, String(it.get("icon", "star")), pa.position + Vector2(15.0, 15.0), 22.0)
-			else:
-				var ic_bg := Rect2(ic_c - Vector2(34.0, 34.0), Vector2(68.0, 68.0))
-				draw_rect(ic_bg, Color(0.1, 0.06, 0.0, 0.82) if legend else Color(tag_col.r, tag_col.g, tag_col.b, 0.22))
-				draw_rect(ic_bg, Color(tag_col.r, tag_col.g, tag_col.b, 0.7), false, 2.0)
-				IC.draw_in(self, String(it.get("icon", "star")), ic_c, 52.0)
-			draw_multiline_string(font, r.position + Vector2(12.0, 134.0), L.t(String(it["title"])), HORIZONTAL_ALIGNMENT_CENTER, r.size.x - 24.0, 24, 2, Color("#4a2f12") if paper else (Color("#2b1a00") if legend else Color.WHITE))
-			var dl: Array = it.get("delta", [])
-			draw_multiline_string(font, r.position + Vector2(16.0, 196.0), L.t(String(it["desc"])), HORIZONTAL_ALIGNMENT_CENTER, r.size.x - 32.0, 18, 4 if not dl.is_empty() else 5, Color("#5a3d1c") if paper else (Color("#3a2600") if legend else Color("#f2e9d8")))
-			if not dl.is_empty():
-				# "ahora > despues": el valor actual de la estadistica y el que tendras con esta carta
-				var dr := Rect2(r.position + Vector2(10.0, r.size.y - 38.0), Vector2(r.size.x - 20.0, 28.0))
-				draw_rect(dr, Color("#141028"))
-				draw_rect(dr, Color(tag_col.r, tag_col.g, tag_col.b, 0.8), false, 2.0)
-				var bt: String = String(dl[0])
-				var at: String = String(dl[1])
-				var bw2: float = font.get_string_size(bt, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 18).x
-				var aw2: float = font.get_string_size(at, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 18).x
-				var gx: float = dr.position.x + (dr.size.x - (bw2 + aw2 + 30.0)) * 0.5
-				draw_string(font, Vector2(gx, dr.position.y + 21.0), bt, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 18, Color("#b4aed6"))
-				var ax: float = gx + bw2 + 8.0
-				draw_colored_polygon(PackedVector2Array([Vector2(ax, dr.position.y + 8.0), Vector2(ax + 10.0, dr.position.y + 14.0), Vector2(ax, dr.position.y + 20.0)]), Color("#ffd65c"))
-				draw_string(font, Vector2(ax + 18.0, dr.position.y + 21.0), at, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 18, Color("#6fd08a"))
-		if age < GRACE:
-			# Estado "aun no": cartas atenuadas y una barra que se llena hasta poder elegir.
-			for r2 in rs:
-				draw_rect(r2, Color(0.0, 0.0, 0.0, 0.5))
-			var bw := 220.0
-			var bx: float = (vp.x - bw) * 0.5
-			var by: float = vp.y * 0.5 + 212.0
-			draw_rect(Rect2(bx, by, bw, 10.0), Color("#1c1833"))
-			draw_rect(Rect2(bx, by, bw * clampf(age / GRACE, 0.0, 1.0), 10.0), Color("#ffd65c"))
-			draw_rect(Rect2(bx, by, bw, 10.0), Color("#8fa8cc"), false, 2.0)
-			draw_string(font, Vector2(0.0, by - 8.0), L.t("One moment…"), HORIZONTAL_ALIGNMENT_CENTER, vp.x, 20, Color("#f2e9d8"))
-		if extras and age >= GRACE:
+			_draw_card(i, rs[i], font)
+		if strip:
+			_draw_build(font, vp)
+		if extras and age >= grace_now:
 			var brs: Array = _btn_rects()
 			if rerolls > 0:
 				draw_rect(brs[0], Color("#1c1833"))
@@ -11990,6 +12280,249 @@ class Cards extends Node2D:
 			draw_rect(ibr[1], Color("#7dffa0") if lock_on else Color("#8fa8cc"), false, 2.0)
 			_draw_key_label(ibr[1], (L.t("Lock: ON  [B]") if lock_on else L.t("Lock: OFF  [B]")), "ban")
 		_draw_footer(vp)
+		if detail_i >= 0 and detail_i < items.size():
+			_draw_detail(font, vp, items[detail_i])
+
+	func _ds2(font: Font, p: Vector2, t: String, al: HorizontalAlignment, w: float, sz: int, col: Color) -> void:
+		draw_string(font, p + Vector2(0.0, 2.0), t, al, w, sz, Color(0, 0, 0, 0.65))
+		draw_string(font, p, t, al, w, sz, col)
+
+	# Rarity frame: bronze (common), silver (rare / new moves), purple (epic), gold (legendary, evolutions, special cards).
+	func _frame_of(it: Dictionary) -> String:
+		if bool(it.get("legend", false)):
+			return "legend"
+		match String(it.get("cat", "")):
+			"stat":
+				return ["common", "rare", "epic", "legend"][clampi(int(it.get("tier", 0)), 0, 3)]
+			"up":
+				return "common"
+			"new":
+				return "rare"
+		return "legend" if String(it.get("cat", "")) in ["evo", "mega", "forme", "kyu", "zc", "plate", "doom"] else "rare"
+
+	func _draw_card(i: int, r0: Rect2, font: Font) -> void:
+		var it: Dictionary = items[i]
+		var k: float = _deal_k(i)
+		if k <= 0.0:
+			return
+		var picked_now: bool = i == sel and age >= grace_now
+		# slide up (first 60%), then flip from the back to the face (last 40%)
+		var ks: float = clampf(k / 0.6, 0.0, 1.0)
+		var slide: float = (1.0 - (1.0 - pow(1.0 - ks, 3.0))) * 240.0
+		var r := Rect2(r0.position + Vector2(0.0, slide - (12.0 if picked_now else 0.0)), r0.size)
+		var kf: float = clampf((k - 0.6) / 0.4, 0.0, 1.0)
+		var sx: float = absf(cos(kf * PI))
+		var face: bool = kf >= 0.5
+		var cx: float = r.get_center().x
+		_xf = Transform2D(0.0, Vector2(maxf(0.02, sx), 1.0), 0.0, Vector2(cx, 0.0))
+		draw_set_transform_matrix(_xf)
+		var lr := Rect2(Vector2(-r.size.x * 0.5, r.position.y), r.size)
+		if face:
+			_draw_face(lr, it, i, picked_now, font)
+		else:
+			_draw_back(lr)
+		_xf = Transform2D.IDENTITY
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		# a sparkle as rare and better cards turn over
+		var fr: String = _frame_of(it)
+		var land: float = age - (float(i) * grace_now * 0.16 + grace_now * 0.62 * 0.8)
+		if (fr == "epic" or fr == "legend") and land >= 0.0 and land < SHX.duration("collect_burst"):
+			SHX.draw(self, "collect_burst", r.get_center() + Vector2(0.0, -60.0), land, 2.2)
+		if picked_now and _tapped == i and detail_i < 0:
+			var pill := Rect2(r.position.x + 28.0, r.end.y + 10.0, r.size.x - 56.0, 32.0)
+			draw_rect(pill, Color("#ffd65c"))
+			draw_rect(pill, Color("#fff1a8"), false, 2.0)
+			draw_string(font, pill.position + Vector2(0.0, 23.0), L.t("Tap again to choose"), HORIZONTAL_ALIGNMENT_CENTER, pill.size.x, 18, Color("#2b1a00"))
+
+	func _draw_back(r: Rect2) -> void:
+		draw_rect(r.grow(3.0), Color("#5a5099"))
+		draw_rect(r, Color("#241d47"))
+		for k2 in range(int(r.size.y / 48.0) + 1):
+			draw_line(Vector2(r.position.x, r.position.y + float(k2) * 48.0), Vector2(r.end.x, r.position.y + float(k2) * 48.0 + 56.0), Color(1, 1, 1, 0.035), 16.0)
+		var cc: Vector2 = r.get_center()
+		draw_circle(cc, 44.0, Color("#141028"))
+		draw_arc(cc, 44.0, 0.0, TAU, 40, Color("#ffd65c"), 4.0)
+		draw_line(cc - Vector2(44.0, 0.0), cc + Vector2(44.0, 0.0), Color("#ffd65c"), 4.0)
+		draw_circle(cc, 12.0, Color("#ffd65c"))
+		draw_circle(cc, 7.0, Color("#141028"))
+
+	func _draw_face(r: Rect2, it: Dictionary, i: int, picked_now: bool, font: Font) -> void:
+		var tag_col: Color = it["color"]
+		var paper: bool = bool(it.get("paper", false))
+		var legend: bool = bool(it.get("legend", false))
+		var fc: Array = FRAMES[_frame_of(it)]
+		if picked_now:
+			draw_rect(r.grow(10.0), Color(1.0, 0.84, 0.36, 0.2))
+			draw_rect(r.grow(6.0), Color("#ffd65c"), false, 3.0)
+		draw_rect(r.grow(3.0), fc[0])
+		draw_rect(r, Color("#1c1833"))
+		if legend:
+			_draw_legend_bg(r)
+		if paper:
+			draw_rect(r, Color("#ecd9a6"))
+			draw_rect(r.grow(-6.0), Color("#8a6a3a"), false, 2.0)
+			draw_line(Vector2(r.position.x + 24.0, r.end.y - 22.0), Vector2(r.position.x + r.size.x * 0.55, r.end.y - 22.0), Color("#6b4a2b"), 2.0)
+			draw_circle(Vector2(r.end.x - 40.0, r.end.y - 34.0), 15.0, Color("#a8281c"))
+			draw_circle(Vector2(r.end.x - 40.0, r.end.y - 34.0), 9.0, Color("#c0392b"))
+		draw_rect(r.grow(-4.0), Color(fc[1].r, fc[1].g, fc[1].b, 0.5), false, 2.0)
+		for px in [r.position.x, r.end.x]:
+			for py in [r.position.y, r.end.y]:
+				draw_rect(Rect2(Vector2(px, py) - Vector2(6.0, 6.0), Vector2(12.0, 12.0)), fc[1])
+		var dark: bool = legend or paper
+		var ink: Color = Color("#2b1a00") if legend else (Color("#4a2f12") if paper else Color.WHITE)
+		draw_rect(Rect2(r.position, Vector2(r.size.x, 34.0)), Color(tag_col.r, tag_col.g, tag_col.b, 0.35))
+		var tag_txt: String = L.t("Upgrade") if String(it["cat"]) == "up" else L.t(String(it["tag"]))   # the level change is in the title
+		draw_string(font, r.position + Vector2(12.0, 24.0), tag_txt, HORIZONTAL_ALIGNMENT_LEFT, r.size.x - 46.0, 19, Color("#2b1a00") if legend else Color.WHITE)
+		draw_string(font, r.position + Vector2(r.size.x - 26.0, 24.0), str(i + 1), HORIZONTAL_ALIGNMENT_LEFT, -1.0, 20, Color("#8fa8cc"))
+		if String(it["cat"]) == "stat" and it.has("tier"):
+			for pk in range(int(it["tier"]) + 1):
+				var pc := Vector2(r.position.x + r.size.x - 44.0 - float(pk) * 11.0, r.position.y + 17.0)
+				draw_colored_polygon(PackedVector2Array([pc + Vector2(0, -5), pc + Vector2(4.5, 0), pc + Vector2(0, 5), pc + Vector2(-4.5, 0)]), Color("#2b1a00") if legend else Color.WHITE)
+		var y: float = r.position.y + 46.0
+		var mid: String = String(it.get("id", ""))
+		if String(it["cat"]) == "new" and MD.MOVES.has(mid):
+			var pa := Rect2(r.position.x + 14.0, y, r.size.x - 28.0, 96.0)
+			draw_rect(pa, Color(0.05, 0.04, 0.10, 0.95))
+			draw_rect(pa, Color(tag_col.r, tag_col.g, tag_col.b, 0.75), false, 2.0)
+			_move_preview(pa.grow(-3.0), String(MD.MOVES[mid]["kind"]), tag_col, age, mid)
+			IC.draw_in(self, String(it.get("icon", "star")), pa.position + Vector2(16.0, 16.0), 22.0)
+			y = pa.end.y + 16.0
+		else:
+			var ic_bg := Rect2(Vector2(r.get_center().x - 44.0, y + 2.0), Vector2(88.0, 88.0))
+			draw_rect(ic_bg, Color(0.1, 0.06, 0.0, 0.82) if legend else Color(tag_col.r, tag_col.g, tag_col.b, 0.2))
+			draw_rect(ic_bg, Color(tag_col.r, tag_col.g, tag_col.b, 0.75), false, 2.0)
+			IC.draw_in(self, String(it.get("icon", "star")), ic_bg.get_center(), 64.0)
+			y = ic_bg.end.y + 14.0
+		var ttl: String = L.t(String(it["title"]))
+		if String(it["cat"]) == "up":
+			ttl += "  " + L.t(String(it["tag"])).replace(">", "→")
+		var tfs := 27
+		while tfs > 20 and font.get_string_size(ttl, HORIZONTAL_ALIGNMENT_LEFT, -1.0, tfs).x > r.size.x - 24.0:
+			tfs -= 1   # long titles ("Fire Spin  Lv.1 -> 2") shrink a little to stay on one line
+		draw_multiline_string(font, Vector2(r.position.x + 10.0, y + 22.0), ttl, HORIZONTAL_ALIGNMENT_CENTER, r.size.x - 20.0, tfs, 2, ink)
+		y += 40.0 if font.get_string_size(ttl, HORIZONTAL_ALIGNMENT_LEFT, -1.0, tfs).x < r.size.x - 20.0 else 72.0
+		# badges (your type, evolves at...)
+		var bdg: Array = it.get("badges", [])
+		if not bdg.is_empty():
+			var bx: float = r.position.x + 14.0
+			for b in bdg:
+				var bt: String = String(b[0])
+				var bc: Color = b[1]
+				var bw2: float = font.get_string_size(bt, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 16).x + 14.0
+				if bx + bw2 > r.end.x - 12.0:
+					bx = r.position.x + 14.0
+					y += 32.0
+				draw_rect(Rect2(bx, y, bw2, 24.0), Color(bc.r, bc.g, bc.b, 0.22))
+				draw_rect(Rect2(bx, y, bw2, 24.0), bc, false, 1.5)
+				draw_string(font, Vector2(bx + 7.0, y + 18.0), bt, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 16, bc.lightened(0.4) if not dark else Color("#2b1a00"))
+				bx += bw2 + 6.0
+			y += 36.0
+		# exact numbers: "Damage 22 -> 27" rows for move upgrades, "now -> after" for stat cards
+		var rows: Array = it.get("rows", [])
+		var dl: Array = it.get("delta", [])
+		if not rows.is_empty():
+			draw_line(Vector2(r.position.x + 14.0, y - 8.0), Vector2(r.end.x - 14.0, y - 8.0), Color("#3a3262"), 2.0)
+			for rw in rows:
+				y += 34.0
+				draw_string(font, Vector2(r.position.x + 16.0, y), L.t(String(rw[0])), HORIZONTAL_ALIGNMENT_LEFT, 110.0, 19, Color("#b4aed6"))
+				# value columns sized to the text, so "0.52 s > 0.39 s" never touches the arrow
+				var vw: float = font.get_string_size(String(rw[1]), HORIZONTAL_ALIGNMENT_LEFT, -1.0, 20).x
+				var nw: float = font.get_string_size(String(rw[2]), HORIZONTAL_ALIGNMENT_LEFT, -1.0, 20).x
+				var vx: float = r.end.x - 16.0 - nw - 26.0 - vw
+				draw_string(font, Vector2(vx, y), String(rw[1]), HORIZONTAL_ALIGNMENT_LEFT, -1.0, 20, Color("#f2e9d8"))
+				var ax: float = vx + vw + 8.0
+				draw_colored_polygon(PackedVector2Array([Vector2(ax, y - 14.0), Vector2(ax + 10.0, y - 8.0), Vector2(ax, y - 2.0)]), Color("#ffd65c"))
+				draw_string(font, Vector2(ax + 15.0, y), String(rw[2]), HORIZONTAL_ALIGNMENT_LEFT, -1.0, 20, Color("#6fd08a"))
+			y += 22.0
+		elif not dl.is_empty():
+			var dr := Rect2(Vector2(r.position.x + 14.0, y), Vector2(r.size.x - 28.0, 36.0))
+			draw_rect(dr, Color("#141028"))
+			draw_rect(dr, Color(tag_col.r, tag_col.g, tag_col.b, 0.8), false, 2.0)
+			var bt2: String = String(dl[0])
+			var at2: String = String(dl[1])
+			var bw3: float = font.get_string_size(bt2, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 22).x
+			var aw3: float = font.get_string_size(at2, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 22).x
+			var gx: float = dr.position.x + (dr.size.x - (bw3 + aw3 + 30.0)) * 0.5
+			draw_string(font, Vector2(gx, dr.position.y + 26.0), bt2, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 22, Color("#b4aed6"))
+			var ax2: float = gx + bw3 + 8.0
+			draw_colored_polygon(PackedVector2Array([Vector2(ax2, dr.position.y + 11.0), Vector2(ax2 + 11.0, dr.position.y + 18.0), Vector2(ax2, dr.position.y + 25.0)]), Color("#ffd65c"))
+			draw_string(font, Vector2(ax2 + 19.0, dr.position.y + 26.0), at2, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 22, Color("#6fd08a"))
+			y = dr.end.y + 22.0
+		var lines: int = maxi(1, int((r.end.y - (26.0 if OS.has_feature("mobile") else 8.0) - y) / font.get_height(22)))   # whole lines that fit inside the card
+		draw_multiline_string(font, Vector2(r.position.x + 16.0, y + 20.0), L.t(String(it["desc"])), HORIZONTAL_ALIGNMENT_CENTER, r.size.x - 32.0, 22, lines,
+			Color("#5a3d1c") if paper else (Color("#3a2600") if legend else Color("#f2e9d8")))
+		if OS.has_feature("mobile"):   # phones: hold a card for its full text
+			draw_string(font, Vector2(r.position.x, r.end.y - 10.0), L.t("Hold for details"), HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 15, Color("#8f88b8") if not dark else Color("#5a3d1c"))
+
+	# The strip of your build under the cards; the highlighted card's slot glows.
+	func _draw_build(font: Font, vp: Vector2) -> void:
+		var slots: Array = build.get("slots", [])
+		var mx: int = maxi(slots.size(), int(build.get("max", 4)))
+		var its: Array = build.get("items", [])
+		var icap: int = maxi(its.size(), int(build.get("item_cap", 1)))
+		var sw := 150.0
+		var iw := 52.0
+		var w: float = 32.0 + float(mx) * (sw + 8.0) + 24.0 + float(icap) * (iw + 8.0) + 8.0
+		var x0: float = (vp.x - w) * 0.5
+		var y: float = vp.y - 168.0   # strip, then the buttons, then the hint line: each on its own row
+		var box := Rect2(x0, y, w, 90.0)
+		draw_rect(box, Color(0.07, 0.05, 0.14, 0.95))
+		draw_rect(box, Color("#5a5099"), false, 2.0)
+		draw_string(font, box.position + Vector2(16.0, 21.0), L.t("Your moves"), HORIZONTAL_ALIGNMENT_LEFT, -1.0, 15, Color("#b4aed6"))
+		var hl: int = int(items[sel].get("slot_hl", -1)) if sel < items.size() and age >= grace_now else -1
+		for i in range(mx):
+			var sr := Rect2(x0 + 16.0 + float(i) * (sw + 8.0), y + 32.0, sw, 48.0)
+			var hot: bool = i == hl
+			draw_rect(sr, Color(1.0, 0.84, 0.36, 0.18) if hot else Color("#1c1833"))
+			draw_rect(sr, Color("#ffd65c") if hot else Color("#3a3262"), false, 3.0 if hot else 2.0)
+			if i < slots.size():
+				var sd: Dictionary = slots[i]
+				IC.draw_in(self, String(sd["icon"]), sr.position + Vector2(24.0, 24.0), 30.0)
+				var nfs: int = 17
+				while nfs > 12 and font.get_string_size(String(sd["name"]), HORIZONTAL_ALIGNMENT_LEFT, -1.0, nfs).x > sw - 52.0:
+					nfs -= 1   # long names shrink to fit their slot
+				draw_string(font, sr.position + Vector2(46.0, 21.0), String(sd["name"]), HORIZONTAL_ALIGNMENT_LEFT, sw - 50.0, nfs, Color.WHITE)
+				draw_string(font, sr.position + Vector2(46.0, 40.0), (L.t("Evolved") if bool(sd.get("evolved", false)) else L.t("Lv %d") % int(sd["lvl"])), HORIZONTAL_ALIGNMENT_LEFT, -1.0, 16, Color("#6fd08a"))
+			else:
+				draw_string(font, sr.position + Vector2(0.0, 30.0), L.t("+ New move here") if hot else L.t("Empty slot"), HORIZONTAL_ALIGNMENT_CENTER, sw, 15, Color("#ffd65c") if hot else Color("#5a5480"))
+			if hot:
+				var tx: float = sr.position.x + sw * 0.5
+				draw_colored_polygon(PackedVector2Array([Vector2(tx - 10.0, sr.position.y - 14.0), Vector2(tx + 10.0, sr.position.y - 14.0), Vector2(tx, sr.position.y - 2.0)]), Color("#ffd65c"))
+		var ix: float = x0 + 16.0 + float(mx) * (sw + 8.0) + 16.0
+		draw_string(font, Vector2(ix, y + 21.0), L.t("Items"), HORIZONTAL_ALIGNMENT_LEFT, -1.0, 15, Color("#b4aed6"))
+		for i in range(icap):
+			var ir := Rect2(ix + float(i) * (iw + 8.0), y + 32.0, iw, 48.0)
+			draw_rect(ir, Color("#1c1833"))
+			draw_rect(ir, Color("#3a3262"), false, 2.0)
+			if i < its.size():
+				IC.draw_in(self, String(its[i]), ir.get_center(), 32.0)
+			else:
+				draw_string(font, ir.position + Vector2(0.0, 32.0), "+", HORIZONTAL_ALIGNMENT_CENTER, iw, 22, Color("#5a5480"))
+
+	# Held card: everything it says, untruncated.
+	func _draw_detail(font: Font, vp: Vector2, it: Dictionary) -> void:
+		draw_rect(Rect2(Vector2.ZERO, vp), Color(0, 0, 0, 0.55))
+		var w: float = minf(620.0, vp.x - 60.0)
+		var r := Rect2(Vector2((vp.x - w) * 0.5, vp.y * 0.5 - 190.0), Vector2(w, 380.0))
+		var fc: Array = FRAMES[_frame_of(it)]
+		draw_rect(r.grow(3.0), fc[0])
+		draw_rect(r, Color("#1c1833"))
+		IC.draw_in(self, String(it.get("icon", "star")), r.position + Vector2(52.0, 56.0), 56.0)
+		draw_string(font, r.position + Vector2(100.0, 46.0), L.t(String(it["title"])), HORIZONTAL_ALIGNMENT_LEFT, w - 120.0, 26, Color.WHITE)
+		draw_string(font, r.position + Vector2(100.0, 74.0), L.t(String(it["tag"])), HORIZONTAL_ALIGNMENT_LEFT, w - 120.0, 17, fc[1])
+		var y: float = r.position.y + 118.0
+		for b in it.get("badges", []):
+			draw_string(font, Vector2(r.position.x + 24.0, y), "• " + String(b[0]), HORIZONTAL_ALIGNMENT_LEFT, w - 48.0, 17, (b[1] as Color).lightened(0.3))
+			y += 24.0
+		for rw in it.get("rows", []):
+			draw_string(font, Vector2(r.position.x + 24.0, y), "%s:  %s  →  %s" % [L.t(String(rw[0])), String(rw[1]), String(rw[2])], HORIZONTAL_ALIGNMENT_LEFT, w - 48.0, 18, Color("#6fd08a"))
+			y += 26.0
+		var dl: Array = it.get("delta", [])
+		if not dl.is_empty():
+			draw_string(font, Vector2(r.position.x + 24.0, y), "%s  →  %s" % [String(dl[0]), String(dl[1])], HORIZONTAL_ALIGNMENT_LEFT, w - 48.0, 18, Color("#6fd08a"))
+			y += 26.0
+		draw_multiline_string(font, Vector2(r.position.x + 24.0, y + 10.0), L.t(String(it["desc"])), HORIZONTAL_ALIGNMENT_LEFT, w - 48.0, 19, -1, Color("#f2e9d8"))
+		draw_string(font, Vector2(r.position.x, r.end.y - 14.0), L.t("Let go to close"), HORIZONTAL_ALIGNMENT_CENTER, w, 15, Color("#8f88b8"))
 
 
 	# Carta legendaria: fondo de oro con brillo diagonal que recorre la carta y destellos.
@@ -12035,7 +12568,7 @@ class Cards extends Node2D:
 	func _draw_footer(vp: Vector2) -> void:
 		var font := ThemeDB.fallback_font
 		var col := Color("#8fa8cc")
-		var parts: Array = [{"t": L.t("Tap a card") + "  |  "}]
+		var parts: Array = [{"t": (L.t("Tap a card to look, tap again to choose") if OS.has_feature("mobile") else L.t("Tap a card")) + "  |  "}]
 		if Input.get_connected_joypads().size() > 0:
 			parts.append({"t": L.t("Gamepad") + ": "})
 			parts.append({"i": PADI.named("dpad_lr")})
@@ -12045,17 +12578,18 @@ class Cards extends Node2D:
 		parts.append({"t": L.t("Keyboard: 1 2 3")})
 		var isz := 28.0
 		var total := 0.0
+		var fs: int = 14 if not build.is_empty() else 18
 		for p in parts:
-			total += isz if p.has("i") else font.get_string_size(String(p["t"]), HORIZONTAL_ALIGNMENT_LEFT, -1.0, 18).x
+			total += isz if p.has("i") else font.get_string_size(String(p["t"]), HORIZONTAL_ALIGNMENT_LEFT, -1.0, fs).x
 		var x: float = (vp.x - total) * 0.5
-		var y: float = vp.y - 24.0
+		var y: float = vp.y - (8.0 if not build.is_empty() else 24.0)
 		for p in parts:
 			if p.has("i"):
 				draw_texture_rect(p["i"], Rect2(Vector2(x, y - 21.0), Vector2(isz, isz)), false)
 				x += isz
 			else:
-				draw_string(font, Vector2(x, y), String(p["t"]), HORIZONTAL_ALIGNMENT_LEFT, -1.0, 18, col)
-				x += font.get_string_size(String(p["t"]), HORIZONTAL_ALIGNMENT_LEFT, -1.0, 18).x
+				draw_string(font, Vector2(x, y), String(p["t"]), HORIZONTAL_ALIGNMENT_LEFT, -1.0, fs, col)
+				x += font.get_string_size(String(p["t"]), HORIZONTAL_ALIGNMENT_LEFT, -1.0, fs).x
 
 
 # ---------------------------------------------------------------
@@ -13296,22 +13830,27 @@ class Hud extends Node2D:
 	func dash_rect() -> Rect2:
 		var vp: Vector2 = get_viewport_rect().size
 		var ins: Vector4 = DSP.insets(get_tree())
-		return DSP.mirror_rect(Rect2(vp.x - 126.0 - ins.z, vp.y - 218.0 - ins.w, 100.0, 100.0), vp, ins)
+		# movable and resizable in Settings > HUD layout, like the rest of the HUD (same rule as the editor's preview)
+		var d: Rect2 = HL.default_rect("dash", vp, ins)
+		var r := Rect2(d.position + HL.offset("dash"), d.size * HL.scale_of("dash"))
+		r.position = r.position.clamp(Vector2.ZERO, vp - r.size)
+		return DSP.mirror_rect(r, vp, ins)
 
 	func draw_dash(font: Font) -> void:
 		var r: Rect2 = dash_rect()
 		var c: Vector2 = r.position + r.size * 0.5
+		var k: float = r.size.x / 100.0   # its size from the HUD layout
 		var ready: bool = dash_cd <= 0.0
 		var gold := Color("#ffcb3d")
 		if ready:
 			var beat: float = 0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.006)
-			draw_circle(c, 52.0 + beat * 4.0, Color(gold.r, gold.g, gold.b, 0.18 + 0.14 * beat))
-		draw_circle(c, 46.0, Color(0.1, 0.07, 0.02, 0.88))
-		draw_arc(c, 46.0, 0.0, TAU, 40, gold if ready else Color(0.35, 0.34, 0.3), 4.0)
+			draw_circle(c, (52.0 + beat * 4.0) * k, Color(gold.r, gold.g, gold.b, 0.18 + 0.14 * beat))
+		draw_circle(c, 46.0 * k, Color(0.1, 0.07, 0.02, 0.88))
+		draw_arc(c, 46.0 * k, 0.0, TAU, 40, gold if ready else Color(0.35, 0.34, 0.3), 4.0)
 		if not ready:
-			draw_arc(c, 46.0, -PI * 0.5, -PI * 0.5 + TAU * clampf(1.0 - dash_cd / dash_max, 0.0, 1.0), 40, gold, 4.0)
+			draw_arc(c, 46.0 * k, -PI * 0.5, -PI * 0.5 + TAU * clampf(1.0 - dash_cd / dash_max, 0.0, 1.0), 40, gold, 4.0)
 		var label: String = "DASH" if ready else "%.1f" % dash_cd
-		_ds(font, Vector2(c.x - 44.0, c.y + 9.0), label, HORIZONTAL_ALIGNMENT_CENTER, 88.0, 24 if ready else 28, Color.WHITE if ready else Color(0.75, 0.78, 0.85))
+		_ds(font, Vector2(c.x - 44.0 * k, c.y + 9.0 * k), label, HORIZONTAL_ALIGNMENT_CENTER, 88.0 * k, maxi(12, roundi((24.0 if ready else 28.0) * k)), Color.WHITE if ready else Color(0.75, 0.78, 0.85))
 
 	# Dynamax: boton (listo / bloqueado por nivel), barra de tiempo, borde rojo y cartel "DYNAMAX" al activarse.
 	func draw_dyn(font: Font, vp: Vector2) -> void:

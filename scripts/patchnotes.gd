@@ -9,6 +9,23 @@ const UPD = preload("res://scripts/updater.gd")
 
 const ENTRIES := [
 	{
+		"ver": "0.1.3-alpha.5",
+		"date": "2026-11-03",
+		"title": "Megarift Survivors 0.1.3-alpha.5: new level-up cards, a new font, shinier pickups (test build)",
+		"new": [
+			"New level-up cards: they deal in and flip over, with a frame for each rarity. Move upgrades show exactly what changes (for example Cooldown 0.52 s to 0.39 s), cards show badges like Your type +10% and Evolves at Lv 5, and a strip of your moves and items lights up where the card goes. Several level-ups at once are picked one after another with a list of what you took. On phones: tap to look, tap again to choose, swipe between cards and hold a card for its full text.",
+			"Move previews on the cards show the real move, with your Pokémon attacking wild Pokémon from the run.",
+			"The Dash button can be moved and resized in Settings > HUD layout.",
+		],
+		"changes": [
+			"New game font, Megarift Pixel (from Fusion Pixel), drawn a little bolder. Japanese, Chinese and Russian now use pixel letters too.",
+			"Chests have new art, and chests, parcels, supply crates and map items glow, shine and sparkle. Rare drops bob and twinkle.",
+		],
+		"fixes": [
+			"Japanese and Chinese: the Gacha line about a generation's Pokémon had its two numbers swapped.",
+		],
+	},
+	{
 		"ver": "0.1.3-alpha.4",
 		"date": "2026-11-03",
 		"title": "Megarift Survivors 0.1.3-alpha.4: Legendary Banners, Shiny Charms, effects you can read (test build)",

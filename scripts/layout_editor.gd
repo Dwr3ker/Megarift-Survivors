@@ -8,7 +8,7 @@ const DSP = preload("res://scripts/display.gd")
 const PAD = preload("res://scripts/pad.gd")
 const SV = preload("res://scripts/save_data.gd")
 
-const COLORS := {"plate": Color("#5fd08a"), "radar": Color("#5fb4ff"), "stats": Color("#ffd65c"), "items": Color("#ff8ad8"), "counters": Color("#ffb347"), "skills": Color("#b48aff")}
+const COLORS := {"plate": Color("#5fd08a"), "radar": Color("#5fb4ff"), "stats": Color("#ffd65c"), "items": Color("#ff8ad8"), "counters": Color("#ffb347"), "skills": Color("#b48aff"), "dash": Color("#ffcb3d")}
 const KEY_STEP := 4.0
 const STICK_SPEED := 320.0
 

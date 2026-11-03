@@ -102,5 +102,11 @@
  ],
  "Legendary Banners": [
   "screens/legendary_banners.jpg"
+ ],
+ "Level-up cards": [
+  "screens/level_up_cards.jpg"
+ ],
+ "Pickups that shine": [
+  "screens/pickups.jpg"
  ]
 }

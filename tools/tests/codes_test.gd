@@ -81,6 +81,15 @@ func _init() -> void:
 	var r7: Dictionary = CODES.redeem("Unlock All", sv)
 	check("UNLOCKALL unlocks everything", bool(r7["ok"]) and sv["owned"].size() == SV.dex_list.size() and sv["ach"].size() > 200 and int(sv["pup"]["25"]["hp"]) == 10 and int(sv["coins"]) >= 9999999)
 	check("the plain code words are not stored in the table", not str(CODES.TABLE).contains("MEGARIFT") and not str(CODES.TABLE).contains("UNLOCKALL"))
+	# FIRSTPARTNERS: the 27 first-stage starters, Bulbasaur to Quaxly
+	var dfp: Dictionary = SV.default_data()
+	var fp: Array = CODES.first_partners()
+	var rfp: Dictionary = CODES.redeem("first partners", dfp)
+	var all_fp: bool = fp.size() == 27 and fp.has(1) and fp.has(4) and fp.has(7) and fp.has(912) and not fp.has(54)
+	for dx in fp:
+		all_fp = all_fp and dfp["owned"].has(str(dx))
+	check("FIRSTPARTNERS grants the 27 first-stage starters of every region", bool(rfp["ok"]) and all_fp, str(rfp["msg"]))
+	check("FIRSTPARTNERS works once", not bool(CODES.redeem("FIRSTPARTNERS", dfp)["ok"]))
 	# ---------- random codes ----------
 	var sv2: Dictionary = SV.default_data()
 	var gens_ok := true

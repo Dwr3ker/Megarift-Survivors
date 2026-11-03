@@ -76,7 +76,7 @@ func _init() -> void:
 	for i in range(8):
 		await process_frame
 	var ed = menu.layout_ed
-	check("the layout screen exists with a stage and six element buttons", ed != null and ed.stage != null and ed.el_btns.size() == 6)
+	check("the layout screen exists with a stage and a button per element (Dash included)", ed != null and ed.stage != null and ed.el_btns.size() == HL.IDS.size() and HL.IDS.has("dash"))
 	ed._select("items")
 	ed._nudge(Vector2(40.0, 24.0))
 	check("nudging moves the selected element", HL.offset("items") == Vector2(40.0, 24.0), str(HL.offset("items")))

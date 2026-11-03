@@ -3,6 +3,7 @@ extends RefCounted
 # SHA-256 of each code (with a salt), not the codes themselves. Each code works once per save.
 #   MEGARIFT     alpha tester gift: 10,000 coins, 25 tickets, 5 x10 tickets
 #   STARTERPACK  every strong starter (see starters_data.gd STRONG)
+#   FIRSTPARTNERS every first partner of every region, first stage (Bulbasaur ... Quaxly: 27 Pokémon)
 #   MEGAPACK     every Pokémon that can Mega Evolve (+ 5,000 coins)
 #   LEGENDS      every legendary Pokémon
 #   UNLOCKALL    everything (testing): all Pokémon, upgrades, achievements, medals, Z-Crystals, recipes, tower floors
@@ -24,6 +25,7 @@ const DUPLICATE_COINS := 2000   # paid by a random code when there is nothing ne
 const TABLE := {
 	"d3e0f7ef5d8ca75a5d9d618728273c3b3dabe9f4e079aeb888d8919aa26b095a": "alpha",
 	"ccff2b21521dce45c9f96c1815e4700b74845d144ceffc7c7bee245359b82a14": "starters",
+	"ed1e204802e533b27c9acfacc53ceaeae804122a0519c17dabd4139e6e8d2e45": "partners",
 	"369f1375d6aa82a6db1d7098f87d01222c148c259fc3ec09ac279645d1d2d52f": "megas",
 	"bbc8941822cea37cde6bc58063482bb5e252d6260dc903b1620cf68951f3927e": "legends",
 	"afcbf9b0e121bb9505fe535863f367a4f9c0ad0f5ab5a84c98a02add22e4311d": "all",
@@ -91,6 +93,9 @@ static func redeem(text: String, d: Dictionary) -> Dictionary:
 		"starters":
 			msg = "Starter pack: %d new Pokémon."
 			args = [_grant(d, ST.STRONG)]
+		"partners":
+			msg = "First partners: %d new Pokémon."
+			args = [_grant(d, first_partners())]
 		"megas":
 			var list: Array = []
 			for p in SV.dex_list:
@@ -123,6 +128,16 @@ static func redeem(text: String, d: Dictionary) -> Dictionary:
 	used[id] = int(Time.get_unix_time_from_system())
 	d["codes_used"] = used
 	return {"ok": true, "msg": msg, "args": args}
+
+
+# The first-stage starter trio of every region (generations 1-9): the first 27 entries of starters_data.gd STARTERS.
+static func first_partners() -> Array:
+	var out: Array = []
+	for e in ST.STARTERS:
+		var dx: int = int(e["dex"])
+		if out.size() < 27 and dx != 54 and dx != 79:   # Psyduck and Slowpoke are the extra quiz partners, not starters
+			out.append(dx)
+	return out
 
 
 # "GIMMEALL" -> "gimmeall"; "GIMMEPIKACHU" -> "gimme:25" (the Pokémon whose name matches); anything else -> "".

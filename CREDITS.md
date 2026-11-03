@@ -4,7 +4,7 @@
 - **Android port (Godot):** JayElDragon.
 - **Megarift Survivors — Doofcraft-style edition (v0.1.0 pre-release), by Dwr3ker:** adds Mega Evolution, rarity-tier cards, Hyper mode, Eternamax Eternatus and the other systems listed in `README.md`. The systems are inspired by [PokeSurvivor Doofcraft](https://pokesurvivor.doofcraft.com) (not affiliated; rules and numbers re-implemented from public information, no code or art copied). The dash is modelled on [PokeTide](https://poketide.com).
 - **Pokémon data and official names:** [PokéAPI](https://pokeapi.co).
-- **Fonts:** Pixelify Sans and Noto Sans CJK, both under the SIL Open Font License 1.1.
+- **Fonts:** Megarift Pixel (the main font, `fonts/MegariftPixel.ttf`): a modified Fusion Pixel 12px proportional (latin) by TakWolf, with the line height reduced to 1.25 em and renamed as the licence requires for modified versions (Reserved Font Name 'Fusion Pixel'; licence in `fonts/OFL_FusionPixel.txt`), Pixelify Sans and Noto Sans CJK, all under the SIL Open Font License 1.1.
 - Pokémon and its characters are trademarks of Nintendo, Creatures Inc., GAME FREAK inc. and The Pokémon Company. This is a free, non-profit fan project, not affiliated with or endorsed by them.
 
 The sprite credits below are copied from the original game's CREDITS.md. Sprites come from

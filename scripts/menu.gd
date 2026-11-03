@@ -8746,7 +8746,7 @@ func _set_about() -> void:
 	_sadd(ver)
 	_sadd(_label("Fan game free and non-profit: no ads or purchases. Pokémon and its characters are owned by Nintendo, Creatures and GAME FREAK; this project is not affiliated with them.", 20, Color("#f2e9d8")))
 	_sec("Credits")
-	for line in ["• Original game (web): PokéSurvivor, by JPTER78.", "• Android port (Godot): JayElDragon.", "• This edition: Dwr3ker.", "• Inspired by PokeSurvivor Doofcraft (not affiliated); the dash, by PokeTide.", "• Sprites: PMD SpriteCollab and its artists (CC BY-NC 4.0).", "• Pokémon data: PokéAPI.", "• Font: Pixelify Sans (OFL).", "• Effects (status icons, critical hits, pickups, rare XP): pixelfx by Patch and Hugo Duprez (MIT)."]:
+	for line in ["• Original game (web): PokéSurvivor, by JPTER78.", "• Android port (Godot): JayElDragon.", "• This edition: Dwr3ker.", "• Inspired by PokeSurvivor Doofcraft (not affiliated); the dash, by PokeTide.", "• Sprites: PMD SpriteCollab and its artists (CC BY-NC 4.0).", "• Pokémon data: PokéAPI.", "• Fonts: Megarift Pixel (from Fusion Pixel by TakWolf) and Pixelify Sans (OFL).", "• Effects (status icons, critical hits, pickups, rare XP): pixelfx by Patch and Hugo Duprez (MIT)."]:
 		_sadd(_label(line, 20))
 	var hb := HFlowContainer.new()
 	hb.add_theme_constant_override("h_separation", 10)

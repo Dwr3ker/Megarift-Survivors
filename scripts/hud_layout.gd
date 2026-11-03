@@ -4,8 +4,8 @@ extends RefCounted
 # used to be sliders in Settings live here now. Older saves are migrated from the hud_plate / hud_radar / ... settings.
 const SV = preload("res://scripts/save_data.gd")
 
-const IDS := ["plate", "radar", "stats", "items", "counters", "skills"]
-const NAMES := {"plate": "Health plate", "radar": "Radar", "stats": "Stats panel", "items": "Item list", "counters": "Resource counters", "skills": "Move bar"}
+const IDS := ["plate", "radar", "stats", "items", "counters", "skills", "dash"]
+const NAMES := {"plate": "Health plate", "radar": "Radar", "stats": "Stats panel", "items": "Item list", "counters": "Resource counters", "skills": "Move bar", "dash": "Dash button"}
 const OLD_KEYS := {"plate": "hud_plate", "radar": "hud_radar", "stats": "hud_stats", "items": "hud_items", "counters": "hud_counters", "skills": "hud_skills"}
 const S_MIN := 60
 const S_MAX := 150
@@ -31,7 +31,7 @@ static func layout() -> Dictionary:
 	if not (st.get("hud_layout") is Dictionary):
 		var lay := _fresh()
 		for id in IDS:
-			lay[id]["s"] = clampi(int(st.get(OLD_KEYS[id], 100)), S_MIN, S_MAX)
+			lay[id]["s"] = clampi(int(st.get(String(OLD_KEYS.get(id, "")), 100)), S_MIN, S_MAX)
 		st["hud_layout"] = lay
 	var cur: Dictionary = st["hud_layout"]
 	for id in IDS:   # tolerate a layout from an older version
@@ -158,4 +158,6 @@ static func default_rect(id: String, vp: Vector2, ins: Vector4, team_rows: int =
 			return Rect2(vp.x * 0.5 - 190.0, 66.0, 380.0, 40.0)
 		"skills":
 			return Rect2(vp.x * 0.5 - 215.0, vp.y - 14.0 - ins.w - 70.0, 430.0, 70.0)
+		"dash":   # the golden Dash button, bottom right (Hud.dash_rect applies the saved offset and size)
+			return Rect2(vp.x - 126.0 - ins.z, vp.y - 218.0 - ins.w, 100.0, 100.0)
 	return Rect2()
