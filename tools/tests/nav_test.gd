@@ -32,6 +32,8 @@ func _init() -> void:
 	var CR = load("res://scripts/crash_report.gd")
 	SV.ensure()
 	var _guard: Dictionary = SV.d.duplicate(true)   # the real save is restored at the end
+	for fk in ["dex_gen", "dex_type", "dex_sort", "dex_show", "dex_grid", "dex_mine"]:   # the list's saved filters: start from the defaults
+		SV.d["settings"][fk] = SV.default_data()["settings"][fk]
 	# ---------- gacha: Down keeps to one column ----------
 	var menu = (load("res://scenes/menu.tscn") as PackedScene).instantiate()
 	root.add_child(menu)
@@ -86,8 +88,13 @@ func _init() -> void:
 	root.add_child(menu2)
 	for i in range(20):
 		await process_frame
-	check("compact main menu: taller stage card", menu2.main_card.custom_minimum_size.y >= 430.0, str(menu2.main_card.custom_minimum_size))
-	check("compact main menu: taller buttons", menu2.cont_btn.custom_minimum_size.y >= 110.0 and menu2.main_btns["play"].custom_minimum_size.y >= 150.0)
+	# main menu: the stage and the tiles fill the screen height (shares of it, so a taller screen gets a taller stage)
+	var hs: float = (menu2.screens["main"] as Control).size.y - 164.0 - menu2.get_viewport_rect().size.y * 0.12   # minus the screen margins and padding
+	var used: float = menu2.main_card.size.y + menu2.main_info.size.y + 60.0
+	check("main menu: the stage fills the left column", menu2.main_card.size_flags_vertical == Control.SIZE_EXPAND_FILL and used >= hs * 0.85, "%.0f of %.0f" % [used, hs])
+	var tile_h: float = (menu2.main_btns["play"] as Control).size.y
+	check("main menu: tiles stretch to the screen height", tile_h >= 120.0 and menu2.cont_btn.custom_minimum_size.y >= 80.0, "tile %.0f" % tile_h)
+	var h0: float = menu2.main_card.size.y
 	menu2.queue_free()
 	await process_frame
 	Engine.set_meta("force_compact", false)
@@ -95,7 +102,7 @@ func _init() -> void:
 	root.add_child(menu3)
 	for i in range(20):
 		await process_frame
-	check("normal main menu keeps the original sizes", menu3.main_card.custom_minimum_size.y == 320.0 and menu3.cont_btn.custom_minimum_size.y == 92.0)
+	check("main menu sizes do not depend on the compact switch any more", absf(menu3.main_card.size.y - h0) < 2.0, "%.0f vs %.0f" % [menu3.main_card.size.y, h0])
 	menu3.queue_free()
 	await process_frame
 	Engine.remove_meta("force_compact")

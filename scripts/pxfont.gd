@@ -15,7 +15,57 @@ const MAIN := "res://fonts/MegariftPixel.ttf"   # Fusion Pixel 12 (OFL, renamed:
 const PIXELIFY := "res://fonts/PixelifySansFix.ttf"   # second in line: the few symbols the main font lacks
 const EMBOLDEN := 0.7   # thicker strokes: the pixel font reads better on a phone (0 = as drawn, 1 = heavy)
 static var font: FontVariation = null
+static var font_small: FontVariation = null   # same font without the extra boldness, for small text
 static var lang_code := ""
+# Small text: the font is drawn on a 12 px grid, so anything at or below SMALL_MAX is drawn at exactly 12 px (every font
+# pixel lands on whole screen pixels) and without the extra boldness (at small sizes it fills the gaps inside letters).
+const SMALL_MAX := 15
+const GRID := 12
+
+
+static func is_small(sz: int) -> bool:
+	return sz <= SMALL_MAX
+
+
+static func px_size(sz: int) -> int:
+	return GRID if sz <= SMALL_MAX else sz
+
+
+static func get_small() -> Font:
+	if font_small == null:
+		var f: Font = get_font()
+		if not (f is FontVariation):
+			return f
+		font_small = (f as FontVariation).duplicate()
+		font_small.variation_embolden = 0.0
+		font_small.fallbacks = (f as FontVariation).fallbacks
+	return font_small
+
+
+# The font to draw a given size with (the thin one for small text, when it is the game font).
+static func font_for(f: Font, sz: int) -> Font:
+	if sz <= SMALL_MAX and f != null and f == font:
+		return get_small()
+	return f
+
+
+# draw_string / draw_string_outline with the small-text rule applied (used by the run's HUD and cards).
+static func dstr(ci: CanvasItem, f: Font, p: Vector2, t: String, al: int = HORIZONTAL_ALIGNMENT_LEFT, w: float = -1.0, sz: int = 16, col: Color = Color.WHITE) -> void:
+	ci.draw_string(font_for(f, sz), p, t, al, w, px_size(sz), col)
+
+
+static func dstro(ci: CanvasItem, f: Font, p: Vector2, t: String, al: int = HORIZONTAL_ALIGNMENT_LEFT, w: float = -1.0, sz: int = 16, o: int = 1, col: Color = Color.WHITE) -> void:
+	ci.draw_string_outline(font_for(f, sz), p, t, al, w, px_size(sz), o, col)
+
+
+# Labels / buttons: small sizes get the thin font at 12 px.
+static func style_small(c: Control, sz: int) -> int:
+	if sz <= SMALL_MAX and lang_code != "vi":
+		c.add_theme_font_override("font", get_small())
+		return GRID
+	if c.has_theme_font_override("font") and c.get_theme_font("font") == font_small:
+		c.remove_theme_font_override("font")   # grown back above the small sizes: the normal (bold) font again
+	return sz
 
 
 static func get_font() -> Font:
@@ -63,6 +113,9 @@ static func _set_fallbacks() -> void:
 	if fb is Font:
 		arr.append(fb)
 	font.fallbacks = arr
+	if font_small != null:
+		font_small.base_font = font.base_font
+		font_small.fallbacks = arr
 
 
 static func set_lang(code: String) -> void:

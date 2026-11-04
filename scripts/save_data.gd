@@ -123,7 +123,7 @@ static func default_data() -> Dictionary:
 		"v": 1, "created": int(Time.get_unix_time_from_system()), "title": "", "nick": "", "favs": [0, 0, 0], "coins": 600, "tickets": 10, "tickets10": 3, "lshards": 0, "regions_migrated": true, "regions_rule2": true, "pity": {}, "bpity": 0, "charms": {}, "banners_claimed": {}, "legends": {}, "arenas": {}, "lshiny": {}, "owned": {}, "selected": 25, "shiny_on": false,
 		"fusions": [], "upgrades": {}, "pup": {}, "claimed": {}, "pban": {}, "pbind": {}, "ptm": {}, "pz": {},
 		"stats": {"runs": 0, "kills": 0, "best_time": 0, "best_level": 1, "bosses": 0, "chests": 0, "pulls": 0, "shinies": 0, "total_time": 0, "coins_total": 0, "defeated_runs": 0, "rifts": 0},
-		"settings": {"master": 80, "music": 70, "sfx": 80, "dmg_numbers": true, "vibration": true, "shake": true, "stick": 1, "stick_fixed": false, "manual_aim": false, "lang": "en", "view": 100, "fov": 165, "pad": 0, "padmap": {}, "mute": false, "quality": 0, "fps": false, "stats_box": true, "stats_mode": 0, "mirror": false, "hud_scale": 100, "colorblind": false, "adaptive": true, "mono_bonus": false, "fx_op": 1, "act_side": 0, "text_sz": 0, "show_map": true, "test_builds": false, "dex_gen": 0, "dex_type": "", "dex_sort": 0, "dex_show": 0, "dex_grid": 1},
+		"settings": {"master": 80, "music": 70, "sfx": 80, "dmg_numbers": true, "vibration": true, "shake": true, "stick": 1, "stick_fixed": false, "manual_aim": false, "lang": "en", "view": 100, "fov": 165, "pad": 0, "padmap": {}, "mute": false, "quality": 0, "fps": false, "stats_box": true, "stats_mode": 0, "mirror": false, "hud_scale": 100, "colorblind": false, "adaptive": true, "mono_bonus": false, "fx_op": 1, "act_side": 0, "text_sz": 0, "show_map": true, "test_builds": false, "dex_gen": 0, "dex_type": "", "dex_sort": 0, "dex_show": 0, "dex_grid": 1, "dex_mine": false},
 	}
 
 
@@ -833,6 +833,11 @@ static func banner_dexes(w: int = -1) -> Array:
 	return out
 
 
+# A region's banner opens with the region itself (clear the one before it); the weekly Legendary Banners are always open.
+static func banner_open(region: int) -> bool:
+	return is_banner(region) or region_unlocked(region)
+
+
 static func is_banner(region: int) -> bool:
 	return region >= BANNER_BASE and region < BANNER_BASE + BANNER_COUNT
 
@@ -888,7 +893,7 @@ static var last_crystal := ""
 
 static func pull(region: int, n: int = 1, use: String = "t1") -> Array:
 	last_crystal = ""
-	if not can_pull(n, use):
+	if not can_pull(n, use) or not banner_open(region):
 		return []
 	var banner_on: bool = is_banner(region)
 	var feat: int = 0

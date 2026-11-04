@@ -1,5 +1,6 @@
 extends SceneTree
-# Headless check (compact cards show only the initial: M / P / C / F): the collection card shows a Mega/Primal/Crowned badge only for capable Pokemon.
+# Collection cards: a Pokémon that can change form shows the item it uses (Mega Stone, orb, rusted sword / shield);
+# Deoxys (no item) keeps its F badge; other Pokémon and unowned cards show nothing.
 var ok := true
 func check(name: String, cond: bool, detail: String = "") -> void:
 	print(("PASS  " if cond else "FAIL  ") + name + ("  " + detail if detail != "" else ""))
@@ -12,6 +13,10 @@ func badge_text(btn: Node) -> String:
 				if g is Label:
 					return g.text
 	return ""
+
+func stone(btn: Node) -> Texture2D:
+	var r = btn.find_child("MegaStone", false, false)
+	return (r as TextureRect).texture if r is TextureRect else null
 
 func _init() -> void:
 	var SV = load("res://scripts/save_data.gd")
@@ -26,17 +31,18 @@ func _init() -> void:
 	await process_frame
 	await process_frame
 	var c6 = menu._dex_card(SV.dex_by[6], true)
-	check("Charizard card: M (mega) badge", badge_text(c6) == "M", badge_text(c6))
+	check("Charizard card: its Mega Stone icon", stone(c6) != null and badge_text(c6) == "")
 	var c382 = menu._dex_card(SV.dex_by[382], true)
-	check("Kyogre card: P (primal) badge", badge_text(c382) == "P", badge_text(c382))
+	check("Kyogre card: its orb icon", stone(c382) != null)
 	var c888 = menu._dex_card(SV.dex_by[888], true)
-	check("Zacian card: C (crowned) badge", badge_text(c888) == "C", badge_text(c888))
+	check("Zacian card: its rusted sword icon", stone(c888) != null)
+	check("every item icon is its own picture (Charizard, Kyogre and Zacian differ)", stone(c6) != stone(c382) and stone(c382) != stone(c888))
 	var c386 = menu._dex_card(SV.dex_by[386], true)
 	check("Deoxys card: F (forme) badge", badge_text(c386) == "F", badge_text(c386))
 	var c25 = menu._dex_card(SV.dex_by[25], true)
-	check("Pikachu card: no badge", badge_text(c25) == "", badge_text(c25))
+	check("Pikachu card: no badge or item", badge_text(c25) == "" and stone(c25) == null, badge_text(c25))
 	var c6_locked = menu._dex_card(SV.dex_by[6], false)
-	check("not owned (hidden): no badge", badge_text(c6_locked) == "", badge_text(c6_locked))
+	check("not owned (hidden): no badge or item", badge_text(c6_locked) == "" and stone(c6_locked) == null, badge_text(c6_locked))
 	SV.d = snap
 	SV.save()
 	print("RESULT: ", "PASS" if ok else "FAIL")

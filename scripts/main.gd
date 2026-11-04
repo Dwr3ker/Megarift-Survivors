@@ -518,6 +518,14 @@ var daily_fmt := ""     # Daily Challenge format of the day (daily.gd): medals /
 var daily_stage := 0    # Gauntlet: stages already reached (a new rule every 5 minutes)
 var evo_cine = null     # games-style evolution scene (evo_cine.gd); the world is frozen while it plays
 var zoom_punch := 0.0   # brief camera push-in (Z-Move cinematic, Dynamax); decays by itself
+# Entering a rift: a short pull-in (the screen closes on you in the rift's colour, the camera pushes in, your Pokémon
+# spins into the rift), then the arena opens with a flash, rings and a banner naming the legendary.
+const RIFT_IN := 0.45
+const RIFT_OUT := 0.7
+const RIFT_INTRO := 2.6
+var rift_in_t := 0.0
+var rift_out_t := 0.0
+var rift_fx_col := Color("#a06bff")
 var cam_zoom := 1.65  # campo de vision: ajustable en la pausa (View, 70-250 %), se guarda en Ajustes
 var settings_open := false
 var run_saved := false
@@ -946,11 +954,43 @@ func _pad_slot(bi: int) -> int:
 	return -1
 
 
+const FOV_MIN := 70
+const FOV_MAX := 250
+const FOV_STEP := 5
+var _fov_save_pending := false
+
+
+# PC: the mouse wheel zooms the camera during a run (up = closer, down = further out), the same setting as Options > View.
+func _wheel_fov(event: InputEvent) -> bool:
+	if not (event is InputEventMouseButton) or not event.pressed:
+		return false
+	var mb: InputEventMouseButton = event
+	if mb.button_index != MOUSE_BUTTON_WHEEL_UP and mb.button_index != MOUSE_BUTTON_WHEEL_DOWN:
+		return false
+	if get_tree().paused or (cards != null and cards.open):
+		return false
+	var cur: int = clampi(int(SV.d["settings"].get("fov", 165)), FOV_MIN, FOV_MAX)
+	var nv: int = clampi(cur + (FOV_STEP if mb.button_index == MOUSE_BUTTON_WHEEL_UP else -FOV_STEP), FOV_MIN, FOV_MAX)
+	if nv == cur:
+		return true
+	SV.d["settings"]["fov"] = nv
+	_apply_fov()
+	if not _fov_save_pending:   # one save after the wheel stops, not one per notch
+		_fov_save_pending = true
+		get_tree().create_timer(0.8, true).timeout.connect(func():
+			_fov_save_pending = false
+			SV.save())
+	return true
+
+
 func _unhandled_input(event: InputEvent) -> void:
 	if settings_open:
 		return
 	if shop_open:
 		kec.ui_input(event)
+		return
+	if _wheel_fov(event):
+		get_viewport().set_input_as_handled()
 		return
 	var slot := -1
 	var cyc := 0
@@ -1365,10 +1405,22 @@ func _on_reroll() -> void:
 	rerolls -= 1
 	var heading: String = cards.title
 	var head: String = cards.headline
+	var had_build: bool = not cards.build.is_empty()
+	var had_skip: bool = cards.can_skip
 	cards.show_cards(picks, heading, head, true)
 	cards.age = cards.GRACE   # un cambio o un veto deliberado no vuelve a bloquear las cartas
 	cards.rerolls = rerolls
 	cards.bans = bans
+	_redeal_keep(picks, had_build, had_skip)
+
+
+# show_cards clears the moves strip and Skip: a reroll / ban deals the new cards with the same screen around them
+# (without the strip the cards fell back to the old layout, overlapping the title and cutting descriptions short).
+func _redeal_keep(picks: Array, had_build: bool, had_skip: bool) -> void:
+	cards.can_skip = had_skip
+	if had_build:
+		cards.build = _card_build(picks)
+	_card_preview_sprites()
 
 
 func _on_ban(idx: int) -> void:
@@ -1381,10 +1433,13 @@ func _on_ban(idx: int) -> void:
 		return
 	var heading: String = cards.title
 	var head: String = cards.headline
+	var had_build: bool = not cards.build.is_empty()
+	var had_skip: bool = cards.can_skip
 	cards.show_cards(picks, heading, head, true)
 	cards.age = cards.GRACE   # un cambio o un veto deliberado no vuelve a bloquear las cartas
 	cards.rerolls = rerolls
 	cards.bans = bans
+	_redeal_keep(picks, had_build, had_skip)
 
 
 func _fx_cap() -> int:
@@ -1590,8 +1645,9 @@ func _process(delta: float) -> void:
 			_offer_bond(true)
 	ground.center = player.position
 	EVL.tick(self)
-	if zoom_punch != 0.0:
-		zoom_punch = move_toward(zoom_punch, 0.0, delta * 0.3)
+	_rift_fx_tick(delta)
+	if zoom_punch != 0.0 and rift_in_t <= 0.0:
+		zoom_punch = move_toward(zoom_punch, 0.0, delta * (0.3 if rift_out_t <= 0.0 else 0.4))
 		cam.zoom = Vector2(cam_zoom, cam_zoom) * (1.0 + zoom_punch)
 	cam.offset = Vector2(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0)) * shake * (1.0 if shake_on else 0.0)
 	shake = maxf(0.0, shake - 30.0 * delta)
@@ -8586,7 +8642,19 @@ func _offer() -> Array:
 # ---------------------------------------------------------------
 # Vinculos: fusiona movimientos en un solo hueco (player.js)
 # ---------------------------------------------------------------
-const BOND_MAX := 2   # S54: como mucho 2 movimientos vinculados a la vez
+const BOND_MAX := 2   # a bond is always a pair of 2 moves; several pairs can exist at once
+# bond_ids is read two at a time: [a, b, c, d] = pairs a+b and c+d (saves, Team mode and form swaps keep working on it).
+
+
+func _bond_pairs_of(bids: Array) -> Array:
+	var out: Array = []
+	for i in range(0, bids.size() - 1, 2):
+		out.append([String(bids[i]), String(bids[i + 1])])
+	return out
+
+
+func _bond_pairs() -> Array:
+	return _bond_pairs_of(bond_ids)
 
 
 # Atajos de Mejoras: cada movimiento con hueco fijo se coloca en ese numero; si aun
@@ -8644,30 +8712,25 @@ func _arrange(keep: Dictionary = {}) -> void:
 
 
 func _slot_list() -> Array:
-	var out: Array = []
-	var grp: Array = []
-	var added := false
-	for m in player.moves:
-		if bond_ids.has(String(m["id"])):
-			if not added:
-				added = true
-				out.append(grp)
-			grp.append(m)
-		else:
-			out.append([m])
-	return out
+	return _slot_list_of(player.moves, bond_ids)
 
 
 func _slot_list_of(moves: Array, bids: Array) -> Array:
+	var pair_of := {}
+	var prs: Array = _bond_pairs_of(bids)
+	for pi in range(prs.size()):
+		for id in prs[pi]:
+			pair_of[String(id)] = pi
 	var out: Array = []
-	var grp: Array = []
-	var added := false
+	var grp_at := {}   # pair index -> its group in out
 	for m in moves:
-		if bids.has(String(m["id"])):
-			if not added:
-				added = true
-				out.append(grp)
-			grp.append(m)
+		var id: String = String(m["id"])
+		if pair_of.has(id):
+			var pi: int = int(pair_of[id])
+			if not grp_at.has(pi):
+				grp_at[pi] = []
+				out.append(grp_at[pi])
+			(grp_at[pi] as Array).append(m)
 		else:
 			out.append([m])
 	return out
@@ -8683,11 +8746,21 @@ func _bond_options() -> Dictionary:
 	for m in player.moves:
 		if not bond_ids.has(String(m["id"])):
 			loose.append(m)
-	if bond_ids.size() >= 2 and bond_ids.size() < BOND_MAX:
-		return {"mode": "add", "loose": loose} if not loose.is_empty() else {}
-	if bond_ids.is_empty() and loose.size() >= 2:
+	if loose.size() >= 2:
 		return {"mode": "pair", "loose": loose}
 	return {}
+
+
+# A bond that can never be used (fewer than 2 free moves and every move slot taken, so no move can join) turns into
+# one free upgrade choice. Returns true if it converted any. Otherwise the bond stays saved until you learn a move.
+func _bond_convert() -> bool:
+	if bonds <= 0 or not _bond_options().is_empty() or _slot_list().size() < _max_moves():
+		return false
+	var n: int = bonds
+	bonds = 0
+	pending_levels += n
+	_say(L.t("No free moves to pair: the bond becomes a free upgrade"), 3.4)
+	return true
 
 
 func _offer_bond(quiet: bool = false) -> void:
@@ -8695,31 +8768,23 @@ func _offer_bond(quiet: bool = false) -> void:
 		return
 	var opt: Dictionary = _bond_options()
 	if opt.is_empty():
+		if _bond_convert():
+			return
 		if not quiet:
 			_say(L.t("Bond saved: learn another move to use it"), 3.0)
 		return
-	var mode: String = String(opt["mode"])
-	var names: Array = []
-	for m in player.moves:
-		if bond_ids.has(String(m["id"])):
-			names.append(L.t(String(m["name"])))
-	var gname: String = " + ".join(names)
 	var picks: Array = []
 	for m in opt["loose"]:
 		if bond_first != "" and String(m["id"]) == bond_first:
 			continue
 		var d: String = String(m["desc"])
-		if mode == "add":
-			d = L.t("Will fire at the same time as %s.") % gname
-		elif bond_first != "":
+		if bond_first != "":
 			d = L.t("Will fire together with %s. Frees up a slot.") % _move_name(bond_first)
 		picks.append({"cat": "bond", "id": String(m["id"]), "key": "bond:" + String(m["id"]), "w": 1.0,
 			"title": String(m["name"]), "desc": d, "icon": "move:" + String(m.get("recipe", m["id"])),
 			"tag": L.t("Lv.%d") % int(m["lvl"]), "color": _col(m)})
 	var heading: String = L.t("Choose the first move to bond")
-	if mode == "add":
-		heading = L.t("Choose which move joins %s") % gname
-	elif bond_first != "":
+	if bond_first != "":
 		heading = L.t("Which move do you bond with %s?") % _move_name(bond_first)
 	choosing = true
 	Aud.sfx("levelup")
@@ -8741,21 +8806,21 @@ func _parts_of(m: Dictionary) -> Array:
 
 
 func _fuse_pair() -> Array:
-	if bond_ids.size() != 2:
-		return []
-	var out: Array = []
-	for id in bond_ids:
-		for m in player.moves:
-			if String(m["id"]) == String(id):
-				out.append(m)
-	if out.size() != 2 or out[0] == out[1]:
-		return []
-	for m in out:
-		if not bool(m["evolved"]) or int(m["lvl"]) < _max_lvl(m):
-			return []
-	if _parts_of(out[0]).size() + _parts_of(out[1]).size() > FUSE_MAX:
-		return []
-	return out
+	for pr in _bond_pairs():
+		var out: Array = []
+		for id in pr:
+			for m in player.moves:
+				if String(m["id"]) == String(id):
+					out.append(m)
+		if out.size() != 2 or out[0] == out[1]:
+			continue
+		var ready := true
+		for m in out:
+			if not bool(m["evolved"]) or int(m["lvl"]) < _max_lvl(m):
+				ready = false
+		if ready and _parts_of(out[0]).size() + _parts_of(out[1]).size() <= FUSE_MAX:
+			return out
+	return []
 
 
 func _fuse_ready() -> bool:
@@ -8768,7 +8833,7 @@ func _offer_fuse() -> void:
 	var pr: Array = _fuse_pair()
 	if pr.is_empty():
 		return
-	fuse_asked = "+".join(bond_ids)   # se ofrece una sola vez por pareja
+	fuse_asked = "%s+%s" % [String(pr[0]["id"]), String(pr[1]["id"])]   # se ofrece una sola vez por pareja
 	var nm := "%s + %s" % [L.t(String(pr[0]["name"])), L.t(String(pr[1]["name"]))]
 	var picks: Array = [
 		{"cat": "fuse", "id": "yes", "key": "fuse:yes", "w": 1.0, "title": L.t("Fuse"),
@@ -8826,7 +8891,11 @@ func _do_fuse() -> void:
 			continue
 		out.append(m)
 	player.moves = out
-	bond_ids = []
+	var keep_ids: Array = []
+	for pr2 in _bond_pairs():
+		if not (pr2.has(String(a["id"])) or pr2.has(String(b["id"]))):
+			keep_ids.append_array(pr2)
+	bond_ids = keep_ids   # only the fused pair goes: other pairs stay as they are
 	bond_first = ""
 	fuse_asked = ""
 	player.slot = clampi(player.slot, 0, maxi(0, _slot_list().size() - 1))
@@ -8993,10 +9062,9 @@ func _bond_pick(id: String) -> void:
 		_offer_bond(true)
 		return
 	var cur_m: Dictionary = _active_group()[0]
-	if bond_first != "":
-		bond_ids = [bond_first, id]
-	else:
-		bond_ids.append(id)
+	bond_ids.append(bond_first)
+	bond_ids.append(id)
+	var just: Array = [bond_first, id]
 	bond_first = ""
 	bonds = maxi(0, bonds - 1)
 	var sl: Array = _slot_list()
@@ -9014,17 +9082,17 @@ func _bond_pick(id: String) -> void:
 	player.slot = target
 	Aud.sfx("legend")
 	_ring(player.position, 8.0, 130.0, Color("#ff8ad8"), 0.8)
-	_say(L.t("Bond! %d moves at once") % bond_ids.size(), 2.6)
-	_fuse_hint()
+	_say(L.t("Bond! %d moves at once") % 2, 2.6)
+	_fuse_hint(just)
 
 
 # v5.2: si la pareja vinculada no se puede fusionar, dice por que (antes no pasaba nada y no se sabia el motivo).
-func _fuse_hint() -> void:
-	if bond_ids.size() != 2 or mode == "tower":
+func _fuse_hint(pair: Array) -> void:
+	if pair.size() != 2 or mode == "tower":
 		return
 	var why := ""
 	var total := 0
-	for id in bond_ids:
+	for id in pair:
 		for m in player.moves:
 			if String(m["id"]) == String(id):
 				total += _parts_of(m).size()
@@ -9495,6 +9563,8 @@ func _weather_banner() -> String:
 # Grietas y arenas legendarias (rift.js)
 # ---------------------------------------------------------------
 func _update_rift(delta: float) -> void:
+	if rift_in_t > 0.0:
+		return   # being pulled in: the rift stays put until the arena opens
 	if rift != null:
 		if not is_instance_valid(rift) or rift.ttl <= 0.0:
 			if is_instance_valid(rift):
@@ -9502,7 +9572,7 @@ func _update_rift(delta: float) -> void:
 			rift = null
 			_rift_drop_arena()
 		elif rift.t > 1.0 and player.position.distance_to(rift.position) < 42.0 and not player.dead:
-			_arena_begin()
+			_rift_pull_start()
 			return
 	rift_check -= delta * time_k   # reloj de partida (x2 en Hyper)
 	if rift_check > 0.0:
@@ -9686,6 +9756,63 @@ func _legend_def(dex: int) -> Dictionary:
 		"behavior": "ranged" if ranged else "charger", "shotDmg": 18.0 + t / 40.0, "shotCd": 0.9, "range": 300.0}
 
 
+func _rift_pull_start() -> void:
+	rift_in_t = RIFT_IN
+	var ty: String = String(rift_info.get("type", ""))
+	rift_fx_col = Color("#ff3d6e") if bool(rift_info.get("den", false)) else Color.html(String(MD.TYPE_COLOR.get(ty, "#a06bff")))
+	player.invuln = maxf(player.invuln, RIFT_IN + 1.2)
+	player_vel = Vector2.ZERO
+	Aud.sfx("descend")
+	_ring(rift.position, 6.0, 120.0, rift_fx_col, 0.45, 4.0)
+	shake = maxf(shake, 3.0)
+
+
+# Runs every frame (also while the arena opens): the pull-in, then the reveal.
+func _rift_fx_tick(delta: float) -> void:
+	if rift_in_t > 0.0:
+		rift_in_t = maxf(0.0, rift_in_t - delta)
+		var k: float = 1.0 - rift_in_t / RIFT_IN
+		zoom_punch = maxf(zoom_punch, 0.32 * k * k)
+		cam.zoom = Vector2(cam_zoom, cam_zoom) * (1.0 + zoom_punch)
+		if is_instance_valid(rift):
+			player.position = player.position.lerp(rift.position, minf(1.0, delta * 10.0))   # drawn into the rift
+		player.scale = Vector2.ONE * maxf(0.15, 1.0 - 0.85 * k * k)
+		player.rotation = k * k * TAU * 1.25
+		if rift_in_t <= 0.0:
+			player.scale = Vector2.ONE
+			player.rotation = 0.0
+			if is_instance_valid(rift) and not rift_info.is_empty():
+				_arena_begin()
+				_rift_arrive()
+			else:
+				zoom_punch = 0.0
+	elif rift_out_t > 0.0:
+		rift_out_t = maxf(0.0, rift_out_t - delta)
+	hud.rift_iris = (1.0 - rift_in_t / RIFT_IN) if rift_in_t > 0.0 else 0.0
+	hud.rift_open = (1.0 - rift_out_t / RIFT_OUT) if rift_out_t > 0.0 else -1.0
+	hud.rift_fx_col = rift_fx_col
+	hud.rift_intro_t = maxf(0.0, hud.rift_intro_t - delta)
+
+
+func _rift_arrive() -> void:
+	rift_out_t = RIFT_OUT
+	zoom_punch = 0.22   # starts pushed in and eases back out
+	cam.zoom = Vector2(cam_zoom, cam_zoom) * (1.0 + zoom_punch)
+	shake = maxf(shake, 14.0)
+	Aud.sfx("quake")
+	_ring(player.position, 10.0, 260.0, Color.WHITE, 0.55, 5.0)
+	_ring(player.position, 10.0, 380.0, rift_fx_col, 0.8, 4.0)
+	pfx.burst(player.position + Vector2(0.0, -20.0), rift_fx_col, 40, 320.0)
+	pfx.burst(player.position + Vector2(0.0, -20.0), Color.WHITE, 16, 200.0)
+	var boss = ainfo.get("boss")
+	hud.rift_notice = -1.0   # the "A rift has opened!" sign is done: you are inside
+	hud.rift_intro_t = RIFT_INTRO
+	hud.rift_intro_name = String(boss.enemy_name) if boss != null and is_instance_valid(boss) else ""
+	hud.rift_intro_sub = L.t("DYNAMAX DEN") if bool(ainfo.get("den", false)) else (L.t("MEGA RIFT") if bool(ainfo.get("mega", false)) else L.t("LEGENDARY RIFT"))
+	if boss != null and is_instance_valid(boss):
+		_ring(boss.position, 8.0, 160.0, rift_fx_col, 0.7, 4.0)
+
+
 func _arena_begin() -> void:
 	var dex: int = int(rift_info["dex"])
 	var ty: String = String(rift_info["type"])
@@ -9744,7 +9871,7 @@ func _arena_begin() -> void:
 		wx.clear()
 	Aud.sfx("legend")
 	_say((L.t("Dynamax %s challenges you!") if is_den else L.t("%s challenges you!")) % e.enemy_name, 3.0)
-	shake = 10.0
+	shake = maxf(shake, 10.0)
 
 
 # Entrada a una cueva elemental (cave.gd / cave_int.gd): igual que entrar a una grieta, sin jefe ni limite de tiempo.
@@ -9821,11 +9948,9 @@ func _update_arena(delta: float) -> void:
 			_arena_end(false)
 	elif ph == "won":
 		# v5.2: no se sale de la grieta hasta elegir el vínculo pendiente
-		if bonds > 0 and not choosing and not bool(ainfo.get("cave", false)) and _bond_options().is_empty() and not bool(ainfo.get("bond_drop", false)):
-			# Sin movimientos que vincular, el vínculo ganado en la grieta se quita en vez de quedarse guardado
-			ainfo["bond_drop"] = true
-			bonds -= 1
-			_say(L.t("No moves left to bond: the bond is discarded"), 3.0)
+		if bonds > 0 and not choosing and not bool(ainfo.get("cave", false)) and _bond_options().is_empty():
+			# moves already linked as far as they go: the bond becomes a free upgrade instead of being lost
+			_bond_convert()
 		var bond_wait: bool = not bool(ainfo.get("cave", false)) and (choosing or (bonds > 0 and not _bond_options().is_empty()))
 		if not bond_wait or float(ainfo["end"]) > 2.0:
 			ainfo["end"] = float(ainfo["end"]) - delta
@@ -9999,7 +10124,7 @@ func _arena_end(won: bool, timeout: bool = false) -> void:
 			mew.on_leave(won)
 		else:
 			cave.on_leave(won)
-	if won and not was_cave and bonds > 0 and _bond_options().is_empty():
+	if won and not was_cave and bonds > 0 and _bond_options().is_empty() and not _bond_convert():
 		_say(L.t("Bond saved: learn another move to use it"), 3.0)
 	rift_check = 6.0 if mode == "rifts" else RIFT_EVERY
 	rift_miss = 0
@@ -10424,7 +10549,7 @@ class Legend extends Actor:
 		var y: float = -body_h - 14.0
 		draw_rect(Rect2(-w * 0.5 - 1.0, y - 1.0, w + 2.0, 8.0), Color(0, 0, 0, 0.8))
 		draw_rect(Rect2(-w * 0.5, y, w * clampf(hp / max_hp, 0.0, 1.0), 6.0), Color("#ffd65c"))
-		draw_string(ThemeDB.fallback_font, Vector2(-w * 0.5, y - 5.0), lname, HORIZONTAL_ALIGNMENT_LEFT, 120, 11, Color.WHITE)
+		PXF.dstr(self, ThemeDB.fallback_font, Vector2(-w * 0.5, y - 5.0), lname, HORIZONTAL_ALIGNMENT_LEFT, 120, 11, Color.WHITE)
 
 
 # Aura azul circular del escudo del jugador (escudo del descanso de la Torre). Sigue al valor real del escudo
@@ -10541,7 +10666,7 @@ class BuffBadges extends Node2D:
 				draw_polyline(PackedVector2Array([Vector2(px - 3.0, py), Vector2(px, py - 4.0), Vector2(px + 3.0, py)]), Color(0, 0, 0, 0.6 * blink), 3.5)
 				draw_polyline(PackedVector2Array([Vector2(px - 3.0, py), Vector2(px, py - 4.0), Vector2(px + 3.0, py)]), Color(col.r, col.g, col.b, blink), 2.0)
 			if n > 5:
-				draw_string(ThemeDB.fallback_font, Vector2(cx + 35.0, y + 4.0), "x%d" % n, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 11, Color(col.r, col.g, col.b, blink))
+				PXF.dstr(self, ThemeDB.fallback_font, Vector2(cx + 35.0, y + 4.0), "x%d" % n, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 11, Color(col.r, col.g, col.b, blink))
 			y += 24.0
 
 	func _icon(k: String, c: Vector2, col: Color, a: float) -> void:
@@ -11119,10 +11244,10 @@ class Prop extends Node2D:
 				base = Color("#3b2152")
 				edge = Color("#241033")
 				hi = Color("#b06bff")
-			"ice":
-				base = Color("#86cfe8")
-				edge = Color("#4f9cc0")
-				hi = Color("#f2fcff")
+			"ice":   # sticky goo (slows): green, like its burst
+				base = Color("#3f7a2a")
+				edge = Color("#24491a")
+				hi = Color("#a8ec62")
 			"freeze":
 				base = Color("#16466e")
 				edge = Color("#0a2038")
@@ -11148,11 +11273,27 @@ class Prop extends Node2D:
 			edge = edge.lerp(Color(0.2, 0.2, 0.2), 0.7)
 			hi = hi.lerp(Color(0.45, 0.45, 0.45), 0.8)
 		var tm: float = float(Time.get_ticks_msec()) * 0.001
+		var tex: Texture2D = WTex.get_t("trap_" + sub)
+		# the plate: an oval stone pressure plate set into the ground, its core in the trap's colour (assets/world/trap_*.png)
+		if tex != null:
+			var tsz := Vector2(tex.get_width(), tex.get_height()) * WTex.SC
+			var tint := Color(0.55, 0.55, 0.58, 0.85) if off else Color.WHITE
+			draw_texture_rect(tex, Rect2(-tsz * 0.5, tsz), false, tint)
+			if not off:   # the armed core breathes a little light
+				var gl: float = 0.5 + 0.5 * sin(tm * 2.6 + float(get_instance_id() % 7))
+				draw_set_transform(Vector2(0.0, 1.0), 0.0, Vector2(1.0, 0.56))
+				draw_circle(Vector2.ZERO, tsz.x * 0.3, Color(hi.r, hi.g, hi.b, 0.10 + 0.12 * gl))
+				draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		if not off:
 			# Aviso del area real (radio 112) con animacion propia de cada tipo
 			var pul: float = 0.5 + 0.5 * sin(tm * 3.0)
 			var ac := Color(hi.r, hi.g, hi.b, 0.10 + 0.08 * pul)
-			draw_arc(Vector2.ZERO, 112.0, 0.0, TAU, 56, Color(hi.r, hi.g, hi.b, 0.22 + 0.15 * pul), 2.0)
+			# the danger area: a faint fill and a slowly turning dashed ring in the trap's colour
+			draw_circle(Vector2.ZERO, 112.0, Color(hi.r, hi.g, hi.b, 0.05 + 0.03 * pul))
+			var dash_n := 18
+			for di in range(dash_n):
+				var a0: float = tm * 0.25 + float(di) * TAU / float(dash_n)
+				draw_arc(Vector2.ZERO, 112.0, a0, a0 + TAU / float(dash_n) * 0.55, 6, Color(hi.r, hi.g, hi.b, 0.35 + 0.2 * pul), 2.5)
 			match sub:
 				"poison":
 					for i in range(4):
@@ -11170,7 +11311,7 @@ class Prop extends Node2D:
 						draw_line(Vector2.ZERO, q, Color("#fff6a0"), 2.0)
 				"sleep":
 					var zf: float = fposmod(tm * 0.5, 1.0)
-					draw_string(ThemeDB.fallback_font, Vector2(14.0, -20.0 - zf * 30.0), "z", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(hi.r, hi.g, hi.b, 1.0 - zf))
+					PXF.dstr(self, ThemeDB.fallback_font, Vector2(14.0, -20.0 - zf * 30.0), "z", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(hi.r, hi.g, hi.b, 1.0 - zf))
 				"confuse":
 					for i in range(10):
 						var aa: float = tm * 2.0 + float(i) * 0.6
@@ -11179,30 +11320,11 @@ class Prop extends Node2D:
 					for i in range(5):
 						var ff: float = fposmod(tm * 0.8 + float(i) * 0.2, 1.0)
 						draw_circle(Vector2(sin(float(i) * 3.0) * 26.0, -ff * 34.0), 3.5 * (1.0 - ff), Color("#ffb23a", 0.8))
-		var o := Vector2(-4.0 * u, -4.0 * u)
+		if tex != null:
+			return
+		var o := Vector2(-4.0 * u, -4.0 * u)   # fallback if the sprite is missing: the old flat tile
 		draw_rect(Rect2(o, Vector2(8.0 * u, 8.0 * u)), edge)
 		draw_rect(Rect2(o + Vector2(u, u), Vector2(6.0 * u, 6.0 * u)), base)
-		var cells: Array
-		match sub:
-			"poison":   # burbujas
-				cells = [Vector2(2, 2), Vector2(5, 3), Vector2(3, 5), Vector2(5, 6), Vector2(2, 4)]
-			"ice":      # cristal en cruz diagonal
-				cells = [Vector2(2, 2), Vector2(3, 3), Vector2(4, 4), Vector2(5, 5), Vector2(5, 2), Vector2(4, 3), Vector2(3, 4), Vector2(2, 5)]
-			"freeze":   # copo de nieve
-				cells = [Vector2(3, 1), Vector2(4, 1), Vector2(3, 2), Vector2(4, 2), Vector2(1, 3), Vector2(2, 3), Vector2(3, 3), Vector2(4, 3), Vector2(5, 3), Vector2(6, 3), Vector2(1, 4), Vector2(2, 4), Vector2(3, 4), Vector2(4, 4), Vector2(5, 4), Vector2(6, 4), Vector2(3, 5), Vector2(4, 5), Vector2(3, 6), Vector2(4, 6)]
-			"shock":    # rayo
-				cells = [Vector2(4, 1), Vector2(5, 1), Vector2(3, 2), Vector2(4, 2), Vector2(2, 3), Vector2(3, 3), Vector2(4, 3), Vector2(5, 3), Vector2(3, 4), Vector2(4, 4), Vector2(3, 5), Vector2(2, 6)]
-			"sleep":    # una Z
-				cells = [Vector2(2, 2), Vector2(3, 2), Vector2(4, 2), Vector2(5, 2), Vector2(4, 3), Vector2(3, 4), Vector2(2, 5), Vector2(3, 5), Vector2(4, 5), Vector2(5, 5)]
-			"confuse":  # espiral
-				cells = [Vector2(2, 2), Vector2(3, 2), Vector2(4, 2), Vector2(5, 2), Vector2(5, 3), Vector2(5, 4), Vector2(5, 5), Vector2(4, 5), Vector2(3, 5), Vector2(3, 4), Vector2(3, 3), Vector2(4, 3)]
-			_:          # grietas de lava
-				cells = [Vector2(2, 3), Vector2(3, 3), Vector2(3, 4), Vector2(4, 4), Vector2(4, 5), Vector2(5, 5), Vector2(5, 2), Vector2(4, 2)]
-		for c in cells:
-			var sz: float = u * (0.9 if sub == "poison" else 1.0)
-			draw_rect(Rect2(o + (c as Vector2) * u, Vector2(sz, sz)), hi)
-		if sub == "fire" and not off:
-			draw_rect(Rect2(o + Vector2(3.0 * u, 3.0 * u), Vector2(2.0 * u, 2.0 * u)), Color("#ffe27a"))
 
 	# Altar legendario (arte nuevo): 4 estados que se funden segun avanza la invocacion.
 	# El origen del nodo es el centro del circulo (donde te paras).
@@ -11235,7 +11357,7 @@ class Prop extends Node2D:
 			var gold := Color(1.0, 0.82, 0.25)
 			draw_rect(Rect2(-w * 0.5 - 2.0, y - 2.0, w + 4.0, 16.0), Color(0, 0, 0, 0.8))
 			draw_rect(Rect2(-w * 0.5, y, w * ck, 12.0), gold)
-			draw_string(ThemeDB.fallback_font, Vector2(-w * 0.5, y - 6.0), L.t("Summoning"), HORIZONTAL_ALIGNMENT_CENTER, w, 14, Color.WHITE)
+			PXF.dstr(self, ThemeDB.fallback_font, Vector2(-w * 0.5, y - 6.0), L.t("Summoning"), HORIZONTAL_ALIGNMENT_CENTER, w, 14, Color.WHITE)
 
 	func _old_draw() -> void:
 		if kind == "tree":
@@ -11548,7 +11670,7 @@ class Slots extends Node2D:
 				IC.draw_in(self, "star", tile.position + Vector2(tile.size.x - 2.0, 4.0), 12.0)
 			# tecla
 			draw_rect(Rect2(p + Vector2(5.0, 5.0), Vector2(15.0, 15.0)), UIS.INK)
-			draw_string(font, p + Vector2(5.0, 17.0), str(i + 1), HORIZONTAL_ALIGNMENT_CENTER, 15.0, roundi(13.0 * TXS.k()), UIS.TITLE if is_act else UIS.MUTED)
+			PXF.dstr(self, font, p + Vector2(5.0, 17.0), str(i + 1), HORIZONTAL_ALIGNMENT_CENTER, 15.0, roundi(13.0 * TXS.k()), UIS.TITLE if is_act else UIS.MUTED)
 			# varios movimientos en un vinculo: raya de orquidea bajo el icono (los iconos ya se muestran juntos)
 			if int(it.get("n", 1)) > 1:
 				draw_rect(Rect2(tile.position.x, tile.position.y + tile.size.y - 2.0, tile.size.x, 2.0), UIS.ORCHID)
@@ -11562,7 +11684,7 @@ class Slots extends Node2D:
 			var nm_fs: int = roundi(12.0 * TXS.k())
 			while nm_fs > 8 and font.get_string_size(nm_t, HORIZONTAL_ALIGNMENT_LEFT, -1.0, nm_fs).x > SZ - 8.0:
 				nm_fs -= 1
-			draw_string(font, p + Vector2(4.0, 56.0), nm_t, HORIZONTAL_ALIGNMENT_CENTER, SZ - 8.0, nm_fs, UIS.TEXT if is_act else UIS.MUTED)
+			PXF.dstr(self, font, p + Vector2(4.0, 56.0), nm_t, HORIZONTAL_ALIGNMENT_CENTER, SZ - 8.0, nm_fs, UIS.TEXT if is_act else UIS.MUTED)
 			# pips de nivel (cian al llegar al maximo)
 			var mx: int = int(it["max"])
 			var lv: int = int(it["lvl"])
@@ -11679,6 +11801,15 @@ class Orb extends Node2D:
 # ---------------------------------------------------------------
 class Cards extends Node2D:
 	signal chosen(idx: int)
+	# The card screen is laid out for 1280x720 and scaled to the screen: a taller screen (16:10, 4:3) draws it bigger
+	# instead of leaving empty bands. _vps() is the layout size; touches are divided by the same factor.
+	func _vpk() -> float:
+		var r: Vector2 = get_viewport_rect().size
+		return clampf(minf(r.y / 720.0, r.x / 1024.0), 1.0, 1.4)
+
+	func _vps() -> Vector2:
+		return get_viewport_rect().size / _vpk()
+
 	var items: Array = []
 	var sel := 0
 	var open := false
@@ -11729,7 +11860,7 @@ class Cards extends Node2D:
 	# Botones de la pantalla bajo las cartas: Cambiar, Vetar y (en subida de nivel normal) Saltar. Solo se reparten
 	# los visibles (centrados); los demas quedan fuera de pantalla para que no reciban toques.
 	func _btn_rects() -> Array:
-		var vp: Vector2 = get_viewport_rect().size
+		var vp: Vector2 = _vps()
 		var w := 230.0
 		var gap := 16.0
 		var rs0: Array = _rects()
@@ -11799,21 +11930,23 @@ class Cards extends Node2D:
 		queue_redraw()
 
 	func _rects() -> Array:
-		var vp: Vector2 = get_viewport_rect().size
+		var vp: Vector2 = _vps()
 		var n: int = items.size()
 		var gap := 28.0
 		var w: float = minf(280.0, (vp.x - 80.0 - gap * float(n - 1)) / float(maxi(n, 1)))
 		var strip: bool = not build.is_empty()
-		var h: float = clampf(vp.y - 128.0 - 212.0, 300.0, 386.0) if strip else 360.0
+		var h: float = clampf(vp.y - 340.0, 300.0, 430.0) if strip else 380.0
 		var total: float = w * float(n) + gap * float(n - 1)
 		var x0: float = (vp.x - total) * 0.5
-		var y0: float = 128.0 if strip else vp.y * 0.5 - 160.0   # clear of the title and its banner
+		# with the moves strip: centred between the title banner (ends ~108) and the strip (vp.y - 168), at least 150 down
+		var y0: float = maxf(150.0, 108.0 + (vp.y - 168.0 - 108.0 - h) * 0.5) if strip else vp.y * 0.5 - 140.0   # without the strip: clear of the title banner
 		var out: Array = []
 		for i in range(n):
 			out.append(Rect2(x0 + float(i) * (w + gap), y0, w, h))
 		return out
 
 	func _process(delta: float) -> void:
+		scale = Vector2.ONE * _vpk()
 		if open:
 			age += delta
 			if _down and _press_i >= 0 and not _swiped and detail_i < 0:
@@ -12082,6 +12215,8 @@ class Cards extends Node2D:
 	func _input(event: InputEvent) -> void:
 		if not open:
 			return
+		scale = Vector2.ONE * _vpk()
+		var ep: Vector2 = (event.position / _vpk()) if (event is InputEventMouse or event is InputEventScreenTouch or event is InputEventScreenDrag) else Vector2.ZERO
 		if event is InputEventJoypadMotion and event.axis == JOY_AXIS_LEFT_X:
 			if absf(event.axis_value) < 0.3:
 				_axis_free = true
@@ -12090,9 +12225,9 @@ class Cards extends Node2D:
 				_move(1 if event.axis_value > 0.0 else -1)
 			return
 		if event is InputEventScreenDrag and _down and not _swiped and age >= grace_now:
-			if absf(event.position.x - _press_x) > 70.0:
+			if absf(ep.x - _press_x) > 70.0:
 				_swiped = true
-				_move(1 if event.position.x < _press_x else -1)   # swipe left: next card
+				_move(1 if ep.x < _press_x else -1)   # swipe left: next card
 			get_viewport().set_input_as_handled()
 			return
 		if event is InputEventScreenTouch and not event.pressed:
@@ -12127,35 +12262,35 @@ class Cards extends Node2D:
 		if event is InputEventScreenTouch:
 			var brs: Array = _btn_rects()
 			if item_mode:
-				if brs[0].has_point(event.position):
+				if brs[0].has_point(ep):
 					_do_block()
 					return
-				if brs[1].has_point(event.position):
+				if brs[1].has_point(ep):
 					_toggle_lock()
 					return
-			if brs[0].has_point(event.position):
+			if brs[0].has_point(ep):
 				_do_reroll()
 				return
-			if brs[1].has_point(event.position):
+			if brs[1].has_point(ep):
 				_toggle_ban()
 				return
-			if brs.size() > 2 and brs[2].has_point(event.position):
+			if brs.size() > 2 and brs[2].has_point(ep):
 				_do_skip()
 				return
 			var rs: Array = _rects()
 			for i in range(rs.size()):
-				if (rs[i] as Rect2).grow(6.0).has_point(event.position):
+				if (rs[i] as Rect2).grow(6.0).has_point(ep):
 					_down = true
 					_swiped = false
 					_press_i = i
 					_press_sel = sel
 					_press_t = 0.0
-					_press_x = event.position.x
+					_press_x = ep.x
 					return
 			_down = true   # a press outside the cards can still start a swipe
 			_swiped = false
 			_press_i = -1
-			_press_x = event.position.x
+			_press_x = ep.x
 		elif event is InputEventKey:
 			match event.keycode:
 				KEY_1:
@@ -12199,7 +12334,7 @@ class Cards extends Node2D:
 		if not open:
 			return
 		var font := ThemeDB.fallback_font
-		var vp: Vector2 = get_viewport_rect().size
+		var vp: Vector2 = _vps()
 		# the run freezes behind: darker, with a soft light on your Pokemon in the middle
 		draw_rect(Rect2(Vector2.ZERO, vp), Color(0.03, 0.02, 0.07, 0.74))
 		for i in range(5):
@@ -12226,11 +12361,11 @@ class Cards extends Node2D:
 			draw_rect(sb.grow(2.0), Color(0, 0, 0, 0.5))
 			draw_rect(sb, Color(0.09, 0.06, 0.2, 0.96))
 			draw_rect(sb, Color("#ffd65c"), false, 2.0)
-			draw_string(font, Vector2(sb.position.x + 24.0, sub_y + 1.0), sub, HORIZONTAL_ALIGNMENT_LEFT, sw + 4.0, sfs, Color.WHITE)
+			PXF.dstr(self, font, Vector2(sb.position.x + 24.0, sub_y + 1.0), sub, HORIZONTAL_ALIGNMENT_LEFT, sw + 4.0, sfs, Color.WHITE)
 			if ctxt != "":
 				var cx0: float = sb.position.x + 24.0 + sw + 18.0
 				draw_rect(Rect2(cx0 - 10.0, sb.position.y + 6.0, 2.0, sb.size.y - 12.0), Color("#5a5099"))
-				draw_string(font, Vector2(cx0 + 6.0, sub_y + 1.0), ctxt, HORIZONTAL_ALIGNMENT_LEFT, cw, sfs, Color("#ffd65c"))
+				PXF.dstr(self, font, Vector2(cx0 + 6.0, sub_y + 1.0), ctxt, HORIZONTAL_ALIGNMENT_LEFT, cw, sfs, Color("#ffd65c"))
 		else:
 			# new item banner: icon, name and what it does, with a hint for the cards below
 			var bw: float = minf(vp.x - 40.0, 720.0)
@@ -12239,18 +12374,18 @@ class Cards extends Node2D:
 			draw_rect(br, Color("#2a1f4d"))
 			IC.draw_in(self, String(item_new["id"]), br.position + Vector2(22.0, 18.0), 28.0)
 			var hd: String = "%s: %s" % [L.t("NEW"), String(item_new["name"])]
-			draw_string(font, br.position + Vector2(46.0, 16.0), hd, HORIZONTAL_ALIGNMENT_LEFT, bw - 56.0, 17, Color("#ffd65c"))
-			draw_string(font, br.position + Vector2(46.0, 31.0), String(item_new["desc"]), HORIZONTAL_ALIGNMENT_LEFT, bw - 56.0, 13, Color("#f2e9d8"))
+			PXF.dstr(self, font, br.position + Vector2(46.0, 16.0), hd, HORIZONTAL_ALIGNMENT_LEFT, bw - 56.0, 17, Color("#ffd65c"))
+			PXF.dstr(self, font, br.position + Vector2(46.0, 31.0), String(item_new["desc"]), HORIZONTAL_ALIGNMENT_LEFT, bw - 56.0, 13, Color("#f2e9d8"))
 		if chain_total > 1:
 			# what this run of level-ups has given you so far
 			var tb := Rect2(vp.x - 268.0, 26.0, 244.0, 30.0 + 20.0 * float(maxi(1, mini(4, chain_taken.size()))))
 			draw_rect(tb, Color(0.08, 0.06, 0.16, 0.92))
 			draw_rect(tb, Color("#5a5099"), false, 2.0)
-			draw_string(font, tb.position + Vector2(12.0, 21.0), L.t("Taken this level-up"), HORIZONTAL_ALIGNMENT_LEFT, tb.size.x - 20.0, 15, Color("#b4aed6"))
+			PXF.dstr(self, font, tb.position + Vector2(12.0, 21.0), L.t("Taken this level-up"), HORIZONTAL_ALIGNMENT_LEFT, tb.size.x - 20.0, 15, Color("#b4aed6"))
 			if chain_taken.is_empty():
-				draw_string(font, tb.position + Vector2(12.0, 42.0), "—", HORIZONTAL_ALIGNMENT_LEFT, -1.0, 16, Color("#8f88b8"))
+				PXF.dstr(self, font, tb.position + Vector2(12.0, 42.0), "—", HORIZONTAL_ALIGNMENT_LEFT, -1.0, 16, Color("#8f88b8"))
 			for k in range(mini(4, chain_taken.size())):
-				draw_string(font, tb.position + Vector2(12.0, 42.0 + 20.0 * float(k)), "✓ " + String(chain_taken[k]), HORIZONTAL_ALIGNMENT_LEFT, tb.size.x - 20.0, 15, Color("#6fd08a"))
+				PXF.dstr(self, font, tb.position + Vector2(12.0, 42.0 + 20.0 * float(k)), "✓ " + String(chain_taken[k]), HORIZONTAL_ALIGNMENT_LEFT, tb.size.x - 20.0, 15, Color("#6fd08a"))
 		var rs: Array = _rects()
 		for i in range(rs.size()):
 			_draw_card(i, rs[i], font)
@@ -12284,8 +12419,8 @@ class Cards extends Node2D:
 			_draw_detail(font, vp, items[detail_i])
 
 	func _ds2(font: Font, p: Vector2, t: String, al: HorizontalAlignment, w: float, sz: int, col: Color) -> void:
-		draw_string(font, p + Vector2(0.0, 2.0), t, al, w, sz, Color(0, 0, 0, 0.65))
-		draw_string(font, p, t, al, w, sz, col)
+		PXF.dstr(self, font, p + Vector2(0.0, 2.0), t, al, w, sz, Color(0, 0, 0, 0.65))
+		PXF.dstr(self, font, p, t, al, w, sz, col)
 
 	# Rarity frame: bronze (common), silver (rare / new moves), purple (epic), gold (legendary, evolutions, special cards).
 	func _frame_of(it: Dictionary) -> String:
@@ -12332,7 +12467,7 @@ class Cards extends Node2D:
 			var pill := Rect2(r.position.x + 28.0, r.end.y + 10.0, r.size.x - 56.0, 32.0)
 			draw_rect(pill, Color("#ffd65c"))
 			draw_rect(pill, Color("#fff1a8"), false, 2.0)
-			draw_string(font, pill.position + Vector2(0.0, 23.0), L.t("Tap again to choose"), HORIZONTAL_ALIGNMENT_CENTER, pill.size.x, 18, Color("#2b1a00"))
+			PXF.dstr(self, font, pill.position + Vector2(0.0, 23.0), L.t("Tap again to choose"), HORIZONTAL_ALIGNMENT_CENTER, pill.size.x, 18, Color("#2b1a00"))
 
 	func _draw_back(r: Rect2) -> void:
 		draw_rect(r.grow(3.0), Color("#5a5099"))
@@ -12372,8 +12507,8 @@ class Cards extends Node2D:
 		var ink: Color = Color("#2b1a00") if legend else (Color("#4a2f12") if paper else Color.WHITE)
 		draw_rect(Rect2(r.position, Vector2(r.size.x, 34.0)), Color(tag_col.r, tag_col.g, tag_col.b, 0.35))
 		var tag_txt: String = L.t("Upgrade") if String(it["cat"]) == "up" else L.t(String(it["tag"]))   # the level change is in the title
-		draw_string(font, r.position + Vector2(12.0, 24.0), tag_txt, HORIZONTAL_ALIGNMENT_LEFT, r.size.x - 46.0, 19, Color("#2b1a00") if legend else Color.WHITE)
-		draw_string(font, r.position + Vector2(r.size.x - 26.0, 24.0), str(i + 1), HORIZONTAL_ALIGNMENT_LEFT, -1.0, 20, Color("#8fa8cc"))
+		PXF.dstr(self, font, r.position + Vector2(12.0, 24.0), tag_txt, HORIZONTAL_ALIGNMENT_LEFT, r.size.x - 46.0, 19, Color("#2b1a00") if legend else Color.WHITE)
+		PXF.dstr(self, font, r.position + Vector2(r.size.x - 26.0, 24.0), str(i + 1), HORIZONTAL_ALIGNMENT_LEFT, -1.0, 20, Color("#8fa8cc"))
 		if String(it["cat"]) == "stat" and it.has("tier"):
 			for pk in range(int(it["tier"]) + 1):
 				var pc := Vector2(r.position.x + r.size.x - 44.0 - float(pk) * 11.0, r.position.y + 17.0)
@@ -12414,7 +12549,7 @@ class Cards extends Node2D:
 					y += 32.0
 				draw_rect(Rect2(bx, y, bw2, 24.0), Color(bc.r, bc.g, bc.b, 0.22))
 				draw_rect(Rect2(bx, y, bw2, 24.0), bc, false, 1.5)
-				draw_string(font, Vector2(bx + 7.0, y + 18.0), bt, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 16, bc.lightened(0.4) if not dark else Color("#2b1a00"))
+				PXF.dstr(self, font, Vector2(bx + 7.0, y + 18.0), bt, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 16, bc.lightened(0.4) if not dark else Color("#2b1a00"))
 				bx += bw2 + 6.0
 			y += 36.0
 		# exact numbers: "Damage 22 -> 27" rows for move upgrades, "now -> after" for stat cards
@@ -12424,15 +12559,15 @@ class Cards extends Node2D:
 			draw_line(Vector2(r.position.x + 14.0, y - 8.0), Vector2(r.end.x - 14.0, y - 8.0), Color("#3a3262"), 2.0)
 			for rw in rows:
 				y += 34.0
-				draw_string(font, Vector2(r.position.x + 16.0, y), L.t(String(rw[0])), HORIZONTAL_ALIGNMENT_LEFT, 110.0, 19, Color("#b4aed6"))
+				PXF.dstr(self, font, Vector2(r.position.x + 16.0, y), L.t(String(rw[0])), HORIZONTAL_ALIGNMENT_LEFT, 110.0, 19, Color("#b4aed6"))
 				# value columns sized to the text, so "0.52 s > 0.39 s" never touches the arrow
 				var vw: float = font.get_string_size(String(rw[1]), HORIZONTAL_ALIGNMENT_LEFT, -1.0, 20).x
 				var nw: float = font.get_string_size(String(rw[2]), HORIZONTAL_ALIGNMENT_LEFT, -1.0, 20).x
 				var vx: float = r.end.x - 16.0 - nw - 26.0 - vw
-				draw_string(font, Vector2(vx, y), String(rw[1]), HORIZONTAL_ALIGNMENT_LEFT, -1.0, 20, Color("#f2e9d8"))
+				PXF.dstr(self, font, Vector2(vx, y), String(rw[1]), HORIZONTAL_ALIGNMENT_LEFT, -1.0, 20, Color("#f2e9d8"))
 				var ax: float = vx + vw + 8.0
 				draw_colored_polygon(PackedVector2Array([Vector2(ax, y - 14.0), Vector2(ax + 10.0, y - 8.0), Vector2(ax, y - 2.0)]), Color("#ffd65c"))
-				draw_string(font, Vector2(ax + 15.0, y), String(rw[2]), HORIZONTAL_ALIGNMENT_LEFT, -1.0, 20, Color("#6fd08a"))
+				PXF.dstr(self, font, Vector2(ax + 15.0, y), String(rw[2]), HORIZONTAL_ALIGNMENT_LEFT, -1.0, 20, Color("#6fd08a"))
 			y += 22.0
 		elif not dl.is_empty():
 			var dr := Rect2(Vector2(r.position.x + 14.0, y), Vector2(r.size.x - 28.0, 36.0))
@@ -12443,16 +12578,16 @@ class Cards extends Node2D:
 			var bw3: float = font.get_string_size(bt2, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 22).x
 			var aw3: float = font.get_string_size(at2, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 22).x
 			var gx: float = dr.position.x + (dr.size.x - (bw3 + aw3 + 30.0)) * 0.5
-			draw_string(font, Vector2(gx, dr.position.y + 26.0), bt2, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 22, Color("#b4aed6"))
+			PXF.dstr(self, font, Vector2(gx, dr.position.y + 26.0), bt2, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 22, Color("#b4aed6"))
 			var ax2: float = gx + bw3 + 8.0
 			draw_colored_polygon(PackedVector2Array([Vector2(ax2, dr.position.y + 11.0), Vector2(ax2 + 11.0, dr.position.y + 18.0), Vector2(ax2, dr.position.y + 25.0)]), Color("#ffd65c"))
-			draw_string(font, Vector2(ax2 + 19.0, dr.position.y + 26.0), at2, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 22, Color("#6fd08a"))
+			PXF.dstr(self, font, Vector2(ax2 + 19.0, dr.position.y + 26.0), at2, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 22, Color("#6fd08a"))
 			y = dr.end.y + 22.0
 		var lines: int = maxi(1, int((r.end.y - (26.0 if OS.has_feature("mobile") else 8.0) - y) / font.get_height(22)))   # whole lines that fit inside the card
 		draw_multiline_string(font, Vector2(r.position.x + 16.0, y + 20.0), L.t(String(it["desc"])), HORIZONTAL_ALIGNMENT_CENTER, r.size.x - 32.0, 22, lines,
 			Color("#5a3d1c") if paper else (Color("#3a2600") if legend else Color("#f2e9d8")))
 		if OS.has_feature("mobile"):   # phones: hold a card for its full text
-			draw_string(font, Vector2(r.position.x, r.end.y - 10.0), L.t("Hold for details"), HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 15, Color("#8f88b8") if not dark else Color("#5a3d1c"))
+			PXF.dstr(self, font, Vector2(r.position.x, r.end.y - 10.0), L.t("Hold for details"), HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 15, Color("#8f88b8") if not dark else Color("#5a3d1c"))
 
 	# The strip of your build under the cards; the highlighted card's slot glows.
 	func _draw_build(font: Font, vp: Vector2) -> void:
@@ -12468,7 +12603,7 @@ class Cards extends Node2D:
 		var box := Rect2(x0, y, w, 90.0)
 		draw_rect(box, Color(0.07, 0.05, 0.14, 0.95))
 		draw_rect(box, Color("#5a5099"), false, 2.0)
-		draw_string(font, box.position + Vector2(16.0, 21.0), L.t("Your moves"), HORIZONTAL_ALIGNMENT_LEFT, -1.0, 15, Color("#b4aed6"))
+		PXF.dstr(self, font, box.position + Vector2(16.0, 21.0), L.t("Your moves"), HORIZONTAL_ALIGNMENT_LEFT, -1.0, 15, Color("#b4aed6"))
 		var hl: int = int(items[sel].get("slot_hl", -1)) if sel < items.size() and age >= grace_now else -1
 		for i in range(mx):
 			var sr := Rect2(x0 + 16.0 + float(i) * (sw + 8.0), y + 32.0, sw, 48.0)
@@ -12481,15 +12616,15 @@ class Cards extends Node2D:
 				var nfs: int = 17
 				while nfs > 12 and font.get_string_size(String(sd["name"]), HORIZONTAL_ALIGNMENT_LEFT, -1.0, nfs).x > sw - 52.0:
 					nfs -= 1   # long names shrink to fit their slot
-				draw_string(font, sr.position + Vector2(46.0, 21.0), String(sd["name"]), HORIZONTAL_ALIGNMENT_LEFT, sw - 50.0, nfs, Color.WHITE)
-				draw_string(font, sr.position + Vector2(46.0, 40.0), (L.t("Evolved") if bool(sd.get("evolved", false)) else L.t("Lv %d") % int(sd["lvl"])), HORIZONTAL_ALIGNMENT_LEFT, -1.0, 16, Color("#6fd08a"))
+				PXF.dstr(self, font, sr.position + Vector2(46.0, 21.0), String(sd["name"]), HORIZONTAL_ALIGNMENT_LEFT, sw - 50.0, nfs, Color.WHITE)
+				PXF.dstr(self, font, sr.position + Vector2(46.0, 40.0), (L.t("Evolved") if bool(sd.get("evolved", false)) else L.t("Lv %d") % int(sd["lvl"])), HORIZONTAL_ALIGNMENT_LEFT, -1.0, 16, Color("#6fd08a"))
 			else:
-				draw_string(font, sr.position + Vector2(0.0, 30.0), L.t("+ New move here") if hot else L.t("Empty slot"), HORIZONTAL_ALIGNMENT_CENTER, sw, 15, Color("#ffd65c") if hot else Color("#5a5480"))
+				PXF.dstr(self, font, sr.position + Vector2(0.0, 30.0), L.t("+ New move here") if hot else L.t("Empty slot"), HORIZONTAL_ALIGNMENT_CENTER, sw, 15, Color("#ffd65c") if hot else Color("#5a5480"))
 			if hot:
 				var tx: float = sr.position.x + sw * 0.5
 				draw_colored_polygon(PackedVector2Array([Vector2(tx - 10.0, sr.position.y - 14.0), Vector2(tx + 10.0, sr.position.y - 14.0), Vector2(tx, sr.position.y - 2.0)]), Color("#ffd65c"))
 		var ix: float = x0 + 16.0 + float(mx) * (sw + 8.0) + 16.0
-		draw_string(font, Vector2(ix, y + 21.0), L.t("Items"), HORIZONTAL_ALIGNMENT_LEFT, -1.0, 15, Color("#b4aed6"))
+		PXF.dstr(self, font, Vector2(ix, y + 21.0), L.t("Items"), HORIZONTAL_ALIGNMENT_LEFT, -1.0, 15, Color("#b4aed6"))
 		for i in range(icap):
 			var ir := Rect2(ix + float(i) * (iw + 8.0), y + 32.0, iw, 48.0)
 			draw_rect(ir, Color("#1c1833"))
@@ -12497,7 +12632,7 @@ class Cards extends Node2D:
 			if i < its.size():
 				IC.draw_in(self, String(its[i]), ir.get_center(), 32.0)
 			else:
-				draw_string(font, ir.position + Vector2(0.0, 32.0), "+", HORIZONTAL_ALIGNMENT_CENTER, iw, 22, Color("#5a5480"))
+				PXF.dstr(self, font, ir.position + Vector2(0.0, 32.0), "+", HORIZONTAL_ALIGNMENT_CENTER, iw, 22, Color("#5a5480"))
 
 	# Held card: everything it says, untruncated.
 	func _draw_detail(font: Font, vp: Vector2, it: Dictionary) -> void:
@@ -12508,21 +12643,21 @@ class Cards extends Node2D:
 		draw_rect(r.grow(3.0), fc[0])
 		draw_rect(r, Color("#1c1833"))
 		IC.draw_in(self, String(it.get("icon", "star")), r.position + Vector2(52.0, 56.0), 56.0)
-		draw_string(font, r.position + Vector2(100.0, 46.0), L.t(String(it["title"])), HORIZONTAL_ALIGNMENT_LEFT, w - 120.0, 26, Color.WHITE)
-		draw_string(font, r.position + Vector2(100.0, 74.0), L.t(String(it["tag"])), HORIZONTAL_ALIGNMENT_LEFT, w - 120.0, 17, fc[1])
+		PXF.dstr(self, font, r.position + Vector2(100.0, 46.0), L.t(String(it["title"])), HORIZONTAL_ALIGNMENT_LEFT, w - 120.0, 26, Color.WHITE)
+		PXF.dstr(self, font, r.position + Vector2(100.0, 74.0), L.t(String(it["tag"])), HORIZONTAL_ALIGNMENT_LEFT, w - 120.0, 17, fc[1])
 		var y: float = r.position.y + 118.0
 		for b in it.get("badges", []):
-			draw_string(font, Vector2(r.position.x + 24.0, y), "• " + String(b[0]), HORIZONTAL_ALIGNMENT_LEFT, w - 48.0, 17, (b[1] as Color).lightened(0.3))
+			PXF.dstr(self, font, Vector2(r.position.x + 24.0, y), "• " + String(b[0]), HORIZONTAL_ALIGNMENT_LEFT, w - 48.0, 17, (b[1] as Color).lightened(0.3))
 			y += 24.0
 		for rw in it.get("rows", []):
-			draw_string(font, Vector2(r.position.x + 24.0, y), "%s:  %s  →  %s" % [L.t(String(rw[0])), String(rw[1]), String(rw[2])], HORIZONTAL_ALIGNMENT_LEFT, w - 48.0, 18, Color("#6fd08a"))
+			PXF.dstr(self, font, Vector2(r.position.x + 24.0, y), "%s:  %s  →  %s" % [L.t(String(rw[0])), String(rw[1]), String(rw[2])], HORIZONTAL_ALIGNMENT_LEFT, w - 48.0, 18, Color("#6fd08a"))
 			y += 26.0
 		var dl: Array = it.get("delta", [])
 		if not dl.is_empty():
-			draw_string(font, Vector2(r.position.x + 24.0, y), "%s  →  %s" % [String(dl[0]), String(dl[1])], HORIZONTAL_ALIGNMENT_LEFT, w - 48.0, 18, Color("#6fd08a"))
+			PXF.dstr(self, font, Vector2(r.position.x + 24.0, y), "%s  →  %s" % [String(dl[0]), String(dl[1])], HORIZONTAL_ALIGNMENT_LEFT, w - 48.0, 18, Color("#6fd08a"))
 			y += 26.0
 		draw_multiline_string(font, Vector2(r.position.x + 24.0, y + 10.0), L.t(String(it["desc"])), HORIZONTAL_ALIGNMENT_LEFT, w - 48.0, 19, -1, Color("#f2e9d8"))
-		draw_string(font, Vector2(r.position.x, r.end.y - 14.0), L.t("Let go to close"), HORIZONTAL_ALIGNMENT_CENTER, w, 15, Color("#8f88b8"))
+		PXF.dstr(self, font, Vector2(r.position.x, r.end.y - 14.0), L.t("Let go to close"), HORIZONTAL_ALIGNMENT_CENTER, w, 15, Color("#8f88b8"))
 
 
 	# Carta legendaria: fondo de oro con brillo diagonal que recorre la carta y destellos.
@@ -12552,7 +12687,7 @@ class Cards extends Node2D:
 		var pad: bool = Input.get_connected_joypads().size() > 0
 		var by2: float = r.size.y * 0.5 + 7.0
 		if not pad:
-			draw_string(font, r.position + Vector2(0.0, by2), txt, HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 20, Color.WHITE)
+			PXF.dstr(self, font, r.position + Vector2(0.0, by2), txt, HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 20, Color.WHITE)
 			return
 		var rx := RegEx.new()
 		rx.compile("\\s*\\[[^\\]]*\\]")
@@ -12560,7 +12695,7 @@ class Cards extends Node2D:
 		var tw: float = font.get_string_size(clean, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 20).x
 		var isz := 30.0
 		var x0: float = r.position.x + (r.size.x - (tw + 8.0 + isz)) * 0.5
-		draw_string(font, Vector2(x0, r.position.y + by2), clean, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 20, Color.WHITE)
+		PXF.dstr(self, font, Vector2(x0, r.position.y + by2), clean, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 20, Color.WHITE)
 		draw_texture_rect(PADI.tex(PAD.btn("cancel" if action == "skip" else action)), Rect2(Vector2(x0 + tw + 8.0, r.position.y + (r.size.y - isz) * 0.5), Vector2(isz, isz)), false)
 
 
@@ -12588,7 +12723,7 @@ class Cards extends Node2D:
 				draw_texture_rect(p["i"], Rect2(Vector2(x, y - 21.0), Vector2(isz, isz)), false)
 				x += isz
 			else:
-				draw_string(font, Vector2(x, y), String(p["t"]), HORIZONTAL_ALIGNMENT_LEFT, -1.0, fs, col)
+				PXF.dstr(self, font, Vector2(x, y), String(p["t"]), HORIZONTAL_ALIGNMENT_LEFT, -1.0, fs, col)
 				x += font.get_string_size(String(p["t"]), HORIZONTAL_ALIGNMENT_LEFT, -1.0, fs).x
 
 
@@ -12621,8 +12756,8 @@ class Floater extends Node2D:
 		var k: float = clampf(age / life, 0.0, 1.0)
 		var a: float = clampf(1.0 - k * k, 0.0, 1.0)
 		var font := ThemeDB.fallback_font
-		draw_string_outline(font, Vector2(-30.0, 0.0), L.t(text), HORIZONTAL_ALIGNMENT_CENTER, 60.0, size, 4, Color(0, 0, 0, a))
-		draw_string(font, Vector2(-30.0, 0.0), L.t(text), HORIZONTAL_ALIGNMENT_CENTER, 60.0, size, Color(color.r, color.g, color.b, a))
+		PXF.dstro(self, font, Vector2(-30.0, 0.0), L.t(text), HORIZONTAL_ALIGNMENT_CENTER, 60.0, size, 4, Color(0, 0, 0, a))
+		PXF.dstr(self, font, Vector2(-30.0, 0.0), L.t(text), HORIZONTAL_ALIGNMENT_CENTER, 60.0, size, Color(color.r, color.g, color.b, a))
 
 
 
@@ -12906,6 +13041,19 @@ class Minimap extends Node2D:
 		draw_colored_polygon(PackedVector2Array([q + Vector2(0, -r - 2), q + Vector2(r + 2, r + 1), q + Vector2(-r - 2, r + 1)]), edge)
 		draw_colored_polygon(PackedVector2Array([q + Vector2(0, -r), q + Vector2(r, r - 1), q + Vector2(-r, r - 1)]), fill)
 
+	# Minimap trap: a spiked plate (four points, like a caltrop) so it never reads as a chest, altar or spring.
+	func _trap_mark(q: Vector2, fill: Color) -> void:
+		var pts := PackedVector2Array()
+		var pts2 := PackedVector2Array()
+		for i in range(8):
+			var an: float = float(i) * TAU / 8.0 + PI / 8.0
+			var rr: float = 6.5 if i % 2 == 0 else 3.0
+			pts.append(q + Vector2.from_angle(an) * (rr + 1.6))
+			pts2.append(q + Vector2.from_angle(an) * rr)
+		draw_colored_polygon(pts, UIS.INK)
+		draw_colored_polygon(pts2, fill)
+		draw_rect(Rect2(q - Vector2(1.0, 1.0), Vector2(2.0, 2.0)), Color(1, 1, 1, 0.9))
+
 	func _sq(q: Vector2, r: float, fill: Color, edge: Color = UIS.INK) -> void:
 		draw_rect(Rect2(q - Vector2(r + 1.5, r + 1.5), Vector2(r * 2.0 + 3.0, r * 2.0 + 3.0)), edge)
 		draw_rect(Rect2(q - Vector2(r, r), Vector2(r * 2.0, r * 2.0)), fill)
@@ -12938,8 +13086,8 @@ class Minimap extends Node2D:
 		draw_rect(Rect2(MX, 4.0, MW, 18.0), Color(UIS.INK, 0.7))
 		draw_rect(Rect2(MX + 4.0, 10.0, 6.0, 6.0), UIS.WAVE)
 		var bname: String = L.t(String(g.biome_name(g.biome))).to_upper()
-		draw_string(font, Vector2(MX + 16.0, 18.0), bname, HORIZONTAL_ALIGNMENT_LEFT, MW - 110.0, 12, UIS.MUTED)
-		draw_string(font, Vector2(MX, 18.0), "%d, %d" % [floori(px), floori(py)], HORIZONTAL_ALIGNMENT_RIGHT, MW - 6.0, 12, UIS.TEXT)
+		PXF.dstr(self, font, Vector2(MX + 16.0, 18.0), bname, HORIZONTAL_ALIGNMENT_LEFT, MW - 110.0, 12, UIS.MUTED)
+		PXF.dstr(self, font, Vector2(MX, 18.0), "%d, %d" % [floori(px), floori(py)], HORIZONTAL_ALIGNMENT_RIGHT, MW - 6.0, 12, UIS.TEXT)
 		# cruces de rejilla cada 8 tiles
 		var gx0: int = floori((px - float(VW) * 0.5) / 8.0)
 		var gx1: int = ceili((px + float(VW) * 0.5) / 8.0)
@@ -12992,21 +13140,23 @@ class Minimap extends Node2D:
 				if k == "trap":
 					if d > trap_r or p.cd > 900.0:
 						continue
-					var tc := Color("#ff8a2b")
+					var tc := Color("#ff8a2e")   # same colours as the plates' signs
 					match String(p.sub):
 						"poison":
-							tc = Color("#a35cff")
+							tc = Color("#c27cff")
 						"ice":
-							tc = Color("#5fd8ff")
+							tc = Color("#a8ec62")
 						"freeze":
-							tc = Color("#2f8fe0")
+							tc = Color("#7fd6ff")
 						"shock":
 							tc = Color("#ffe14d")
 						"sleep":
 							tc = Color("#b9b6ff")
 						"confuse":
 							tc = Color("#ff7ad9")
-					_tri(q, 4.5, tc)
+					# trap: its danger area as a faint ring, and a little spiked plate in the trap's colour
+					draw_arc(q, maxf(5.0, TRAP_R * ts), 0.0, TAU, 20, Color(tc, 0.45), 1.0)
+					_trap_mark(q, tc)
 					continue
 				if d > radar and not explored.has(_tile_of(p.position)):
 					continue
@@ -13105,10 +13255,10 @@ class Minimap extends Node2D:
 
 class Hud extends Node2D:
 	func _ds(f: Font, p: Vector2, t: String, a: int, w: float, sz: int, c: Color) -> void:
-		draw_string(f, p, t, a, w, roundi(float(sz) * TXS.k()), c)
+		PXF.dstr(self, f, p, t, a, w, roundi(float(sz) * TXS.k()), c)
 
 	func _dso(f: Font, p: Vector2, t: String, a: int, w: float, sz: int, o: int, c: Color) -> void:
-		draw_string_outline(f, p, t, a, w, roundi(float(sz) * TXS.k()), o, c)
+		PXF.dstro(self, f, p, t, a, w, roundi(float(sz) * TXS.k()), o, c)
 
 	var hp := 1.0
 	var max_hp := 1.0
@@ -13166,6 +13316,12 @@ class Hud extends Node2D:
 	var weather_text := ""
 	var banner := ""
 	var fusion_t := 0.0
+	var rift_iris := 0.0        # 0..1 while being pulled into a rift (the screen closes in)
+	var rift_open := -1.0       # 0..1 while the arena opens (-1 = not opening)
+	var rift_fx_col := Color("#a06bff")
+	var rift_intro_t := 0.0
+	var rift_intro_name := ""
+	var rift_intro_sub := ""
 	var fusion_name := ""
 	var coins := 0
 	var balls := 0
@@ -13307,11 +13463,11 @@ class Hud extends Node2D:
 		var k: float = clampf(vp.x / 1280.0, 0.72, 1.0) * sc_stats
 		var cols := 3
 		var rows: int = 0 if stats_compact else ceili(float(stats.size()) / float(cols))
-		var pw: float = 214.0 if stats_compact else 282.0
+		var pw: float = 224.0 if stats_compact else 300.0
 		var cw: float = (pw - 20.0) / float(cols)
-		var rh := 31.0   # row pitch
-		var gy := 34.0   # grid top
-		var ph: float = gy + float(rows) * rh + 6.0
+		var rh := 39.0   # row pitch: room between a stat's name, its value and the next row
+		var gy := 42.0   # grid top, clear of the combo bar
+		var ph: float = gy + float(rows) * rh + 4.0
 		var org := Vector2(vp.x - pw * k - 14.0 - ins.z, 134.0 + ins.y + (20.0 * float(ch_lines.size()) + 8.0 if ch_mode else 0.0) + (52.0 * float(team.size()) + 8.0 if not team.is_empty() else 0.0))
 		org += off_stats
 		stats_bottom = org.y + ph * k
@@ -13321,12 +13477,12 @@ class Hud extends Node2D:
 		# Combo (kill streak bonus) + DPS in one header line
 		var mcol: Color = UIS.EMBER if mom_frac > 0.0 else UIS.MUTED
 		var ctxt: String = L.t("Combo").to_upper()
-		_ds(font, Vector2(12.0, 21.0), ctxt, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 14, UIS.TITLE)
+		_ds(font, Vector2(12.0, 22.0), ctxt, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 14, UIS.TITLE)
 		var cwid: float = font.get_string_size(ctxt, HORIZONTAL_ALIGNMENT_LEFT, -1.0, roundi(14.0 * TXS.k())).x
-		_ds(font, Vector2(12.0 + cwid + 8.0, 21.0), "×%.2f" % mom_k, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 14, mcol)
-		_ds(font, Vector2(12.0, 21.0), "DPS %d" % roundi(dps), HORIZONTAL_ALIGNMENT_RIGHT, pw - 24.0, 14, UIS.GOLD)
-		draw_rect(Rect2(12.0, 26.0, pw - 24.0, 4.0), UIS.INK)
-		draw_rect(Rect2(12.0, 26.0, (pw - 24.0) * mom_frac, 4.0), UIS.EMBER)
+		_ds(font, Vector2(12.0 + cwid + 8.0, 22.0), "×%.2f" % mom_k, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 14, mcol)
+		_ds(font, Vector2(12.0, 22.0), "DPS %d" % roundi(dps), HORIZONTAL_ALIGNMENT_RIGHT, pw - 24.0, 14, UIS.GOLD)
+		draw_rect(Rect2(12.0, 29.0, pw - 24.0, 4.0), UIS.INK)
+		draw_rect(Rect2(12.0, 29.0, (pw - 24.0) * mom_frac, 4.0), UIS.EMBER)
 		# grid
 		for i in range(0 if stats_compact else stats.size()):
 			var row: Array = stats[i]
@@ -13336,18 +13492,22 @@ class Hud extends Node2D:
 			var ft: float = float(_sp_flash[i]) if i < _sp_flash.size() else 0.0
 			if ft > 0.0:
 				var fcol: Color = UIS.up() if st > 0 else (UIS.bad() if st < 0 else UIS.TEXT)
-				draw_rect(Rect2(cx - 5.0, cy - 2.0, cw - 4.0, rh - 1.0), Color(fcol, 0.3 * (ft / 1.5) * flash_k))
+				draw_rect(Rect2(cx - 5.0, cy - 3.0, cw - 4.0, rh - 3.0), Color(fcol, 0.3 * (ft / 1.5) * flash_k))
 			var vcol: Color = UIS.up() if st > 0 else (UIS.bad() if st < 0 else UIS.TEXT)
 			var lab: String = String(row[0]).to_upper()
-			var lfs: int = 10
-			while lfs > 7 and font.get_string_size(lab, HORIZONTAL_ALIGNMENT_LEFT, -1.0, lfs).x > cw - 8.0:
-				lfs -= 1
-			_ds(font, Vector2(cx, cy + 9.0), lab, HORIZONTAL_ALIGNMENT_LEFT, -1.0, lfs, UIS.MUTED)
+			# small labels are drawn at 12 px with the thin font: measure them the same way, and squeeze wide ones
+			var lw: float = PXF.font_for(font, 12).get_string_size(lab, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 12).x
+			if lw > cw - 6.0:
+				draw_set_transform(org + Vector2(cx, cy + 9.0) * k, 0.0, Vector2(k * (cw - 6.0) / lw, k))
+				_ds(font, Vector2.ZERO, lab, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 12, UIS.MUTED)
+				draw_set_transform(org, 0.0, Vector2(k, k))
+			else:
+				_ds(font, Vector2(cx, cy + 9.0), lab, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 12, UIS.MUTED)
 			var val: String = String(row[1])
-			_ds(font, Vector2(cx, cy + 24.0), val, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 15, vcol)
+			_ds(font, Vector2(cx, cy + 28.0), val, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 15, vcol)
 			if String(row[2]) != "":
 				var vw: float = font.get_string_size(val, HORIZONTAL_ALIGNMENT_LEFT, -1.0, roundi(15.0 * TXS.k())).x
-				_ds(font, Vector2(cx + vw + 4.0, cy + 24.0), String(row[2]), HORIZONTAL_ALIGNMENT_LEFT, -1.0, 10, UIS.GOLD if st > 0 else UIS.MUTED)
+				_ds(font, Vector2(cx + vw + 4.0, cy + 28.0), String(row[2]), HORIZONTAL_ALIGNMENT_LEFT, -1.0, 10, UIS.GOLD if st > 0 else UIS.MUTED)
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 	# Caja de objetos y mejoras: 4 filas con icono, nombre y nivel; con mas de 4 cambia de pagina cada 4 s.
@@ -13432,7 +13592,7 @@ class Hud extends Node2D:
 			var sk: float = clampf(vp.x / 1280.0, 0.72, 1.0) * sc_stats
 			var lsc: float = maxf(sc_plate, sc_radar)
 			var lb := Rect2(0.0, 0.0, 340.0 * lsc + ins.x, 20.0 + 264.0 * lsc + ins.y + 30.0)
-			var rb := Rect2(vp.x - 360.0 * sk - ins.z, 0.0, 400.0, 134.0 + ins.y + (74.0 if stats_compact else 182.0) * sk + 40.0)
+			var rb := Rect2(vp.x - 360.0 * sk - ins.z, 0.0, 400.0, 134.0 + ins.y + (82.0 if stats_compact else 206.0) * sk + 40.0)
 			if lb.has_point(q):
 				q.y = lb.end.y
 			elif show_stats and rb.has_point(q):
@@ -13640,6 +13800,58 @@ class Hud extends Node2D:
 			cx += cw
 
 
+	# Rift entry: the screen closes around you (swirling edge in the rift's colour), then opens with a flash.
+	func draw_rift_iris(vp: Vector2) -> void:
+		var c: Vector2 = vp * 0.5
+		var diag: float = vp.length() * 0.55
+		var tm: float = float(Time.get_ticks_msec()) * 0.001
+		var r := -1.0
+		var flash := 0.0
+		if rift_iris > 0.0:
+			var k: float = rift_iris * rift_iris
+			r = lerpf(diag, 26.0, k)
+		elif rift_open >= 0.0:
+			var ko: float = 1.0 - pow(1.0 - rift_open, 3.0)
+			r = lerpf(0.0, diag, ko)
+			flash = pow(1.0 - rift_open, 2.0)
+		if r < 0.0:
+			return
+		var dark := Color(0.03, 0.01, 0.08, 0.94)
+		var w: float = diag - r + 40.0
+		draw_arc(c, r + w * 0.5, 0.0, TAU, 72, dark, w)
+		if r > 2.0:
+			var ec: Color = rift_fx_col
+			draw_arc(c, r, 0.0, TAU, 64, Color(ec.r, ec.g, ec.b, 0.9), 6.0)
+			draw_arc(c, r + 9.0, 0.0, TAU, 64, Color(ec.r, ec.g, ec.b, 0.35), 10.0)
+			for i in range(6):   # swirling streaks on the edge
+				var a0: float = tm * 5.0 + float(i) * TAU / 6.0
+				draw_arc(c, r + 4.0, a0, a0 + 0.55, 10, Color(1, 1, 1, 0.7), 3.0)
+		if flash > 0.0:
+			draw_rect(Rect2(Vector2.ZERO, vp), Color(rift_fx_col.lightened(0.6), 0.75 * flash))
+
+	# "LEGENDARY RIFT" + the legendary's name, sliding in at the top after the arena opens.
+	func draw_rift_intro(f: Font, vp: Vector2) -> void:
+		if rift_intro_t <= 0.0 or rift_intro_name == "":
+			return
+		var tt: float = 2.6 - rift_intro_t
+		var fin: float = clampf(tt / 0.3, 0.0, 1.0)
+		var fout: float = clampf(rift_intro_t / 0.45, 0.0, 1.0)
+		var al: float = fin * fout
+		var e: float = 1.0 - pow(1.0 - fin, 3.0)
+		var cy: float = vp.y * 0.66 + 40.0 * (1.0 - e)   # below the middle: clear of the boss bar and the challenge line
+		var bw: float = minf(vp.x * 0.7, 620.0) * e
+		var col: Color = rift_fx_col
+		draw_rect(Rect2(vp.x * 0.5 - bw * 0.5, cy - 44.0, bw, 88.0), Color(0.05, 0.02, 0.12, 0.82 * al))
+		draw_rect(Rect2(vp.x * 0.5 - bw * 0.5, cy - 46.0, bw, 4.0), Color(col.r, col.g, col.b, al))
+		draw_rect(Rect2(vp.x * 0.5 - bw * 0.5, cy + 42.0, bw, 4.0), Color(col.r, col.g, col.b, al))
+		var sx: float = vp.x * 0.5 - bw * 0.5 + fmod(tt * 900.0, bw + 160.0) - 80.0
+		if sx < vp.x * 0.5 + bw * 0.5 - 60.0:
+			draw_rect(Rect2(maxf(sx, vp.x * 0.5 - bw * 0.5), cy - 42.0, 60.0, 84.0), Color(1, 1, 1, 0.10 * al))
+		PXF.dstr(self, f, Vector2(0.0, cy - 14.0), rift_intro_sub, HORIZONTAL_ALIGNMENT_CENTER, vp.x, roundi(18.0 * TXS.k()), Color(col.lightened(0.45), al))
+		var fs: int = roundi(40.0 * TXS.k() * (1.0 + 0.15 * (1.0 - e)))
+		PXF.dstro(self, f, Vector2(0.0, cy + 30.0), rift_intro_name, HORIZONTAL_ALIGNMENT_CENTER, vp.x, fs, 10, Color(col.darkened(0.6), al))
+		PXF.dstr(self, f, Vector2(0.0, cy + 30.0), rift_intro_name, HORIZONTAL_ALIGNMENT_CENTER, vp.x, fs, Color(1.0, 0.97, 0.88, al))
+
 	func draw_fusion(f: Font, vp: Vector2) -> void:
 		if fusion_t <= 0.0:
 			return
@@ -13660,12 +13872,12 @@ class Hud extends Node2D:
 		var wob: float = 1.0 + 0.04 * sin(tt * 14.0)
 		var fs: int = roundi(float(sz) * wob)
 		var pos := Vector2(0.0, cy + float(fs) * 0.33)
-		draw_string_outline(f, pos + Vector2(0.0, 5.0), txt, HORIZONTAL_ALIGNMENT_CENTER, vp.x, fs, 14, Color(0.25, 0.0, 0.35, al))
-		draw_string_outline(f, pos, txt, HORIZONTAL_ALIGNMENT_CENTER, vp.x, fs, 10, Color(1.0, 0.45, 0.85, al))
-		draw_string(f, pos, txt, HORIZONTAL_ALIGNMENT_CENTER, vp.x, fs, Color(1.0, 0.97, 0.8, al))
+		PXF.dstro(self, f, pos + Vector2(0.0, 5.0), txt, HORIZONTAL_ALIGNMENT_CENTER, vp.x, fs, 14, Color(0.25, 0.0, 0.35, al))
+		PXF.dstro(self, f, pos, txt, HORIZONTAL_ALIGNMENT_CENTER, vp.x, fs, 10, Color(1.0, 0.45, 0.85, al))
+		PXF.dstr(self, f, pos, txt, HORIZONTAL_ALIGNMENT_CENTER, vp.x, fs, Color(1.0, 0.97, 0.8, al))
 		if fusion_name != "":
-			draw_string_outline(f, Vector2(0.0, cy + 62.0), fusion_name, HORIZONTAL_ALIGNMENT_CENTER, vp.x, roundi(26.0 * TXS.k()), 6, Color(0.1, 0.0, 0.2, al))
-			draw_string(f, Vector2(0.0, cy + 62.0), fusion_name, HORIZONTAL_ALIGNMENT_CENTER, vp.x, roundi(26.0 * TXS.k()), Color(1.0, 0.9, 0.5, al))
+			PXF.dstro(self, f, Vector2(0.0, cy + 62.0), fusion_name, HORIZONTAL_ALIGNMENT_CENTER, vp.x, roundi(26.0 * TXS.k()), 6, Color(0.1, 0.0, 0.2, al))
+			PXF.dstr(self, f, Vector2(0.0, cy + 62.0), fusion_name, HORIZONTAL_ALIGNMENT_CENTER, vp.x, roundi(26.0 * TXS.k()), Color(1.0, 0.9, 0.5, al))
 
 	func draw_rift(font: Font, vp: Vector2) -> void:
 		if rift_ttl >= 0.0:
@@ -14094,6 +14306,7 @@ class Hud extends Node2D:
 		var font := ThemeDB.fallback_font
 		var vp: Vector2 = get_viewport_rect().size
 		var ins: Vector4 = DSP.insets(get_tree())
+		draw_rift_iris(vp)
 		draw_vignette(vp)
 		draw_z(font, vp)
 		draw_dyn(font, vp)
@@ -14194,6 +14407,7 @@ class Hud extends Node2D:
 			_ds(font, Vector2(0.0, banner_y(vp)), L.t(banner), HORIZONTAL_ALIGNMENT_CENTER, vp.x, 20, Color("#ffffff"))
 		draw_join(font, vp)
 		draw_fusion(font, vp)
+		draw_rift_intro(font, vp)
 		draw_rift(font, vp)
 		draw_rift_notice(font, vp)
 		draw_thief_notice(font, vp)
@@ -14424,7 +14638,7 @@ class TeamUi extends Node2D:
 		var nx: int = m._team_next()
 		if nx >= 0:
 			var font := ThemeDB.fallback_font
-			draw_string(font, c + Vector2(-70.0, 74.0), String(m.team[nx]["name"]), HORIZONTAL_ALIGNMENT_CENTER, 140.0, roundi(16.0 * TXS.k()), Color(1, 1, 1, a))
+			PXF.dstr(self, font, c + Vector2(-70.0, 74.0), String(m.team[nx]["name"]), HORIZONTAL_ALIGNMENT_CENTER, 140.0, roundi(16.0 * TXS.k()), Color(1, 1, 1, a))
 		if m.swap_cd > 0.0:
 			draw_arc(c, 60.0, -PI / 2.0, -PI / 2.0 + TAU * (m.swap_cd / 3.0), 32, Color(1, 0.4, 0.4, 0.9), 4.0)
 

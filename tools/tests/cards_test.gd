@@ -95,6 +95,18 @@ func _init() -> void:
 	for i in range(3):
 		await process_frame
 	check("the chain ends and its tally clears", m.pending_levels == 0 and m.cards.chain_taken.is_empty() and m.cards.chain_total == 1)
+	# ---------- reroll keeps the same screen ----------
+	m.pending_levels = 1
+	m.rerolls = 2
+	while not m.cards.open:
+		await process_frame
+	var r_before: Array = m.cards._rects()
+	var strip_before: bool = not m.cards.build.is_empty()
+	m._on_reroll()
+	await process_frame
+	var r_after: Array = m.cards._rects()
+	check("after a reroll the moves strip and Skip are still there", strip_before and not m.cards.build.is_empty() and m.cards.can_skip)
+	check("after a reroll the cards keep their place and size", (r_before[0] as Rect2).is_equal_approx(r_after[0] as Rect2), "%s vs %s" % [r_before[0], r_after[0]])
 	print("RESULT: ", "PASS" if ok else "FAIL")
 	quit(0 if ok else 1)
 

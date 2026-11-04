@@ -11,6 +11,7 @@ const DLY = preload("res://scripts/daily.gd")
 const IVS = preload("res://scripts/ivs.gd")
 const L = preload("res://scripts/lang.gd")
 const MD = preload("res://scripts/moves_data.gd")
+const MST = preload("res://scripts/megastone.gd")
 const FUS = preload("res://scripts/fusions.gd")
 const TD = preload("res://scripts/types_data.gd")
 const KCX = preload("res://scripts/kecleon.gd")
@@ -100,6 +101,9 @@ var dex_sel := 25
 var dex_grid: GridContainer
 var dex_page_lbl: Label
 var dex_detail: VBoxContainer
+var dex_dsc: ScrollContainer     # scroll of the Pokémon details (right stick scrolls it)
+var dex_left: Control            # left panel: portrait, details, Choose
+var dex_gsc: ScrollContainer     # scroll holding the collection grid
 var dex_prev: Preview
 var gacha_region := 1
 var gacha_box: VBoxContainer
@@ -128,6 +132,9 @@ var ban_open := false
 var tm_open := false
 var main_prev: Preview
 var main_card: PanelContainer
+var main_tiles: Array = []       # the six section tiles (heights follow the screen, see _main_fit)
+var main_gp: Button
+var main_prev_k := 7.5           # sprite scale of the stage Pokémon, follows the stage height
 var main_info: Label
 var main_stats: Label
 var main_chips: Dictionary = {}
@@ -835,6 +842,17 @@ func _build_theme() -> void:
 	theme_main.set_constant("separation", "VBoxContainer", 10)
 	theme_main.set_constant("separation", "HBoxContainer", 10)
 	theme_main.set_constant("scrollbar_h_separation", "ScrollContainer", 26)   # keep content clear of the scroll bar
+	# dropdown lists (type, Show, sort, grid size...): the item under the controller / mouse gets a bright gold box
+	var pmp := _sb(UIS.INK, UIS.EDGE, 3)
+	pmp.set_content_margin_all(6)
+	theme_main.set_stylebox("panel", "PopupMenu", pmp)
+	var pmh := _sb(C_BTN_H, UIS.GOLD, 3)
+	pmh.set_content_margin_all(4)
+	theme_main.set_stylebox("hover", "PopupMenu", pmh)
+	theme_main.set_color("font_color", "PopupMenu", UIS.TEXT)
+	theme_main.set_color("font_hover_color", "PopupMenu", UIS.TITLE)
+	theme_main.set_constant("v_separation", "PopupMenu", 10)
+	theme_main.set_constant("h_separation", "PopupMenu", 8)
 	theme = theme_main
 
 
@@ -1286,7 +1304,7 @@ func _panel(parent: Node) -> VBoxContainer:
 func _label(text: String, size: int = 22, col: Color = Color.WHITE) -> Label:
 	var l := Label.new()
 	l.text = text
-	l.add_theme_font_size_override("font_size", size)
+	l.add_theme_font_size_override("font_size", PXF.style_small(l, size))   # small text: thin font at 12 px
 	l.add_theme_color_override("font_color", col)
 	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	return l
@@ -1326,6 +1344,8 @@ func _show(name: String) -> void:
 		dex_jump = true
 	if name == "up" and cur != "up":
 		up_dex = int(SV.d["selected"])
+	if name == "gacha" and cur != "gacha" and not SV.banner_open(gacha_region):
+		gacha_region = _newest_open_region()
 	_close_up_picker()
 	cur = name
 	if name != "dex":
@@ -1443,6 +1463,12 @@ func _touch_pass(node: Node) -> void:
 
 # Stick izquierdo y cruceta (mantenidos): desplazan las listas del Lexico y de Misiones/logros/Cristales Z (el contenido no tiene botones que enfocar).
 func _stick_scroll(delta: float) -> void:
+	if cur == "dex" and dex_dsc != null and is_visible_in_tree() and not _popup_open():
+		for pd in Input.get_connected_joypads():
+			var ry: float = Input.get_joy_axis(int(pd), JOY_AXIS_RIGHT_Y)
+			if absf(ry) > 0.25:   # right stick: scroll the Pokémon details (faster the further it is pushed)
+				dex_dsc.scroll_vertical += int(signf(ry) * (absf(ry) - 0.25) / 0.75 * 1100.0 * delta + signf(ry))
+				break
 	if not (cur == "lexicon" or cur == "goals") or not screens.has(cur):
 		return
 	if gacha_result != null and gacha_result.visible:
@@ -1843,6 +1869,9 @@ func _input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		call_deferred("_follow_focus")
 		return
+	if cur == "dex" and _dex_side_nav(event):
+		get_viewport().set_input_as_handled()
+		return
 	if _grid_nav(event):
 		get_viewport().set_input_as_handled()
 		call_deferred("_follow_focus")
@@ -1864,6 +1893,58 @@ func _input(event: InputEvent) -> void:
 			return
 		_go_back()
 		get_viewport().set_input_as_handled()
+
+
+# Pokémon list with a controller: Left on a card in the first column jumps to the details panel (Train IVs, Change nature,
+# Choose...), the control nearest in height; Right from the details panel, when nothing else is to the right, goes back to the
+# selected card.
+func _dex_side_nav(event: InputEvent) -> bool:
+	var left: bool = event.is_action_pressed("ui_left", true)
+	var right: bool = event.is_action_pressed("ui_right", true)
+	if not (left or right) or _popup_open() or listening != "" or dex_left == null or dex_grid == null:
+		return false
+	var f: Control = get_viewport().gui_get_focus_owner()
+	if f == null or f is LineEdit:
+		return false
+	var fr: Rect2 = f.get_global_rect()
+	if left and f.get_parent() == dex_grid:
+		var ix: int = dex_grid.get_children().find(f)
+		if ix < 0 or ix % maxi(1, dex_grid.columns) != 0:
+			return false
+		var all: Array = []
+		_focusables(dex_left, all)
+		var clip: Rect2 = dex_dsc.get_global_rect() if dex_dsc != null else Rect2()
+		var best: Control = null
+		var bd := INF
+		for c in all:
+			var cr: Rect2 = (c as Control).get_global_rect()
+			if dex_dsc != null and dex_dsc.is_ancestor_of(c) and not clip.intersects(cr):
+				continue   # scrolled out of view
+			var dd: float = absf(cr.get_center().y - fr.get_center().y) + absf(cr.get_center().x - fr.position.x) * 0.15
+			if dd < bd:
+				bd = dd
+				best = c
+		if best != null:
+			best.grab_focus()
+			Aud.sfx("hover")
+			return true
+		return false
+	if right and dex_left.is_ancestor_of(f):
+		var all2: Array = []
+		_focusables(dex_left, all2)
+		for c in all2:
+			var cr2: Rect2 = (c as Control).get_global_rect()
+			if c != f and cr2.get_center().x > fr.end.x - 2.0 and minf(fr.end.y, cr2.end.y) - maxf(fr.position.y, cr2.position.y) > 1.0:
+				return false   # another control on the same row (Train IVs -> Change nature)
+		var tgt: Control = dex_cards.get(dex_sel) if dex_cards.has(dex_sel) else null
+		if tgt == null and dex_grid.get_child_count() > 0:
+			tgt = dex_grid.get_child(0) as Control
+		if tgt != null:
+			tgt.grab_focus()
+			Aud.sfx("hover")
+			call_deferred("_follow_focus")
+			return true
+	return false
 
 
 # Focusable controls under a node (visible, enabled), used by _column_nav.
@@ -2093,13 +2174,14 @@ func _type_text(dex: int) -> String:
 # ---------------------------------------------------------------
 func _build_main() -> void:
 	var s: Control = _screen("main")
+	s.resized.connect(_main_fit)
+	main_tiles.clear()
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 28)
 	s.add_child(row)
 	# columna izquierda: titulo, escenario con el Pokemon y marcas personales
 	var left := VBoxContainer.new()
 	left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	left.alignment = BoxContainer.ALIGNMENT_CENTER
 	left.add_theme_constant_override("separation", 6)
 	row.add_child(left)
 	if is_instance_valid(main_title):
@@ -2129,8 +2211,10 @@ func _build_main() -> void:
 	var cbx: StyleBoxFlat = _shad(UIS.box(UIS.INK, UIS.EDGE, 3, false), 10, Vector2(0, 6), 0.6)
 	cbx.set_content_margin_all(3)
 	card.add_theme_stylebox_override("panel", cbx)
-	card.custom_minimum_size = Vector2(0, 440 if _compact() else 320)   # squarer screens have room for a taller stage
+	card.custom_minimum_size = Vector2(0, 260)
+	card.size_flags_vertical = Control.SIZE_EXPAND_FILL   # the stage takes the column's spare height (see _main_fit)
 	left.add_child(card)
+	card.resized.connect(_main_stage_fit)
 	var stage := StageBG.new()   # escenario bajo el Pokemon (el Pokemon se anade despues, encima)
 	stage.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	card.add_child(stage)
@@ -2180,7 +2264,6 @@ func _build_main() -> void:
 	# columna derecha: Continuar + mosaico de secciones (la franja de color indica el grupo)
 	var right := VBoxContainer.new()
 	right.custom_minimum_size = Vector2(540 if _compact() else 500, 0)
-	right.alignment = BoxContainer.ALIGNMENT_CENTER
 	right.add_theme_constant_override("separation", 10)
 	row.add_child(right)
 	resume_btn = _btn("", func(): _resume_run(), Vector2(0, 84 if _compact() else 70))
@@ -2215,18 +2298,96 @@ func _build_main() -> void:
 	for r in rows:
 		var hr := HBoxContainer.new()
 		hr.add_theme_constant_override("separation", 10)
+		hr.size_flags_vertical = Control.SIZE_EXPAND_FILL   # the two tile rows share the column's spare height
 		right.add_child(hr)
 		for info in r:
 			var key: String = String(info[0])
 			var tb: Button = _tile(String(info[1]), String(info[2]), info[3], func(): _menu_pick(key), 156.0 if _compact() else 116.0)
 			hr.add_child(tb)
+			main_tiles.append(tb)
 			main_btns[key] = tb
 			if key == "goals":
 				goals_btn = tb
 	var gp := _tile("TM Gachapon", "gcoin", UIS.ORCHID, func(): _menu_pick("gachapon"), 80.0 if _compact() else 64.0, true)
 	right.add_child(gp)
+	main_gp = gp
 	main_btns["gachapon"] = gp
+	_main_fit.call_deferred()
 	main_play_btn = cont_btn   # el foco por defecto es "Continuar": una pulsacion y a jugar
+
+
+# Main menu sizes are shares of the screen height, so 16:9, 16:10 and 4:3 screens are all filled the same way:
+# the stage and the tile column take 88% of the room under the tagline, split into fixed fractions.
+func _main_fit() -> void:
+	if not screens.has("main") or main_card == null or cont_btn == null:
+		return
+	var s: Control = screens["main"]
+	var ins: Vector4 = DSP.insets(get_tree())
+	# clear of the tagline above and the version line below; the stage and the tile rows stretch to fill the rest
+	var pad: int = int(get_viewport_rect().size.y * 0.06)   # breathing room above and below (6% of the screen height)
+	s.add_theme_constant_override("margin_top", 100 + pad + int(ins.y))
+	s.add_theme_constant_override("margin_bottom", 64 + pad + int(ins.w))
+	var use: float = s.size.y - float(100 + pad + int(ins.y)) - float(64 + pad + int(ins.w))   # height inside the margins
+	if use < 200.0:
+		return
+	var k: float = clampf(use / 488.0, 0.85, 1.6)   # 1.0 on a 1280x720 screen
+	# the right column as shares of its height: Resume (when shown), Play again, two tile rows (the rest), TM Gachapon
+	var res_on: bool = resume_btn != null and resume_btn.visible
+	var avail: float = use - 10.0 * (4.0 if res_on else 3.0)
+	cont_btn.custom_minimum_size.y = avail * (0.16 if res_on else 0.20)
+	cont_btn.add_theme_font_size_override("font_size", roundi(24.0 * minf(k, 1.25)))
+	if resume_btn != null:
+		resume_btn.custom_minimum_size.y = avail * 0.13
+		resume_btn.add_theme_font_size_override("font_size", roundi(20.0 * minf(k, 1.25)))
+	for tb in main_tiles:
+		(tb as Control).custom_minimum_size.y = 90.0
+		if (tb as Control).has_meta("lbl"):
+			((tb as Control).get_meta("lbl") as Label).set_meta("fs", roundi(20.0 * minf(k, 1.25)))
+	if main_gp != null:
+		main_gp.custom_minimum_size.y = avail * 0.11
+		if main_gp.has_meta("lbl"):
+			(main_gp.get_meta("lbl") as Label).set_meta("fs", roundi(20.0 * minf(k, 1.25)))
+	for key in main_chips:
+		(main_chips[key] as Label).add_theme_font_size_override("font_size", roundi(22.0 * minf(k, 1.25)))
+	_main_text_fit.call_deferred()
+	_main_stage_fit.call_deferred()
+
+
+# Tile captions shrink until they fit their tile ("Missions (1)" on a narrow tile never spills over the edge).
+func _main_text_fit() -> void:
+	var tile_fs := 99   # the six tiles share one size: the largest at which every caption fits
+	for tb in main_tiles:
+		tile_fs = mini(tile_fs, _fit_fs(tb as Control, 20.0))
+	for tb in main_tiles:
+		if (tb as Control).has_meta("lbl"):
+			var tlb: Label = (tb as Control).get_meta("lbl")
+			tlb.add_theme_font_size_override("font_size", PXF.style_small(tlb, tile_fs))
+	if main_gp != null and main_gp.has_meta("lbl"):
+		var glb: Label = main_gp.get_meta("lbl")
+		glb.add_theme_font_size_override("font_size", PXF.style_small(glb, _fit_fs(main_gp, 64.0)))
+
+
+func _fit_fs(b: Control, pad: float) -> int:
+	if not b.has_meta("lbl"):
+		return 99
+	var lb: Label = b.get_meta("lbl")
+	var fs: int = int(lb.get_meta("fs", 20))
+	var room: float = b.size.x - pad
+	var f: Font = lb.get_theme_font("font")
+	while fs > 12 and room > 0.0 and f.get_string_size(lb.text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x > room:
+		fs -= 1
+	return fs
+
+
+# The partner grows with the stage (7.5 on a 1280x720 screen).
+func _main_stage_fit() -> void:
+	if main_card == null:
+		return
+	var nk: float = clampf(7.5 * main_card.size.y / 400.0, 6.5, 11.0)
+	if absf(nk - main_prev_k) > 0.25 and is_instance_valid(main_prev):
+		main_prev_k = nk
+		_main_preview()
+	main_prev_k = nk
 
 
 # Mosaico del menu principal: icono grande arriba, nombre debajo y una franja del color del grupo.
@@ -2303,6 +2464,7 @@ func _tile(text: String, icon: String, accent: Color, cb: Callable, h: float, wi
 func _set_tile_text(b: Button, t: String) -> void:
 	if b.has_meta("lbl"):
 		(b.get_meta("lbl") as Label).text = t
+		_main_text_fit.call_deferred()   # a longer caption ("Missions (1)") may need a smaller size
 	else:
 		b.text = t
 
@@ -2602,6 +2764,22 @@ func _start_mode(mode: String, region_ok: bool = false) -> void:
 
 
 # Training (Pokémon page): vitamins raise one IV by IVS.VIT_STEP for IVS.VIT_COST coins.
+# After training an IV or changing a nature: redraw the screen it was opened from (Pokémon list or Upgrades).
+func _iv_refresh() -> void:
+	if cur == "up":
+		_refresh_up()   # the panel keeps the controller focus; closing it returns to the button (_iv_close)
+	else:
+		_dex_detail()
+
+
+func _iv_close(fk: String) -> void:
+	gacha_result.visible = false
+	if cur == "up":
+		var b: Node = screens["up"].find_child("UpTrainIVs" if fk == "iv" else "UpNature", true, false)
+		if b is Control:
+			_gf(b as Control)
+
+
 func _iv_train_ui(dx: int) -> void:
 	_clear(gacha_result)
 	var c := CenterContainer.new()
@@ -2631,13 +2809,13 @@ func _iv_train_ui(dx: int) -> void:
 				Aud.sfx("levelup")
 				PG.check()
 				_update_top()
-				_dex_detail()
+				_iv_refresh()
 				_iv_train_ui(dx), Vector2(560, 48))
 		b.disabled = cur >= IVS.IV_MAX or int(SV.d["coins"]) < IVS.VIT_COST
 		v.add_child(b)
 		if first == null and not b.disabled:
 			first = b
-	var close := _btn_close("Close", func(): gacha_result.visible = false, Vector2(220, 50))
+	var close := _btn_close("Close", func(): _iv_close("iv"), Vector2(220, 50))
 	v.add_child(close)
 	gacha_result.visible = true
 	_gf(first if first != null else close)
@@ -2676,15 +2854,15 @@ func _mint_ui(dx: int) -> void:
 				Aud.sfx("confirm")
 				PG.check()
 				_update_top()
-				_dex_detail()
-				gacha_result.visible = false, Vector2(230, 58))
+				_iv_refresh()
+				_iv_close("nat"), Vector2(230, 58))
 		b.add_theme_font_size_override("font_size", 16)
 		b.disabled = nn == curn or (not have_n and int(SV.d["coins"]) < IVS.MINT_COST)
 		_gold_btn(b, nn == curn or have_n)
 		grid.add_child(b)
 		if first == null and not b.disabled:
 			first = b
-	var close := _btn_close("Close", func(): gacha_result.visible = false, Vector2(220, 50))
+	var close := _btn_close("Close", func(): _iv_close("nat"), Vector2(220, 50))
 	v.add_child(close)
 	gacha_result.visible = true
 	_gf(first if first != null else close)
@@ -3680,21 +3858,27 @@ func _refresh_chal() -> void:
 
 
 
+# The partner on the main-menu stage, sized by main_prev_k (set from the stage height in _main_fit).
+func _main_preview() -> void:
+	var dex: int = int(SV.d["selected"])
+	var shn: bool = SV.shiny_wanted(dex)
+	if is_instance_valid(main_prev):
+		main_prev.queue_free()
+	main_prev = Preview.new()
+	main_prev.custom_minimum_size = Vector2(380, 300) * (main_prev_k / 7.5)
+	main_card.add_child(main_prev)
+	main_prev.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	main_prev.setup(dex, shn, main_prev_k)
+	if is_instance_valid(main_news_ov):
+		main_card.move_child(main_news_ov, main_card.get_child_count() - 1)
+
+
 func _refresh_main() -> void:
 	var dex: int = int(SV.d["selected"])
 	if not SV.owns(dex) and SV.owned_count() > 0:
 		dex = int(SV.d["owned"].keys()[0])
 		SV.d["selected"] = dex
-	var shn: bool = SV.shiny_wanted(dex)
-	if is_instance_valid(main_prev):
-		main_prev.queue_free()
-	main_prev = Preview.new()
-	main_prev.custom_minimum_size = Vector2(380, 300)   # a bit bigger on the main menu stage
-	main_card.add_child(main_prev)
-	main_prev.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	main_prev.setup(dex, shn, 7.5)
-	if is_instance_valid(main_news_ov):
-		main_card.move_child(main_news_ov, main_card.get_child_count() - 1)
+	_main_preview()
 	main_info.text = "%s · %s" % [_name_of(dex), _type_text(dex)]
 	var ttl: String = String(SV.d.get("title", ""))
 	if ttl != "":
@@ -3702,6 +3886,7 @@ func _refresh_main() -> void:
 	if is_instance_valid(resume_btn):
 		var snap: Dictionary = RS.load_snap()
 		resume_btn.visible = not snap.is_empty()
+		_main_fit.call_deferred()   # the column shares change with the Resume button
 		if not snap.is_empty():
 			resume_btn.text = "%s\n%s" % [L.t("Resume run"), RS.describe(snap)]
 	if is_instance_valid(cont_btn):
@@ -4199,9 +4384,9 @@ class DexBack extends Control:
 var dex_search := ""
 var dex_sort := 0
 var dex_type := ""   # filtro por tipo ("" = todos)
-var dex_show := 0    # 0 all, 1 owned, 2 unowned, 3 shiny (shiny version owned)
+var dex_show := 0    # 0 all, 1 owned, 2 unowned, 3 shiny (shiny version owned), 4 can Mega Evolve / Primal / Crowned, 5 favorites
 var dex_grid_sz := 1   # 0 small, 1 medium, 2 large cards
-const DEX_SHOW := ["All Pokémon", "Owned", "Unowned", "Shiny"]
+const DEX_SHOW := ["All Pokémon", "Owned", "Unowned", "Shiny", "Mega capable", "Favorites"]   # Mega capable: Mega, Primal and Crowned forms
 const DEX_GRID := ["Small grid", "Medium grid", "Large grid"]
 const DEX_GRID_K := [0.8, 1.0, 1.3]   # card scale per grid size
 const DEX_GRID_CR := [[10, 5], [8, 4], [6, 3]]   # columns, rows on wide screens
@@ -4269,6 +4454,7 @@ func _dex_load_filters() -> void:
 	dex_sort = clampi(int(st.get("dex_sort", 0)), 0, 4)
 	dex_show = clampi(int(st.get("dex_show", 0)), 0, DEX_SHOW.size() - 1)
 	dex_grid_sz = clampi(int(st.get("dex_grid", 1)), 0, DEX_GRID.size() - 1)
+	dex_only_owned = bool(st.get("dex_mine", false))
 
 
 func _dex_save_filters() -> void:
@@ -4278,6 +4464,7 @@ func _dex_save_filters() -> void:
 	st["dex_sort"] = dex_sort
 	st["dex_show"] = dex_show
 	st["dex_grid"] = dex_grid_sz
+	st["dex_mine"] = dex_only_owned
 	SV.save()
 
 
@@ -4297,6 +4484,7 @@ func _build_dex() -> void:
 	dst.content_margin_bottom = 10
 	dp.add_theme_stylebox_override("panel", dst)
 	row.add_child(dp)
+	dex_left = dp
 	var lv := VBoxContainer.new()
 	lv.add_theme_constant_override("separation", 8)
 	dp.add_child(lv)
@@ -4335,6 +4523,7 @@ func _build_dex() -> void:
 	dsc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	dsc.follow_focus = true
 	lv.add_child(dsc)
+	dex_dsc = dsc
 	dex_detail = VBoxContainer.new()
 	dex_detail.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	dex_detail.add_theme_constant_override("separation", 8)
@@ -4372,6 +4561,13 @@ func _build_dex() -> void:
 	dex_prog_bar.custom_minimum_size = Vector2(0, 14)
 	dex_prog_bar.add_theme_stylebox_override("fill", _sb(C_GOLD, Color.TRANSPARENT, 0))
 	ph.add_child(dex_prog_bar)
+	var own := CheckButton.new()   # "Mine only": on top of any Show / type / region filter
+	own.name = "DexMine"
+	own.text = "Mine only"
+	own.add_theme_font_size_override("font_size", 18)
+	own.button_pressed = dex_only_owned
+	own.toggled.connect(func(on: bool): dex_only_owned = on; dex_page = 0; _dex_save_filters(); _refresh_dex())
+	ph.add_child(own)
 	# regiones en una sola fila: Todas + 1..9 (nombre de la region en el tooltip)
 	var tabs := HBoxContainer.new()
 	tabs.add_theme_constant_override("separation", 6)
@@ -4415,7 +4611,9 @@ func _build_dex() -> void:
 	frow.add_child(to)
 	var sh := OptionButton.new()
 	sh.name = "DexShow"
-	sh.custom_minimum_size = Vector2(140, 44)
+	sh.custom_minimum_size = Vector2(170, 44)
+	sh.fit_to_longest_item = false   # long translations ("Mega capable") never squeeze the search box
+	sh.clip_text = true
 	sh.add_theme_font_size_override("font_size", 18)
 	sh.get_popup().add_theme_font_size_override("font_size", 18)
 	for o in DEX_SHOW:
@@ -4439,6 +4637,8 @@ func _build_dex() -> void:
 	gsc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	gsc.follow_focus = true
 	right.add_child(gsc)
+	dex_gsc = gsc
+	gsc.resized.connect(_dex_fit)
 	dex_grid = GridContainer.new()
 	dex_grid.columns = 8
 	dex_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -4486,6 +4686,10 @@ func _dex_filtered() -> Array:
 		if dex_show == 2 and SV.owns(dxo):
 			continue
 		if dex_show == 3 and not (SV.owns(dxo) and bool((SV.d["owned"][str(dxo)] as Dictionary).get("shiny", false))):
+			continue
+		if dex_show == 4 and not MG.is_capable(dxo):
+			continue
+		if dex_show == 5 and not _is_fav(dxo):
 			continue
 		if not SV.smeta.has(str(dxo)):
 			continue
@@ -4566,6 +4770,20 @@ func _compact() -> bool:
 	return vp.x / maxf(vp.y, 1.0) < 1.5
 
 
+# Card height so the page's rows fill the grid area exactly (never smaller than the card's own minimum).
+func _dex_fit() -> void:
+	if dex_gsc == null or dex_grid == null or dex_gsc.size.y < 40.0:
+		return
+	var rows: int = int(_dex_cr()[1])
+	var gap: float = float(dex_grid.get_theme_constant("v_separation"))
+	var h: float = floorf((dex_gsc.size.y - gap * float(rows - 1)) / float(rows)) - 1.0
+	for b in dex_grid.get_children():
+		if b is Control:
+			var base: float = float((b as Control).get_meta("base_h", (b as Control).custom_minimum_size.y))
+			(b as Control).set_meta("base_h", base)
+			(b as Control).custom_minimum_size.y = maxf(base, h)
+
+
 func _dex_cr() -> Array:
 	return (DEX_GRID_CR_COMPACT if _compact() else DEX_GRID_CR)[clampi(dex_grid_sz, 0, 2)]
 
@@ -4577,6 +4795,34 @@ func _per_page() -> int:
 
 func _dex_cols() -> int:
 	return int(_dex_cr()[0])
+
+
+# A type as a chip: its colour, its icon and its name.
+func _type_chip(t: String, fs: int, isz: float) -> PanelContainer:
+	var col := Color.html(String(MD.TYPE_COLOR.get(t, "#b0a99f")))
+	var pc := PanelContainer.new()
+	pc.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var st := _sb(col.darkened(0.25), col.lightened(0.45), 2, 10)
+	st.content_margin_left = 6
+	st.content_margin_right = 10
+	st.content_margin_top = 3
+	st.content_margin_bottom = 3
+	pc.add_theme_stylebox_override("panel", st)
+	var h := HBoxContainer.new()
+	h.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	h.add_theme_constant_override("separation", 6)
+	pc.add_child(h)
+	var ic := IC.rect("type:" + t, isz)
+	ic.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	h.add_child(ic)
+	var lb := _label(L.t(String(MD.TYPE_NAME[t])), fs, Color.WHITE)
+	lb.autowrap_mode = TextServer.AUTOWRAP_OFF
+	lb.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	lb.add_theme_color_override("font_outline_color", col.darkened(0.6))
+	lb.add_theme_constant_override("outline_size", 4)
+	lb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	h.add_child(lb)
+	return pc
 
 
 func _dex_card(p: Dictionary, owned: bool) -> Button:
@@ -4599,7 +4845,7 @@ func _dex_card(p: Dictionary, owned: bool) -> Button:
 			tn.append(L.t(String(MD.TYPE_NAME[String(t)])))
 		b.tooltip_text = "%s · %s" % [L.t(String(p["name"])), " / ".join(PackedStringArray(tn))]
 	# numero
-	var nl := _label("#%03d" % dx, roundi(11.0 * ck), UIS.MUTED if show else Color(UIS.MUTED, 0.55))
+	var nl := _label("#%03d" % dx, roundi(11.0 * ck), Color("#d8d2f2") if show else Color(UIS.MUTED, 0.7))   # brighter: small text needs contrast
 	nl.autowrap_mode = TextServer.AUTOWRAP_OFF
 	nl.position = Vector2(6.0, 3.0)
 	nl.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -4607,10 +4853,10 @@ func _dex_card(p: Dictionary, owned: bool) -> Button:
 	# sprite
 	var tr := TextureRect.new()
 	tr.set_anchors_preset(Control.PRESET_FULL_RECT)
-	tr.offset_top = 18.0 * ck
-	tr.offset_bottom = -32.0 * ck
-	tr.offset_left = 14.0 * ck
-	tr.offset_right = -14.0 * ck
+	tr.offset_top = 16.0 * ck
+	tr.offset_bottom = -42.0 * ck
+	tr.offset_left = 6.0 * ck
+	tr.offset_right = -6.0 * ck
 	tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	tr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST   # crisp pixels when scaled up
@@ -4623,35 +4869,67 @@ func _dex_card(p: Dictionary, owned: bool) -> Button:
 	# nombre
 	var nm := _label(L.t(String(p["name"])) if show else "", roundi(12.0 * ck), UIS.TEXT)
 	nm.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	nm.offset_top = -30.0 * ck
-	nm.offset_bottom = -9.0
+	nm.offset_top = -42.0 * ck
+	nm.offset_bottom = -(roundf(21.0 * ck) + 4.0) if show else -9.0   # above the type band
 	nm.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	nm.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	nm.clip_text = true
+	nm.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS   # long names end in "…" instead of being cut
 	nm.autowrap_mode = TextServer.AUTOWRAP_OFF
 	nm.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	b.add_child(nm)
-	# franjas de tipo abajo (una por tipo)
+	# type band at the bottom: one coloured segment per type, each with the type's icon
 	if show:
+		var bh: float = roundf(21.0 * ck)
 		for ti in range(types.size()):
+			var tcol2 := Color.html(String(MD.TYPE_COLOR.get(String(types[ti]), "#b0a99f")))
 			var sr := ColorRect.new()
-			sr.color = Color.html(String(MD.TYPE_COLOR.get(String(types[ti]), "#b0a99f")))
+			sr.color = tcol2.darkened(0.15)
 			sr.anchor_left = float(ti) / float(types.size())
 			sr.anchor_right = float(ti + 1) / float(types.size())
 			sr.anchor_top = 1.0
 			sr.anchor_bottom = 1.0
-			sr.offset_top = -6.0
+			# inset by the selection border (4 px) so the gold frame is never covered
+			sr.offset_top = -bh - 2.0
+			sr.offset_left = 4.0 if ti == 0 else 1.0
+			sr.offset_right = -4.0 if ti == types.size() - 1 else -1.0
+			sr.offset_bottom = -4.0
 			sr.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			b.add_child(sr)
+			var ti_icon := TextureRect.new()
+			ti_icon.texture = IC.btn_tex("type:" + String(types[ti]), bh)
+			ti_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			ti_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			ti_icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+			ti_icon.set_anchors_preset(Control.PRESET_FULL_RECT)
+			ti_icon.offset_top = 0.0
+			ti_icon.offset_bottom = 0.0
+			ti_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			sr.add_child(ti_icon)
 	if show:
-		var mbadge: Control = _mega_badge(dx)
-		if mbadge != null:   # "Megaevolucionable": solo la inicial (M / P / F / C); el detalle esta en la ficha
-			(mbadge.get_child(0) as Label).text = (mbadge.get_child(0) as Label).text.left(1)
-			mbadge.position = Vector2(40.0, 3.0)
-			b.add_child(mbadge)
+		var stone: Texture2D = MST.tex(dx)
+		if stone != null:   # can change form in runs: the item it uses (Mega Stone, orb, rusted sword / shield)
+			var st_r := TextureRect.new()
+			st_r.name = "MegaStone"
+			st_r.texture = stone
+			st_r.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			st_r.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			st_r.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+			var ssz: float = roundf(24.0 * maxf(ck, 0.85))
+			st_r.size = Vector2(ssz, ssz)
+			st_r.position = Vector2(3.0, maxf(19.0, 15.0 * ck))   # under the number (12 px or more), clear of the heart
+			st_r.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			st_r.tooltip_text = String(MG.form_for(dx).get("item", ""))
+			b.add_child(st_r)
+		else:
+			var mbadge: Control = _mega_badge(dx)
+			if mbadge != null:   # Deoxys formes have no item: keep the letter badge
+				(mbadge.get_child(0) as Label).text = (mbadge.get_child(0) as Label).text.left(1)
+				mbadge.position = Vector2(6.0 + nl.get_minimum_size().x + 4.0, 3.0)
+				b.add_child(mbadge)
 	if shn:
 		var sh := _label("\u2726", roundi(13.0 * maxf(ck, 1.0)), UIS.GOLD)
-		sh.position = Vector2(6.0, 16.0 * ck)
+		sh.position = Vector2(6.0, maxf(18.0, 16.0 * ck) + (26.0 * ck if MST.tex(dx) != null else 0.0))   # below the item icon if there is one
 		sh.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		b.add_child(sh)
 	if owned:
@@ -4772,6 +5050,7 @@ func _refresh_dex() -> void:
 		if first == null:
 			first = b
 	dex_page_lbl.text = L.t("Page %d / %d  (%d)") % [dex_page + 1, pages, list.size()]
+	_dex_fit.call_deferred()
 	if not SV.dex_by.has(dex_sel):
 		dex_sel = int(SV.d["selected"])
 	if jump and dex_cards.has(int(SV.d["selected"])):
@@ -4838,31 +5117,19 @@ func _dex_detail() -> void:
 	ball.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	dex_pv_box.add_child(ball)
 	if owned:
-		var bdg := PanelContainer.new()
-		bdg.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		var bst := _sb(tcol.darkened(0.3), tcol.lightened(0.3), 2, 12)
-		bst.set_content_margin_all(5)
-		bdg.add_theme_stylebox_override("panel", bst)
-		bdg.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-		bdg.grow_horizontal = Control.GROW_DIRECTION_BEGIN
-		bdg.offset_left = -10.0
-		bdg.offset_right = -10.0
-		bdg.offset_top = 8.0
-		var bv := VBoxContainer.new()
-		bv.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		bv.add_theme_constant_override("separation", 0)
-		bdg.add_child(bv)
+		# one chip per type, each in its own colour with its icon and name (top-right of the portrait)
+		var tchips := VBoxContainer.new()
+		tchips.name = "DexTypes"
+		tchips.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		tchips.add_theme_constant_override("separation", 6)
+		tchips.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+		tchips.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+		tchips.offset_left = -10.0
+		tchips.offset_right = -10.0
+		tchips.offset_top = 10.0
 		for t in p["types"]:
-			var ir := IC.rect("type:" + String(t), 34)
-			ir.mouse_filter = Control.MOUSE_FILTER_IGNORE
-			ir.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-			bv.add_child(ir)
-		var tl := _label(L.t(String(MD.TYPE_NAME[String(p["types"][0])])).to_upper(), 14, Color.WHITE)
-		tl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		tl.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		tl.autowrap_mode = TextServer.AUTOWRAP_OFF
-		bv.add_child(tl)
-		dex_pv_box.add_child(bdg)
+			tchips.add_child(_type_chip(String(t), 20, 28.0))
+		dex_pv_box.add_child(tchips)
 	# barra de nombre
 	dex_namebar.add_child(IC.rect(ball_name, 36))
 	var nm := _label(("#%03d  %s" % [dx, L.t(String(p["name"]))]) if owned else "#%03d  ???" % dx, 26, C_GOLD)
@@ -4923,7 +5190,21 @@ func _dex_detail() -> void:
 			mtxt = L.t("Can take its Crowned Form in runs, with the %s")
 		var mlb := _label(mtxt % String(mfm["item"]), 18, Color("#ff9ee0"))
 		mlb.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		sv.add_child(mlb)
+		mlb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var mrow := HBoxContainer.new()
+		mrow.add_theme_constant_override("separation", 8)
+		var mst_t: Texture2D = MST.tex(dx)
+		if mst_t != null:   # the item's icon next to the line
+			var mic := TextureRect.new()
+			mic.texture = mst_t
+			mic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			mic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			mic.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+			mic.custom_minimum_size = Vector2(34, 34)
+			mic.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			mrow.add_child(mic)
+		mrow.add_child(mlb)
+		sv.add_child(mrow)
 	if dx == FM.DEX:   # Deoxys: cambio de forma en partida
 		var flb := _label(L.t("Can change Forme in runs (Attack, Defense or Speed)"), 18, Color("#ff9ee0"))
 		flb.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -5192,6 +5473,28 @@ func _refresh_up() -> void:
 	if up_dex != int(SV.d["selected"]):
 		var pb := _btn("Use as partner", func(): SV.d["selected"] = up_dex; SV.save(); toast(L.t("Partner: %s") % _name_of(up_dex)); _refresh_up(), Vector2(0, 48))
 		up_head.add_child(pb)
+	# this Pokémon's nature and IVs, with Train IVs / Change nature right here (same as in the Pokémon list)
+	var ive_u: Dictionary = IVS.info(up_dex)
+	var ivs_u: Array = ive_u["iv"]
+	var nat_l := _label(L.t("Nature: %s") % IVS.nature_text(up_dex, L), 16, UIS.GOLD)
+	up_head.add_child(nat_l)
+	var iv_l := _label(L.t("IVs: HP %d · Attack %d · Speed %d") % [int(ivs_u[0]), int(ivs_u[1]), int(ivs_u[2])], 16, Color("#7fe8ff"))
+	iv_l.tooltip_text = L.t("Each IV is worth -5% to +5% on its stat, and a nature +10% / -5%.")
+	up_head.add_child(iv_l)
+	var ivrow := HBoxContainer.new()
+	ivrow.add_theme_constant_override("separation", 6)
+	up_head.add_child(ivrow)
+	var udx: int = up_dex
+	var b_iv := _btn(L.t("Train IVs"), func(): _iv_train_ui(udx), Vector2(0, 44))
+	b_iv.set_meta("fk", "upiv")
+	b_iv.name = "UpTrainIVs"
+	var b_nat := _btn(L.t("Change nature"), func(): _mint_ui(udx), Vector2(0, 44))
+	b_nat.set_meta("fk", "upnat")
+	b_nat.name = "UpNature"
+	for ib in [b_iv, b_nat]:
+		ib.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		ib.add_theme_font_size_override("font_size", 16)
+		ivrow.add_child(ib)
 	# S62.3: "Upgrade all" (only finite permanent upgrades of this Pokemon; atomic purchase with confirmation)
 	var all_cost := 0
 	for u0 in SV.UPGRADES:
@@ -5828,6 +6131,14 @@ const RARITY_BALL := ["ball", "ball2", "ball3", "ball4", "ballLux"]
 
 
 # Gacha pages in rail order: this week's Legendary Banners, then the regions.
+func _newest_open_region() -> int:
+	var best := 1
+	for r in range(1, SV.REGIONS.size() + 1):
+		if SV.region_unlocked(r):
+			best = r
+	return best
+
+
 func _gacha_order() -> Array:
 	var out: Array = []
 	for k in range(SV.BANNER_COUNT):
@@ -5881,9 +6192,13 @@ func _refresh_gacha() -> void:
 	gacha_rail.add_child(rl)
 	for i in range(1, 10):
 		var r: int = i
-		var tb := _btn(("✨ " if SV.shiny_charm(r) else "") + "%s · %s" % [L.t(SV.REGIONS[r - 1]), L.t("Gen %d") % r], func(): gacha_region = r; _refresh_gacha(); _gf(tab_sel), Vector2(0, 52))
+		var r_open: bool = SV.region_unlocked(r)
+		var tb := _btn(("✨ " if SV.shiny_charm(r) else "") + "%s · %s" % [L.t(SV.REGIONS[r - 1]), L.t("Gen %d") % r if r_open else L.t("Locked")], func(): gacha_region = r; _refresh_gacha(); _gf(tab_sel), Vector2(0, 52))
 		tb.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		tb.add_theme_font_size_override("font_size", 20)
+		if not r_open:   # still viewable, but its pulls stay shut until the region opens
+			tb.add_theme_color_override("font_color", UIS.MUTED)
+			tb.tooltip_text = L.t("Locked: defeat Arceus on %s") % L.t(SV.REGIONS[r - 2])
 		if r == gacha_region:
 			for st in ["normal", "hover", "pressed"]:
 				tb.add_theme_stylebox_override(st, _sb(UIS.PANEL_HI, UIS.GOLD, 3, 0))
@@ -5934,6 +6249,10 @@ func _refresh_gacha() -> void:
 		tx.add_child(ttl)
 		tx.add_child(_label(L.t("The %d Pokémon of generation %d. The legendaries await!") % [cnt.y, gacha_region], 21))
 		tx.add_child(_label(L.t("You have %d of %d") % [cnt.x, cnt.y], 19, Color("#f2e9d8")))
+		if not SV.region_unlocked(gacha_region):
+			var lk := _label(L.t("Banner locked: defeat Arceus on %s to open it") % L.t(SV.REGIONS[gacha_region - 2]), 21, Color("#ff9aa5"))
+			lk.name = "BannerLocked"
+			tx.add_child(lk)
 		banner.add_mon(int(bd["legs"][0]), 6.0, 0.0, 0.36)
 		banner.add_mon(int(bd["star"]), 6.0, 0.34, 0.66)
 		banner.add_mon(int(bd["legs"][1]), 6.0, 0.64, 1.0)
@@ -5943,7 +6262,7 @@ func _refresh_gacha() -> void:
 	brow.add_theme_constant_override("h_separation", 8)
 	brow.add_theme_constant_override("v_separation", 8)
 	left.add_child(brow)
-	var open: bool = not claimed
+	var open: bool = not claimed and SV.banner_open(gacha_region)
 	var b1 := _cost_btn(L.t("Pull ×1"), "1", "", "ticket", func(): _do_pull(1, "t1"), Vector2(0, 44), open and SV.can_pull(1, "t1"), false, true)
 	var b10 := _cost_btn(L.t("Pull ×10"), "10", "", "ticket", func(): _do_pull(10, "t1"), Vector2(0, 44), open and SV.can_pull(10, "t1"), false, true)
 	var bt := _cost_btn(L.t("Purple ×10 pull"), "1", "", "ticket10", func(): _do_pull(10, "t10"), Vector2(0, 44), open and SV.can_pull(10, "t10"), false, true)
@@ -5991,7 +6310,12 @@ func _refresh_gacha() -> void:
 		pv.add_child(_label(L.t("Completion %d%%: missing Pokémon ×%.1f · shiny %.1f%%") % [roundi(SV.region_completion(greg) * 100.0),
 			SV.missing_mul(greg), SV.shiny_pull(greg) * 100.0], 18, Color("#7fe8ff")))
 		if SV.shiny_charm(greg):
-			pv.add_child(_icon_label("shiny", L.t("%s Shiny Charm: wild %s Pokémon are shiny ×3 as often, its rift legendaries ×2, and +1%% here.") % [L.t(SV.REGIONS[greg - 1]), L.t(SV.REGIONS[greg - 1])], 17, UIS.GOLD, 22.0))
+			var chl: HBoxContainer = _icon_label("shiny", L.t("%s Shiny Charm: wild %s Pokémon are shiny ×3 as often, its rift legendaries ×2, and +1%% here.") % [L.t(SV.REGIONS[greg - 1]), L.t(SV.REGIONS[greg - 1])], 17, UIS.GOLD, 22.0)
+			var chtx: Label = chl.get_child(1)
+			chtx.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART   # a long line: wrap it, never widen the column off screen
+			chtx.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			chtx.custom_minimum_size.x = 1.0
+			pv.add_child(chl)
 		else:
 			pv.add_child(_label(L.t("Own every Pokémon of %s to earn its Shiny Charm (more shinies of this region only).") % L.t(SV.REGIONS[greg - 1]), 16, UIS.MUTED))
 	if first == null:
@@ -6083,6 +6407,9 @@ func _nw(parent: Node, l: Label) -> void:
 
 
 func _do_pull(n: int, use: String) -> void:
+	if not SV.banner_open(gacha_region):
+		toast(L.t("Banner locked: defeat Arceus on %s to open it") % L.t(SV.REGIONS[maxi(0, gacha_region - 2)]))
+		return
 	if not SV.can_pull(n, use):
 		toast(L.t("Not enough tickets: earn them by playing"))
 		return
@@ -6190,6 +6517,8 @@ const MAX_PULL_BATCHES := 10   # Max pull does at most 100 pulls (10 batches of 
 
 
 func _confirm_max_pull(use: String) -> void:
+	if not SV.banner_open(gacha_region):
+		return
 	var gold: bool = use == "t1"
 	var batches: int = mini(MAX_PULL_BATCHES, int(SV.d["tickets"]) / 10 if gold else int(SV.d.get("tickets10", 0)))
 	if batches <= 0:
@@ -6223,6 +6552,8 @@ func _confirm_max_pull(use: String) -> void:
 
 # Max pull: spends every ticket of one kind in ×10 batches (each batch keeps its own Very Rare guarantee and Z-Crystal roll).
 func _do_max_pull(use: String) -> void:
+	if not SV.banner_open(gacha_region):
+		return
 	var batches: int = mini(MAX_PULL_BATCHES, int(SV.d["tickets"]) / 10 if use == "t1" else int(SV.d.get("tickets10", 0)))
 	if batches <= 0:
 		toast(L.t("Not enough tickets: earn them by playing"))

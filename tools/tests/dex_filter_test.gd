@@ -72,6 +72,17 @@ func _init() -> void:
 	check("Show: Owned lists only owned Pokémon", int(counts[1]) == 3, str(counts))
 	check("Show: Unowned lists the rest", int(counts[2]) == gen1 - 3, str(counts))
 	check("Show: Shiny lists Pokémon whose shiny you own", int(counts[3]) == 1 and int(menu._dex_filtered()[0]["dex"]) == 1, str(counts))
+	var MG = load("res://scripts/mega.gd")
+	menu.dex_gen = 0
+	menu.dex_show = 4
+	var megas: Array = menu._dex_filtered()
+	check("Show: Mega capable lists exactly the Pokémon with a Mega / Primal / Crowned form", not megas.is_empty() and megas.all(func(p): return MG.is_capable(int(p["dex"]))) and megas.any(func(p): return int(p["dex"]) == 6) and megas.any(func(p): return int(p["dex"]) == 888), "%d" % megas.size())
+	SV.d["dex_fav"] = {"4": true, "7": true}
+	menu.dex_show = 5
+	var favs: Array = menu._dex_filtered().map(func(p): return int(p["dex"]))
+	check("Show: Favorites lists only your favorites", favs == [4, 7], str(favs))
+	SV.d["dex_fav"] = {}
+	menu.dex_gen = 1
 	var med_pp: int = menu._per_page()
 	var med_cols: int = menu._dex_cols()
 	# change filters through the controls, as a player would
@@ -84,6 +95,41 @@ func _init() -> void:
 	(menu.find_child("DexGrid", true, false) as OptionButton).item_selected.emit(2)
 	await process_frame
 	check("Large grid has fewer, bigger cards", menu._per_page() < med_pp and menu.dex_grid.columns < med_cols)
+	# controller: Left on the first column jumps to the details panel, Right from there comes back to the grid
+	var c0: Control = menu.dex_grid.get_child(0)
+	c0.grab_focus()
+	await process_frame
+	var lev := InputEventAction.new()
+	lev.action = "ui_left"
+	lev.pressed = true
+	check("Left from the grid's first column goes to the details panel", menu._dex_side_nav(lev) and menu.dex_left.is_ancestor_of(menu.get_viewport().gui_get_focus_owner()))
+	var rev := InputEventAction.new()
+	rev.action = "ui_right"
+	rev.pressed = true
+	var back_ok: bool = false
+	for k in range(4):   # Train IVs -> Change nature -> grid: at most a few presses
+		if menu._dex_side_nav(rev):
+			back_ok = menu.get_viewport().gui_get_focus_owner().get_parent() == menu.dex_grid
+			break
+		var fo: Control = menu.get_viewport().gui_get_focus_owner()
+		var nb: Control = fo.find_valid_focus_neighbor(SIDE_RIGHT)
+		if nb == null:
+			break
+		nb.grab_focus()
+	check("Right from the details panel comes back to the grid", back_ok)
+	check("cards stretch to fill the grid area", c0.size.y * float(menu._dex_cr()[1]) >= menu.dex_gsc.size.y * 0.9, "%.0f x %d of %.0f" % [c0.size.y, int(menu._dex_cr()[1]), menu.dex_gsc.size.y])
+	var mine: CheckButton = menu.find_child("DexMine", true, false)
+	check("the Mine only switch is back", mine != null)
+	menu.dex_show = 0
+	mine.button_pressed = true
+	await process_frame
+	check("Mine only lists only owned Pokémon", menu._dex_filtered().all(func(p): return SV.owns(int(p["dex"]))) and bool(SV.d["settings"]["dex_mine"]))
+	mine.button_pressed = false
+	await process_frame
+	(menu.find_child("DexShow", true, false) as OptionButton).item_selected.emit(2)
+	(menu.find_child("DexGrid", true, false) as OptionButton).item_selected.emit(2)
+	mine.button_pressed = true
+	await process_frame
 	var st: Dictionary = SV.d["settings"]
 	check("filter choices are written to the save", int(st["dex_show"]) == 2 and String(st["dex_type"]) == "fire" and int(st["dex_sort"]) == 2 and int(st["dex_grid"]) == 2 and int(st["dex_gen"]) == 1, str([st["dex_show"], st["dex_type"], st["dex_sort"], st["dex_grid"], st["dex_gen"]]))
 	# a later login: a fresh menu reads them back
@@ -96,7 +142,7 @@ func _init() -> void:
 	for i in range(20):
 		await process_frame
 	check("no username prompt once a name is set", not is_instance_valid(m2.name_prompt))
-	check("the next session restores Show, type, sort, grid size and region", m2.dex_show == 2 and m2.dex_type == "fire" and m2.dex_sort == 2 and m2.dex_grid_sz == 2 and m2.dex_gen == 1)
+	check("the next session restores Show, type, sort, grid size, region and Mine only", m2.dex_show == 2 and m2.dex_type == "fire" and m2.dex_sort == 2 and m2.dex_grid_sz == 2 and m2.dex_gen == 1 and m2.dex_only_owned)
 	var to2: OptionButton = m2.find_child("DexType", true, false)
 	check("and the controls show them", to2.selected == m2.TYPE_IDS.find("fire") + 1 and (m2.find_child("DexShow", true, false) as OptionButton).selected == 2 and (m2.find_child("DexGrid", true, false) as OptionButton).selected == 2)
 	# an old save without these keys falls back to the defaults

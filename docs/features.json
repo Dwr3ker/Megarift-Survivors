@@ -115,5 +115,8 @@
  "Pokémon list filters": [
   "screens/pokemon_list_small_grid.jpg",
   "screens/pokemon_list_type_filter.jpg"
+ ],
+ "New trap look": [
+  "screens/traps.jpg"
  ]
 }
