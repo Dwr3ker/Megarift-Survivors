@@ -831,22 +831,33 @@ class Portal extends Node2D:
 	const FW := 36
 	const FH := 56
 	static var frames: Array = []
+	static var frames_stone: Array = []   # the Mega Stone rift: Mega pink and magenta with gold sparkles
 	var t := 0.0
 	var ttl := 45.0
 	var sparks: Array = []
 	var seed_r := randf() * 100.0
+	var style := ""                        # "" = rift, "stone" = the Mega Stone rift
+	var stone_tex: Texture2D = null        # the Pokémon's own Mega Stone, floating above the Mega Stone rift
+
+	const PAL := {"glow": "#7b3cff", "glow2": "#5a2bd0", "mid": "#b48aff", "mid2": "#9a66ff", "core": "#140a26", "core2": "#2a1550", "white": "#f2e6ff", "pink": "#e6c8ff"}
+	const PAL_STONE := {"glow": "#ff4fb8", "glow2": "#c42a8c", "mid": "#ff9ee0", "mid2": "#ff6fcc", "core": "#26061c", "core2": "#4a0f3a", "white": "#fff6d0", "pink": "#ffd65c"}
 
 	static func build_frames() -> void:
-		if not frames.is_empty():
-			return
-		var glow: int = ArenaScript.pk(Color("#7b3cff"))
-		var glow2: int = ArenaScript.pk(Color("#5a2bd0"))
-		var mid: int = ArenaScript.pk(Color("#b48aff"))
-		var mid2: int = ArenaScript.pk(Color("#9a66ff"))
-		var core: int = ArenaScript.pk(Color("#140a26"))
-		var core2: int = ArenaScript.pk(Color("#2a1550"))
-		var white: int = ArenaScript.pk(Color("#f2e6ff"))
-		var pink: int = ArenaScript.pk(Color("#e6c8ff"))
+		if frames.is_empty():
+			frames = _make_frames(PAL)
+		if frames_stone.is_empty():
+			frames_stone = _make_frames(PAL_STONE)
+
+	static func _make_frames(pal: Dictionary) -> Array:
+		var out: Array = []
+		var glow: int = ArenaScript.pk(Color(String(pal["glow"])))
+		var glow2: int = ArenaScript.pk(Color(String(pal["glow2"])))
+		var mid: int = ArenaScript.pk(Color(String(pal["mid"])))
+		var mid2: int = ArenaScript.pk(Color(String(pal["mid2"])))
+		var core: int = ArenaScript.pk(Color(String(pal["core"])))
+		var core2: int = ArenaScript.pk(Color(String(pal["core2"])))
+		var white: int = ArenaScript.pk(Color(String(pal["white"])))
+		var pink: int = ArenaScript.pk(Color(String(pal["pink"])))
 		for k in range(NF):
 			var ph: float = float(k) / float(NF) * TAU
 			var P := ArenaScript.Pix.new(FW, FH)
@@ -876,7 +887,8 @@ class Portal extends Node2D:
 						P.set_px(px, y, glow2)
 			for i in range(8):
 				P.set_px(15 + int(ArenaScript.hsh(i, k, 94) * 7.0), 8 + int(ArenaScript.hsh(i, k, 95) * 38.0), white)
-			frames.append(ImageTexture.create_from_image(P.img()))
+			out.append(ImageTexture.create_from_image(P.img()))
+		return out
 
 	func _init() -> void:
 		texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
@@ -893,27 +905,48 @@ class Portal extends Node2D:
 		sparks = sparks.filter(func(s): return float(s["a"]) < float(s["l"]))
 		queue_redraw()
 
+	func _helix(back: bool, al: float) -> void:
+		for i in range(18):
+			var hy: float = -6.0 - float(i) * 8.0
+			for strand in range(2):
+				var ph2: float = t * 3.0 + float(i) * 0.55 + float(strand) * PI
+				var front2: bool = sin(ph2) > 0.0
+				if front2 == back:
+					continue
+				var hp := Vector2(cos(ph2) * 40.0, hy)
+				var hc: Color = Color("#ff6fcc") if strand == 0 else Color("#ffd65c")
+				var sz: float = 5.0 if front2 else 3.0
+				draw_rect(Rect2(hp - Vector2(sz, sz) * 0.5, Vector2(sz, sz)), Color(hc.r, hc.g, hc.b, (1.0 if front2 else 0.5) * al))
+
 	func _draw() -> void:
 		var open: float = clampf(t / 0.8, 0.0, 1.0)
 		open = 1.0 - pow(1.0 - open, 3.0)
 		var fo: float = minf(1.0, maxf(ttl, 0.0) / 1.5)
 		var a: float = minf(1.0, t * 2.5) * fo
 		var beat: float = 0.5 + 0.5 * sin(t * 4.0 + seed_r)
+		var st: bool = style == "stone"
+		var c_halo: Color = Color(1.0, 0.3, 0.75) if st else Color(0.5, 0.25, 1.0)
+		var c_wave: Color = Color(1.0, 0.84, 0.36) if st else Color(0.78, 0.6, 1.0)
+		var c_ray: Color = Color(1.0, 0.55, 0.85) if st else Color(0.7, 0.5, 1.0)
+		var c_spark: Color = Color(1.0, 0.9, 0.55) if st else Color(0.9, 0.82, 1.0)
 		# luz en el suelo: halo que late y dos ondas que se expanden
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2(1.0, 0.33))
 		for i in range(4):
-			draw_circle(Vector2.ZERO, 62.0 - float(i) * 11.0 + beat * 4.0, Color(0.5, 0.25, 1.0, (0.07 + 0.05 * float(i)) * a * open))
-		for i in range(2):
+			draw_circle(Vector2.ZERO, (78.0 if st else 62.0) - float(i) * 11.0 + beat * 4.0, Color(c_halo.r, c_halo.g, c_halo.b, (0.07 + 0.05 * float(i)) * a * open))
+		for i in range(3 if st else 2):
 			var rp: float = fmod(t * 0.7 + float(i) * 0.5, 1.0)
-			draw_arc(Vector2.ZERO, 14.0 + rp * 62.0, 0.0, TAU, 40, Color(0.78, 0.6, 1.0, (1.0 - rp) * 0.55 * a * open), 3.0)
+			draw_arc(Vector2.ZERO, 14.0 + rp * (80.0 if st else 62.0), 0.0, TAU, 40, Color(c_wave.r, c_wave.g, c_wave.b, (1.0 - rp) * 0.55 * a * open), 3.0)
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		# rayos de luz detras del portal (parpadean)
-		for i in range(5):
-			var ang: float = -PI * 0.5 + (float(i) - 2.0) * 0.28 + sin(t * 1.3 + float(i)) * 0.06
-			var ln: float = (70.0 + 30.0 * sin(t * 2.1 + float(i) * 1.7)) * open
-			draw_line(Vector2(0.0, -50.0), Vector2(0.0, -50.0) + Vector2.from_angle(ang) * ln, Color(0.7, 0.5, 1.0, 0.09 * a), 6.0)
+		for i in range(7 if st else 5):
+			var ang: float = -PI * 0.5 + (float(i) - (3.0 if st else 2.0)) * 0.28 + sin(t * 1.3 + float(i)) * 0.06
+			var ln: float = ((95.0 if st else 70.0) + 30.0 * sin(t * 2.1 + float(i) * 1.7)) * open
+			draw_line(Vector2(0.0, -50.0), Vector2(0.0, -50.0) + Vector2.from_angle(ang) * ln, Color(c_ray.r, c_ray.g, c_ray.b, (0.13 if st else 0.09) * a), 6.0)
+		if st:   # a pink and gold double helix spiralling up around the portal: the back half behind it
+			_helix(true, a * open)
 		# el portal: cuadro animado, se abre desde el centro y respira
-		var tx: Texture2D = frames[int(t * 12.0) % NF]
+		var fr: Array = frames_stone if st else frames
+		var tx: Texture2D = fr[int(t * 12.0) % NF]
 		var sz := Vector2(tx.get_width(), tx.get_height()) * 3.0
 		var sy: float = (0.12 + 0.88 * open) * (1.0 + 0.025 * sin(t * 3.0))
 		var h: float = sz.y * sy
@@ -923,11 +956,21 @@ class Portal extends Node2D:
 			var oa: float = t * (1.6 + float(i % 3) * 0.4) + float(i) * 0.9
 			var op := Vector2(cos(oa) * (30.0 + float(i % 2) * 8.0), -54.0 + sin(oa) * 52.0 * open)
 			var front: bool = sin(oa) > -0.2
-			draw_rect(Rect2(op - Vector2(1.5, 1.5), Vector2(3, 3)), Color(0.9, 0.82, 1.0, (0.9 if front else 0.4) * a))
+			draw_rect(Rect2(op - Vector2(1.5, 1.5), Vector2(3, 3)), Color(c_spark.r, c_spark.g, c_spark.b, (0.9 if front else 0.4) * a))
 		for sp in sparks:
 			var k: float = float(sp["a"]) / float(sp["l"])
 			var pp: Vector2 = sp["p"]
-			draw_rect(Rect2(Vector2(roundf(pp.x / 3.0) * 3.0, roundf(pp.y / 3.0) * 3.0), Vector2(3, 3)), Color(0.85, 0.76, 1.0, (1.0 - k) * a))
+			draw_rect(Rect2(Vector2(roundf(pp.x / 3.0) * 3.0, roundf(pp.y / 3.0) * 3.0), Vector2(3, 3)), Color(c_spark.r, c_spark.g, c_spark.b, (1.0 - k) * a))
+		if st:
+			_helix(false, a * open)   # ...and the front half over it
+		if st and stone_tex != null:   # the Pokémon's own Mega Stone floats above, glowing and slowly turning
+			var sy2: float = -150.0 - 6.0 * sin(t * 2.2)
+			var gl: float = 0.5 + 0.5 * sin(t * 3.0)
+			draw_circle(Vector2(0.0, sy2), 30.0 + 4.0 * gl, Color(1.0, 0.35, 0.75, 0.28 * a * open))
+			draw_circle(Vector2(0.0, sy2), 21.0, Color(1.0, 0.8, 0.4, 0.3 * a * open))
+			var ssz: float = 42.0 * open
+			var sq: float = absf(cos(t * 1.4))   # turning: the stone narrows and widens
+			draw_texture_rect(stone_tex, Rect2(Vector2(-ssz * 0.5 * maxf(0.25, sq), sy2 - ssz * 0.5), Vector2(ssz * maxf(0.25, sq), ssz)), false, Color(1, 1, 1, a))
 
 
 const ArenaScript = preload("res://scripts/arena.gd")

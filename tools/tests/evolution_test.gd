@@ -69,7 +69,7 @@ func _init() -> void:
 	EVL.apply(m, 6)
 	check("Charizard is the last stage", m._cur_dex() == 6 and EVL.level_for(6) == 0 and m.evo_steps == 2)
 	m.run_time = 2000.0
-	check("an evolved starter cannot Mega Evolve (that needs starting as the Mega-capable Pokémon)", load("res://scripts/mega.gd").card(m).is_empty())
+	check("an evolved starter can Mega Evolve as the Pokémon it is now (Charizard -> Mega Charizard X)", not load("res://scripts/mega.gd").card(m).is_empty())
 	# ---------- a saved run keeps the evolution ----------
 	check("a run can be saved", RS.save(m), RS.block_reason(m))
 	var snap: Dictionary = RS.load_snap()

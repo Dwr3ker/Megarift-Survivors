@@ -17,7 +17,7 @@ const VERSION := 1
 # Main-script variables stored by name.
 const FIELDS := ["run_time", "kills", "coins", "tickets", "tickets10", "gcoins_run", "gold_gcoins_run", "run_bosses", "run_chests", "run_rifts",
 	"run_dens", "run_dmg", "run_kills_by", "run_big", "run_meters", "reap_kills", "pending_levels", "stat_lv", "rerolls", "bans", "banned",
-	"revives", "bonds", "bond_ids", "bond_first", "fuse_declined", "fused_once", "fused_away", "item", "item2", "item3", "mega_done", "mega_stone", "plate", "plate_t", "forme",
+	"revives", "bonds", "bond_ids", "bond_first", "fuse_declined", "fused_once", "fused_away", "item", "item2", "item3", "mega_done", "mega_stone", "mega_told", "stone_tried", "plate", "plate_t", "forme",
 	"forme_t", "kyurem", "cur_dex", "evo_dmg", "evo_spd", "evo_steps", "seas_hp_done", "z_type", "z_crystal", "z_used", "z_cd", "dyn_used", "dyn_cd", "dash_k", "mom_max", "doom_winds", "eter_kills", "eter_at",
 	"eter_last", "cal_used", "cal_for", "dir_done", "dir_gap", "dir_warned", "dir_map", "dir_log", "boss_idx", "boss_run", "cast_run",
 	"surge_t", "next_event_t", "thief_t", "thieves", "wl_acc", "mini_last", "mini_chk", "rift_miss", "rift_check", "biome_idx", "world_seed", "balls",

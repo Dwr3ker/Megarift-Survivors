@@ -44,6 +44,7 @@ const Aud = preload("res://scripts/audio.gd")
 const L = preload("res://scripts/lang.gd")
 const IC = preload("res://scripts/icons.gd")
 const PXF = preload("res://scripts/pxfont.gd")
+const MST = preload("res://scripts/megastone.gd")
 const UIS = preload("res://scripts/ui_style.gd")
 const DSP = preload("res://scripts/display.gd")
 const PAD = preload("res://scripts/pad.gd")
@@ -275,7 +276,8 @@ var hyper := false       # Modo Hyper activo en esta partida
 var time_k := 1.0        # velocidad del reloj de la partida (2 en Hyper); run_time son segundos "de partida", no reales
 var mega = null          # Megaevolucion (mega.gd): una vez por partida, carta rara desde el minuto 30
 var mega_done := false
-var mega_stone := false   # earned by beating a Mega rift: the Mega card is offered at the next level-up (no minute-30 wait)
+var mega_stone := false   # earned by beating the Mega Stone rift: the Mega card is offered at the next level-up (no minute-30 wait)
+var stone_tried := false  # the Mega Stone rift has appeared (one try per run)
 var minion_t := 0.0
 var plate := "normal"    # Arceus: tipo de la placa actual (plates.gd)
 var plate_t := -1000000.0   # run_time de la ultima placa
@@ -1648,6 +1650,8 @@ func _process(delta: float) -> void:
 	ground.center = player.position
 	EVL.tick(self)
 	_rift_fx_tick(delta)
+	if not mega_told and Engine.get_process_frames() % 30 == 0:
+		_mega_unlock_tick()
 	if zoom_punch != 0.0 and rift_in_t <= 0.0:
 		zoom_punch = move_toward(zoom_punch, 0.0, delta * (0.3 if rift_out_t <= 0.0 else 0.4))
 		cam.zoom = Vector2(cam_zoom, cam_zoom) * (1.0 + zoom_punch)
@@ -2110,6 +2114,19 @@ func _dash_hit_along(a: Vector2, b: Vector2) -> void:
 
 
 # ---- Megaevolucion ----
+var mega_told := false   # the "you can Mega Evolve now" message was shown
+
+
+# At minute 30 (15 in Hyper) a Pokémon that can Mega Evolve hears about it: the card comes at the next level-up.
+func _mega_unlock_tick() -> void:
+	if mega_told or mega_done or not MG.guaranteed(self) or MG.card(self).is_empty():
+		return
+	mega_told = true
+	Aud.sfx("shiny")
+	_ring(player.position, 10.0, 180.0, MG.COLOR, 0.6, 4.0)
+	_say(L.t("Mega Evolution unlocked: the card comes at your next level-up"), 3.6)
+
+
 func _mega_on() -> bool:
 	return mega != null and bool(mega.active)
 
@@ -8598,8 +8615,8 @@ func _offer() -> Array:
 	var evc: Dictionary = EVL.card(self)
 	if not evc.is_empty():
 		picked.append(evc)
-	# Megaevolucion: carta rara (siempre ocupa un hueco cuando sale); with the Mega Stone it is always offered
-	if picked.is_empty() and (mega_stone or randf() < MG.OFFER_CHANCE):
+	# Mega Evolution: once unlocked (minute 30, 15 in Hyper, or the Mega Stone) it is offered at every level-up until taken
+	if picked.is_empty() and (MG.guaranteed(self) or randf() < MG.OFFER_CHANCE):
 		var mc: Dictionary = MG.card(self)
 		if not mc.is_empty():
 			picked.append(mc)
@@ -9608,6 +9625,11 @@ func _update_rift(delta: float) -> void:
 	if mode != "rifts" and run_time >= DEN_FROM and randf() < DEN_RATE:
 		_open_rift(-1, true)
 		return
+	if MG.wants_stone(self) and run_time >= MG.STONE_FORCE and not MG.evo_start(self):
+		rift_miss = 0
+		_open_rift(-1, false, true)
+		if stone_tried:
+			return
 	var chance: float = 1.0 if mode == "rifts" else minf(RIFT_CHANCE_MAX, RIFT_CHANCE + RIFT_PITY * float(rift_miss))
 	if randf() < chance:
 		rift_miss = 0
@@ -9644,9 +9666,10 @@ func _pick_legend(capable_only: bool = false) -> Dictionary:
 	return pool[pool.size() - 1]
 
 
-func _open_rift(force_dex: int = -1, den: bool = false) -> void:
+func _open_rift(force_dex: int = -1, den: bool = false, force_stone: bool = false) -> void:
 	var p: Dictionary = {}
 	var mega_rift := false
+	var stone_rift := false
 	if den:
 		var cl: Array = _candidates(_tier_at(run_time))
 		if not cl.is_empty():
@@ -9654,12 +9677,16 @@ func _open_rift(force_dex: int = -1, den: bool = false) -> void:
 	elif force_dex > 0:
 		p = _dex_by[force_dex]
 	else:
-		var mchance: float = MG.rift_chance(run_time / 60.0)
-		if MG.wants_stone(self):
-			mchance = maxf(mchance, MG.stone_chance(run_time / 60.0))
-		mega_rift = mode != "tower" and (DM.mega_rift(eter_kills) or randf() < mchance)
+		# the Mega Stone rift (one try per run): small chance from minute 15, due at minute 20
+		var sk: float = MG.EVO_STONE_K if MG.evo_start(self) else 1.0   # much rarer for a run started unevolved
+		if MG.wants_stone(self) and ((force_stone and sk >= 1.0) or randf() < minf(MG.stone_chance(run_time / 60.0), 0.25) * sk):
+			stone_rift = true
+		mega_rift = mode != "tower" and (stone_rift or DM.mega_rift(eter_kills) or randf() < MG.rift_chance(run_time / 60.0))
 		p = _pick_legend(mega_rift)
 		mega_rift = mega_rift and not p.is_empty() and MG.is_capable(int(p["dex"]))
+		stone_rift = stone_rift and mega_rift
+		if stone_rift:
+			stone_tried = true
 	if p.is_empty():
 		return
 	var pos: Vector2 = player.position + Vector2.from_angle(randf() * TAU) * randf_range(380.0, 560.0)
@@ -9679,11 +9706,14 @@ func _open_rift(force_dex: int = -1, den: bool = false) -> void:
 		rift.ttl = DEN_TTL
 		rift.add_child(DYN.Den.new())
 		rift.add_child(DYN.Pillar.new())
+	elif stone_rift:   # the Mega Stone rift looks its own: Mega pink and gold, with your Pokémon's stone above it
+		rift.style = "stone"
+		rift.stone_tex = MST.tex(int(_cur_dex()))
 	world.add_child(rift)
 	var ar: Node2D = ARENA.new()
 	ar.setup(ty, randi() % 100000)
 	ar.start_bake()
-	rift_info = {"dex": dex, "type": ty, "shiny": (not den) and bool(_sm(dex).get("sh", 0)) and randf() < (SV.CHARM_RIFT if charm_gens.has(_gen_of(dex)) else 1.0) / 512.0, "arena": ar, "den": den, "mega": mega_rift}
+	rift_info = {"dex": dex, "type": ty, "shiny": (not den) and bool(_sm(dex).get("sh", 0)) and randf() < (SV.CHARM_RIFT if charm_gens.has(_gen_of(dex)) else 1.0) / 512.0, "arena": ar, "den": den, "mega": mega_rift, "stone": stone_rift}
 	Aud.sfx("rift")
 	if mega_rift:
 		_say(L.t("A Mega Rift has opened!"), 3.0)
@@ -9747,6 +9777,7 @@ func _update_rift_hud() -> void:
 		var to: Vector2 = rift.position - player.position
 		var vp: Vector2 = get_viewport_rect().size
 		hud.rift_den = bool(rift_info.get("den", false))
+		hud.rift_stone = bool(rift_info.get("stone", false))
 		hud.rift_ttl = rift.ttl
 		hud.rift_dir = to.normalized()
 		hud.rift_scr = get_viewport().get_canvas_transform() * (rift.position + Vector2(0.0, -40.0))
@@ -9853,7 +9884,7 @@ func _arena_begin() -> void:
 	var ty: String = String(rift_info["type"])
 	var new_arena: Node2D = rift_info["arena"]
 	ainfo = {"phase": "fight", "t": 0.0, "back": player.position, "dex": dex, "type": ty,
-		"shiny": bool(rift_info["shiny"]), "stash_e": enemies.duplicate(), "stash_o": orbs.duplicate(), "end": 0.0, "boss": null, "den": bool(rift_info.get("den", false)), "mega": bool(rift_info.get("mega", false))}
+		"shiny": bool(rift_info["shiny"]), "stash_e": enemies.duplicate(), "stash_o": orbs.duplicate(), "end": 0.0, "boss": null, "den": bool(rift_info.get("den", false)), "mega": bool(rift_info.get("mega", false)), "stone": bool(rift_info.get("stone", false))}
 	for e in enemies:
 		e.visible = false
 	for o in orbs:
@@ -10121,10 +10152,10 @@ func _legend_down(e) -> void:
 # Beating a Mega rift: your Pokémon's Mega Stone (Mega Evolve at the next level-up); a Pokémon that can't Mega Evolve
 # (or already did) gets a Legend Shard instead.
 func _mega_stone_reward(pos: Vector2) -> void:
-	if MG.wants_stone(self):
+	if bool(ainfo.get("stone", false)) and not mega_done and not mega_stone:
 		mega_stone = true
 		pending_levels += 1   # the Mega card comes right after the rift
-		var fm: Dictionary = MG.form_for(int(_pdex()))
+		var fm: Dictionary = MG.form_for(int(_cur_dex()))
 		var item: String = String(fm.get("item", "Mega Stone"))
 		get_tree().create_timer(1.2).timeout.connect(func():
 			Aud.sfx("shinyGet")
@@ -13306,11 +13337,12 @@ class Minimap extends Node2D:
 			var rraw: Vector2 = _pt(m.rift.position)
 			var rins: bool = _inside(rraw, 10.0)
 			var rq: Vector2 = rraw if rins else _edge(rraw)
-			draw_rect(Rect2(rq - Vector2(10.0 + 2.0 * pul, 10.0 + 2.0 * pul), Vector2(20.0 + 4.0 * pul, 20.0 + 4.0 * pul)), Color(UIS.ORCHID, 0.55 * pul), false, 1.5)
-			_diamond(rq, 6.0, UIS.ORCHID, UIS.INK)
+			var rcol: Color = Color("#ff6fcc") if bool(m.rift_info.get("stone", false)) else UIS.ORCHID   # the Mega Stone rift is pink
+			draw_rect(Rect2(rq - Vector2(10.0 + 2.0 * pul, 10.0 + 2.0 * pul), Vector2(20.0 + 4.0 * pul, 20.0 + 4.0 * pul)), Color(rcol, 0.55 * pul), false, 1.5)
+			_diamond(rq, 6.0, rcol, UIS.INK)
 			draw_rect(Rect2(rq - Vector2(1.5, 1.5), Vector2(3.0, 3.0)), UIS.TITLE)
 			if not rins:
-				_chev(rq, rraw - CT, UIS.ORCHID)
+				_chev(rq, rraw - CT, rcol)
 		# NPC y eventos nuevos (Kecleon, rescates, alfas, cuevas, meteorito, laboratorios, cajas)
 		for ev in m._mm_events():
 			var eraw: Vector2 = _pt(ev[0])
@@ -13400,6 +13432,7 @@ class Hud extends Node2D:
 	var act_sp := Vector2(-9999.0, -9999.0)
 	var poi_marks: Array = []
 	var rift_den := false
+	var rift_stone := false   # the Mega Stone rift: pink arrow, sign and minimap mark
 	var ab_name := ""
 	var down := false
 	var down_left := 0.0
@@ -13838,6 +13871,9 @@ class Hud extends Node2D:
 		if rift_den:
 			t1 = L.t("A DYNAMAX DEN HAS OPENED!")
 			t2 = L.t("Follow the red arrow: a giant Pokémon awaits inside")
+		elif rift_stone:
+			t1 = L.t("A MEGA STONE RIFT HAS OPENED!")
+			t2 = L.t("Follow the pink arrow: win your Mega Stone inside")
 		var w1: float = font.get_string_size(t1, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 26).x
 		var w2: float = font.get_string_size(t2, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 16).x
 		var bw: float = minf(vp.x - 24.0, maxf(w1, w2) + 48.0)
@@ -13845,7 +13881,7 @@ class Hud extends Node2D:
 		var r := Rect2(-bw * 0.5, -34.0, bw, 68.0)
 		var sb := StyleBoxFlat.new()
 		sb.bg_color = Color(0.102, 0.043, 0.2, 0.88 * a)
-		sb.border_color = Color(1.0, 0.24, 0.43, a) if rift_den else Color(0.706, 0.541, 1.0, a)
+		sb.border_color = Color(1.0, 0.24, 0.43, a) if rift_den else (Color(1.0, 0.54, 0.85, a) if rift_stone else Color(0.706, 0.541, 1.0, a))
 		sb.set_border_width_all(2)
 		sb.set_corner_radius_all(10)
 		draw_style_box(sb, r)
@@ -14013,6 +14049,10 @@ class Hud extends Node2D:
 				tcol = Color("#ffd0d6")
 				fcol = Color("#ffd0d6") if beat > 0.5 else Color("#ff3d6e")
 				lbl = L.t("DEN ·")
+			elif rift_stone:
+				tcol = Color("#ffd2f0")
+				fcol = Color("#ffd65c") if beat > 0.5 else Color("#ff6fcc")
+				lbl = L.t("MEGA STONE ·")
 			if rift_off:
 				# Borde de pantalla: halo que late + flecha grande + "GRIETA · N m · S s"
 				var M := 52.0

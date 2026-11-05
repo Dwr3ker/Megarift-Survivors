@@ -14,9 +14,16 @@ const CD_K := 0.9
 const ANIM_S := 2.6         # invulnerable durante la transformacion
 const COLOR := Color("#ff8ad8")
 const DASH_K := 0.7         # Mega Evolved: dash cooldown -30%
-# Mega Stones: beating a Mega rift gives your Pokémon its Mega Stone (or orb / relic) for the run, so you can Mega Evolve
-# at the next level-up instead of waiting for minute 30. While you can still earn one, Mega rifts come sooner and more often.
-const STONE_CURVE := [[8.0, 0.25], [15.0, 0.4], [30.0, 0.5]]
+# The Mega Stone rift: one try per run to get your Pokémon's Mega Stone (or orb / relic) before minute 30. From minute 15
+# each rift has a small chance to be it (STONE_CURVE), and at minute 20 (STONE_FORCE) the next rift check opens it for sure.
+# Win it and you Mega Evolve at the next level-up; lose it (or let it close) and you wait for the minute-30 card.
+# Run time: in Hyper that is 7.5 and 10 real minutes.
+const STONE_CURVE := [[15.0, 0.10], [20.0, 0.25]]
+const STONE_FORCE := 1200.0
+# A run started with a Pokémon that can still evolve (e.g. Charmander) trades Mega access for the evolution: the stone
+# rift is much rarer (x EVO_STONE_K) and never forced, and without the stone the Mega card stays a random chance at
+# level-ups after minute 30 (OFFER_CHANCE) instead of guaranteed.
+const EVO_STONE_K := 0.15
 # Mega rift bosses call minions: a few wild Pokémon of their type every MINION_EVERY seconds, at most MINION_CAP alive.
 const MINION_EVERY := 7.0
 const MINION_N := 3
@@ -101,12 +108,12 @@ static func stone_chance(minute: float) -> float:
 		var b: Array = STONE_CURVE[i]
 		if minute < float(b[0]):
 			return lerpf(float(a[1]), float(b[1]), (minute - float(a[0])) / (float(b[0]) - float(a[0])))
-	return float(STONE_CURVE[STONE_CURVE.size() - 1][1])
+	return 1.0   # from minute 20 the stone rift is due
 
 
 static func wants_stone(main) -> bool:
-	return not main.mega_done and not bool(main.mega_stone) and main.mode != "team" and main.mode != "tower" \
-		and not main.banned.has("mega") and is_capable(int(main._pdex()))
+	return not main.mega_done and not bool(main.mega_stone) and not bool(main.stone_tried) and main.mode != "team" and main.mode != "tower" \
+		and not main.banned.has("mega") and is_capable(int(main._cur_dex()))
 
 
 # Probabilidad de que una grieta sea Mega en ese minuto de partida (0 antes del minuto 15, tope en el ultimo punto).
@@ -139,13 +146,29 @@ static func apply_boss(main, e, base_dex: int) -> void:
 	e.xp_val *= RIFT_REWARD_K
 
 
-# Carta rara de la subida de nivel: solo si el Pokemon es capaz, aun no se ha usado y ya pasaron 30 minutos.
+# Level-up card: the Pokémon it is NOW must be able to change form (a Charmander that became Charizard can Mega Evolve),
+# not used yet, and either minute 30 has passed (run time: 15 real minutes in Hyper) or it has its Mega Stone.
+# Once available it is offered at every level-up until taken (see main._offer).
+static func unlocked(main) -> bool:
+	return main.run_time >= FROM_TIME or bool(main.mega_stone)
+
+
+# The run started with a Pokémon that can evolve (it may have evolved since).
+static func evo_start(main) -> bool:
+	return main.mode != "team" and int(load("res://scripts/evolution.gd").level_for(int(main._pdex()))) > 0
+
+
+# The Mega card is offered at every level-up: with the stone, or after minute 30 for a run that did not start unevolved.
+static func guaranteed(main) -> bool:
+	return bool(main.mega_stone) or (main.run_time >= FROM_TIME and not evo_start(main))
+
+
 static func card(main) -> Dictionary:
 	if main.mega_done or main.mode == "team" or main.mode == "tower" or main.banned.has("mega"):
 		return {}
 	if (main.run_time < FROM_TIME and not bool(main.mega_stone)) or main.player.dead:
 		return {}
-	var fm: Dictionary = form_for(int(main._pdex()))
+	var fm: Dictionary = form_for(int(main._cur_dex()))
 	if fm.is_empty() or not main._smeta.has(str(int(fm["form"]))):
 		return {}
 	var kind: String = String(fm["kind"])
@@ -158,12 +181,12 @@ static func card(main) -> Dictionary:
 	if main.z_type != "":
 		desc += ". " + L.t("You lose your Z-Move.")
 	return {"cat": "mega", "id": "mega", "key": "mega", "w": 1.0, "title": title, "desc": desc,
-		"icon": "mstone:%d" % int(main._pdex()), "tag": L.t("UNIQUE"), "color": COLOR}   # the Pokémon's own Mega Stone / orb / relic
+		"icon": "mstone:%d" % int(main._cur_dex()), "tag": L.t("UNIQUE"), "color": COLOR}   # the Pokémon's own Mega Stone / orb / relic
 
 
 func start(main) -> void:
 	m = main
-	form = form_for(int(m._pdex()))
+	form = form_for(int(m._cur_dex()))
 	if form.is_empty():
 		return
 	active = true
