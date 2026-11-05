@@ -9,6 +9,20 @@ const UPD = preload("res://scripts/updater.gd")
 
 const ENTRIES := [
 	{
+		"ver": "0.1.3-alpha.8",
+		"date": "2026-11-05",
+		"title": "Megarift Survivors 0.1.3-alpha.8: fusion is your choice (test build)",
+		"new": [
+			"Fusion is a choice: when both moves of a bonded pair are evolved and at max level you pick Fuse or Keep both, and a pair you keep is not asked about again that run.",
+			"One Fusion Move per run: once you have it, only a pair that includes it can fuse, so it can grow up to 4 moves while your other pairs stay bonded.",
+		],
+		"changes": [
+			"In the move bar a bonded pair shows two linked rings and the Fusion Move a pink diamond.",
+		],
+		"fixes": [
+		],
+	},
+	{
 		"ver": "0.1.3-alpha.7",
 		"date": "2026-11-04",
 		"title": "Megarift Survivors 0.1.3-alpha.7: bond pairs, region banners, new traps, rift entrances (test build)",

@@ -1640,7 +1640,7 @@ func _process(delta: float) -> void:
 		elif eter_prompt and not choosing:
 			_open_eter_prompt()
 		elif _fuse_ready() and not choosing:
-			_do_fuse()
+			_offer_fuse()   # Fuse / Keep both: never automatic
 		elif bonds > 0 and not choosing and (arena == null or _arena_bond_ready()):
 			_offer_bond(true)
 	ground.center = player.position
@@ -1822,6 +1822,8 @@ func _refresh_slots() -> void:
 			"n": gicons.size(),
 			"icons": gicons,
 			"names": gnames,
+			"bonded": g.size() > 1,
+			"fused": g.any(func(q): return bool(q.get("fused", false))),
 		})
 	slots.info = info
 	if hud != null:
@@ -8797,6 +8799,7 @@ func _offer_bond(quiet: bool = false) -> void:
 const FUSE_MAX := 4   # a fused move can hold up to 4 original moves
 const FUSE_DMG := 2.2   # cada mitad pega mucho mas que un evolucionado normal (x1,8)
 var fuse_asked := ""
+var fuse_declined: Array = []   # pairs ("a+b") the player chose to keep: they are not offered again this run
 var fused_once := false   # solo una fusion por partida
 var fused_away: Array = []   # movimientos consumidos: ya no se ofrecen en las mejoras
 
@@ -8805,8 +8808,18 @@ func _parts_of(m: Dictionary) -> Array:
 	return m["parts"] if m.has("parts") else [m]
 
 
+func _has_fusion() -> bool:
+	for m in player.moves:
+		if bool(m.get("fused", false)):
+			return true
+	return false
+
+
 func _fuse_pair() -> Array:
+	var has_f: bool = _has_fusion()
 	for pr in _bond_pairs():
+		if fuse_declined.has("%s+%s" % [String(pr[0]), String(pr[1])]):
+			continue
 		var out: Array = []
 		for id in pr:
 			for m in player.moves:
@@ -8818,6 +8831,8 @@ func _fuse_pair() -> Array:
 		for m in out:
 			if not bool(m["evolved"]) or int(m["lvl"]) < _max_lvl(m):
 				ready = false
+		if has_f and not (bool(out[0].get("fused", false)) or bool(out[1].get("fused", false))):
+			ready = false   # one Fusion Move per run: other pairs can only join it, never start a second one
 		if ready and _parts_of(out[0]).size() + _parts_of(out[1]).size() <= FUSE_MAX:
 			return out
 	return []
@@ -8839,8 +8854,8 @@ func _offer_fuse() -> void:
 		{"cat": "fuse", "id": "yes", "key": "fuse:yes", "w": 1.0, "title": L.t("Fuse"),
 		 "desc": L.t("Both original moves will be lost for the rest of the run and merge into a much stronger one: %s.") % nm,
 		 "icon": "evo:" + String(pr[0]["id"]), "tag": L.t("Bond"), "color": Color("#ff8ad8")},
-		{"cat": "fuse", "id": "no", "key": "fuse:no", "w": 1.0, "title": L.t("Cancel"),
-		 "desc": L.t("You keep both moves as they are."),
+		{"cat": "fuse", "id": "no", "key": "fuse:no", "w": 1.0, "title": L.t("Keep both"),
+		 "desc": L.t("You keep both moves as they are. This pair won't be offered again this run."),
 		 "icon": "evo:" + String(pr[1]["id"]), "tag": "", "color": Color("#8fa3c4")}]
 	choosing = true
 	Aud.sfx("levelup")
@@ -9341,6 +9356,8 @@ func _on_card_chosen(idx: int) -> void:
 		choosing = false
 		if id == "yes":
 			_do_fuse()
+		elif fuse_asked != "" and not fuse_declined.has(fuse_asked):
+			fuse_declined.append(fuse_asked)   # kept: this pair is never asked about again
 		return
 	if cat == "new":
 		var nm: Dictionary = _new_move(id, 1)
@@ -11666,8 +11683,19 @@ class Slots extends Node2D:
 				draw_rect(Rect2(tile.position, Vector2(tile.size.x, tile.size.y * (1.0 - fr0))), Color(UIS.INK, 0.6))
 			if i < _flash.size() and float(_flash[i]) > 0.0:
 				draw_rect(tile, Color(1, 1, 1, 0.6 * float(_flash[i]) / 0.35 * Actor.flash_k))
-			if bool(it["evo"]):
+			if bool(it.get("fused", false)):   # the run's Fusion Move: a pink diamond with a white core
+				var fq: Vector2 = tile.position + Vector2(tile.size.x - 1.0, 4.0)
+				draw_colored_polygon(PackedVector2Array([fq + Vector2(0, -7), fq + Vector2(7, 0), fq + Vector2(0, 7), fq + Vector2(-7, 0)]), UIS.INK)
+				draw_colored_polygon(PackedVector2Array([fq + Vector2(0, -5), fq + Vector2(5, 0), fq + Vector2(0, 5), fq + Vector2(-5, 0)]), Color("#ff8ad8"))
+				draw_rect(Rect2(fq - Vector2(1, 1), Vector2(2, 2)), Color.WHITE)
+			elif bool(it["evo"]):
 				IC.draw_in(self, "star", tile.position + Vector2(tile.size.x - 2.0, 4.0), 12.0)
+			if bool(it.get("bonded", false)):   # a bonded pair: two linked rings at the top-left of the icon
+				var lq: Vector2 = tile.position + Vector2(5.0, 6.0)
+				draw_arc(lq, 3.5, 0.0, TAU, 12, UIS.INK, 3.5)
+				draw_arc(lq + Vector2(5.0, 0.0), 3.5, 0.0, TAU, 12, UIS.INK, 3.5)
+				draw_arc(lq, 3.5, 0.0, TAU, 12, UIS.ORCHID, 1.6)
+				draw_arc(lq + Vector2(5.0, 0.0), 3.5, 0.0, TAU, 12, UIS.ORCHID, 1.6)
 			# tecla
 			draw_rect(Rect2(p + Vector2(5.0, 5.0), Vector2(15.0, 15.0)), UIS.INK)
 			PXF.dstr(self, font, p + Vector2(5.0, 17.0), str(i + 1), HORIZONTAL_ALIGNMENT_CENTER, 15.0, roundi(13.0 * TXS.k()), UIS.TITLE if is_act else UIS.MUTED)
