@@ -13,6 +13,14 @@ const SPD_K := 1.1
 const CD_K := 0.9
 const ANIM_S := 2.6         # invulnerable durante la transformacion
 const COLOR := Color("#ff8ad8")
+const DASH_K := 0.7         # Mega Evolved: dash cooldown -30%
+# Mega Stones: beating a Mega rift gives your Pokémon its Mega Stone (or orb / relic) for the run, so you can Mega Evolve
+# at the next level-up instead of waiting for minute 30. While you can still earn one, Mega rifts come sooner and more often.
+const STONE_CURVE := [[8.0, 0.25], [15.0, 0.4], [30.0, 0.5]]
+# Mega rift bosses call minions: a few wild Pokémon of their type every MINION_EVERY seconds, at most MINION_CAP alive.
+const MINION_EVERY := 7.0
+const MINION_N := 3
+const MINION_CAP := 6
 
 # Grietas Mega: el legendario de la grieta puede aparecer en su forma Mega / Primigenia / Corona (Doofcraft: desde el
 # minuto 15, cada vez mas a menudo). Curva [minuto, probabilidad] interpolada; mas vida, dano y premio que el normal.
@@ -84,6 +92,23 @@ static func convert_signature(main, dex: int) -> String:
 	return ""
 
 
+# Chance of a Mega rift while your Pokémon could still earn its Mega Stone (it can Mega Evolve, has not, has no stone).
+static func stone_chance(minute: float) -> float:
+	if minute < float(STONE_CURVE[0][0]):
+		return 0.0
+	for i in range(1, STONE_CURVE.size()):
+		var a: Array = STONE_CURVE[i - 1]
+		var b: Array = STONE_CURVE[i]
+		if minute < float(b[0]):
+			return lerpf(float(a[1]), float(b[1]), (minute - float(a[0])) / (float(b[0]) - float(a[0])))
+	return float(STONE_CURVE[STONE_CURVE.size() - 1][1])
+
+
+static func wants_stone(main) -> bool:
+	return not main.mega_done and not bool(main.mega_stone) and main.mode != "team" and main.mode != "tower" \
+		and not main.banned.has("mega") and is_capable(int(main._pdex()))
+
+
 # Probabilidad de que una grieta sea Mega en ese minuto de partida (0 antes del minuto 15, tope en el ultimo punto).
 static func rift_chance(minute: float) -> float:
 	if minute < float(RIFT_CURVE[0][0]):
@@ -118,7 +143,7 @@ static func apply_boss(main, e, base_dex: int) -> void:
 static func card(main) -> Dictionary:
 	if main.mega_done or main.mode == "team" or main.mode == "tower" or main.banned.has("mega"):
 		return {}
-	if main.run_time < FROM_TIME or main.player.dead:
+	if (main.run_time < FROM_TIME and not bool(main.mega_stone)) or main.player.dead:
 		return {}
 	var fm: Dictionary = form_for(int(main._pdex()))
 	if fm.is_empty() or not main._smeta.has(str(int(fm["form"]))):
@@ -133,7 +158,7 @@ static func card(main) -> Dictionary:
 	if main.z_type != "":
 		desc += ". " + L.t("You lose your Z-Move.")
 	return {"cat": "mega", "id": "mega", "key": "mega", "w": 1.0, "title": title, "desc": desc,
-		"icon": "star", "tag": L.t("UNIQUE"), "color": COLOR}
+		"icon": "mstone:%d" % int(main._pdex()), "tag": L.t("UNIQUE"), "color": COLOR}   # the Pokémon's own Mega Stone / orb / relic
 
 
 func start(main) -> void:

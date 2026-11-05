@@ -275,6 +275,8 @@ var hyper := false       # Modo Hyper activo en esta partida
 var time_k := 1.0        # velocidad del reloj de la partida (2 en Hyper); run_time son segundos "de partida", no reales
 var mega = null          # Megaevolucion (mega.gd): una vez por partida, carta rara desde el minuto 30
 var mega_done := false
+var mega_stone := false   # earned by beating a Mega rift: the Mega card is offered at the next level-up (no minute-30 wait)
+var minion_t := 0.0
 var plate := "normal"    # Arceus: tipo de la placa actual (plates.gd)
 var plate_t := -1000000.0   # run_time de la ultima placa
 var forme := ""          # Deoxys: forma actual ("", attack, defense, speed); ver forme.gd
@@ -1694,7 +1696,7 @@ func _process(delta: float) -> void:
 		lowhp_hap_t = 0.0
 	hud.mom = mom
 	hud.dash_cd = dash_cd
-	hud.dash_max = DASH_CD * dash_k
+	hud.dash_max = DASH_CD * dash_k * (MG.DASH_K if _mega_on() else 1.0)
 	hud.z_cd_max = ZC.COOLDOWN if z_crystal else ZM.COOLDOWN
 	hud.dyn_cd_max = DYN.COOLDOWN
 	var bb = _bar_boss()
@@ -2081,7 +2083,7 @@ func _dash_start() -> void:
 	if trap_conf_t > 0.0 and v.length() > 0.05:
 		dash_dir = -dash_dir
 	dash_left = DASH_TIME
-	dash_cd = DASH_CD * dash_k
+	dash_cd = DASH_CD * dash_k * (MG.DASH_K if _mega_on() else 1.0)
 	dash_hit.clear()
 	player.invuln = maxf(player.invuln, DASH_IFRAMES)
 	Aud.sfx("shot_melee", 1.35)
@@ -2114,6 +2116,7 @@ func _mega_on() -> bool:
 
 func _mega_start() -> void:
 	mega_done = true
+	mega_stone = false
 	mega = MG.new()
 	mega.start(self)
 
@@ -8595,8 +8598,8 @@ func _offer() -> Array:
 	var evc: Dictionary = EVL.card(self)
 	if not evc.is_empty():
 		picked.append(evc)
-	# Megaevolucion: carta rara (siempre ocupa un hueco cuando sale)
-	if picked.is_empty() and randf() < MG.OFFER_CHANCE:
+	# Megaevolucion: carta rara (siempre ocupa un hueco cuando sale); with the Mega Stone it is always offered
+	if picked.is_empty() and (mega_stone or randf() < MG.OFFER_CHANCE):
 		var mc: Dictionary = MG.card(self)
 		if not mc.is_empty():
 			picked.append(mc)
@@ -9651,7 +9654,10 @@ func _open_rift(force_dex: int = -1, den: bool = false) -> void:
 	elif force_dex > 0:
 		p = _dex_by[force_dex]
 	else:
-		mega_rift = mode != "tower" and (DM.mega_rift(eter_kills) or randf() < MG.rift_chance(run_time / 60.0))
+		var mchance: float = MG.rift_chance(run_time / 60.0)
+		if MG.wants_stone(self):
+			mchance = maxf(mchance, MG.stone_chance(run_time / 60.0))
+		mega_rift = mode != "tower" and (DM.mega_rift(eter_kills) or randf() < mchance)
 		p = _pick_legend(mega_rift)
 		mega_rift = mega_rift and not p.is_empty() and MG.is_capable(int(p["dex"]))
 	if p.is_empty():
@@ -9826,8 +9832,20 @@ func _rift_arrive() -> void:
 	hud.rift_intro_t = RIFT_INTRO
 	hud.rift_intro_name = String(boss.enemy_name) if boss != null and is_instance_valid(boss) else ""
 	hud.rift_intro_sub = L.t("DYNAMAX DEN") if bool(ainfo.get("den", false)) else (L.t("MEGA RIFT") if bool(ainfo.get("mega", false)) else L.t("LEGENDARY RIFT"))
+	hud.rift_intro_tex = null
 	if boss != null and is_instance_valid(boss):
 		_ring(boss.position, 8.0, 160.0, rift_fx_col, 0.7, 4.0)
+		if boss.sprite != null and boss.sprite.texture != null:
+			hud.rift_intro_tex = boss.sprite.texture
+			var reg: Rect2 = boss.sprite.region_rect if boss.sprite.region_enabled else Rect2(Vector2.ZERO, boss.sprite.texture.get_size())
+			var simg: Image = boss.sprite.texture.get_image()   # crop the frame to the Pokémon itself (frames have empty space)
+			if simg != null:
+				if simg.is_compressed():
+					simg.decompress()
+				var used: Rect2i = simg.get_region(Rect2i(reg)).get_used_rect()
+				if used.size.x > 0 and used.size.y > 0:
+					reg = Rect2(reg.position + Vector2(used.position), Vector2(used.size))
+			hud.rift_intro_reg = reg
 
 
 func _arena_begin() -> void:
@@ -9949,6 +9967,8 @@ func _update_arena(delta: float) -> void:
 		var b = ainfo["boss"]
 		if b == null or not is_instance_valid(b) or b.dead:
 			return
+		if bool(ainfo.get("mega", false)):
+			_mega_minions(delta, b)
 		if float(ainfo["t"]) >= ARENA_LIMIT:
 			_arena_expel()
 	elif ph == "down":
@@ -10008,6 +10028,39 @@ func _jd_port(new_arena: Node2D) -> void:
 	wx.clear()
 
 
+# Mega rift: the boss calls a few wild Pokémon of its type to help it (every MG.MINION_EVERY s, at most MG.MINION_CAP).
+func _mega_minions(delta: float, b) -> void:
+	minion_t -= delta
+	if minion_t > 0.0 or float(ainfo["t"]) < 3.0:
+		return
+	minion_t = MG.MINION_EVERY
+	var alive := 0
+	for en in enemies:
+		if is_instance_valid(en) and not en.dead and bool(en.get_meta("minion", false)):
+			alive += 1
+	var n: int = mini(MG.MINION_N, MG.MINION_CAP - alive)
+	if n <= 0:
+		return
+	var bag: Array = _bag_at(_dt())
+	var typed: Array = bag.filter(func(d): return _has_t(_dex_by[int(d["dex"])]["types"], b.types))
+	if not typed.is_empty():
+		bag = typed
+	if bag.is_empty():
+		return
+	var base: Dictionary = _scale_at(_dt())
+	var sc := {"hp": float(base["hp"]) * _hp_k(_dt()), "dmg": float(base["dmg"]), "spd": float(base["spd"])}
+	for i in range(n):
+		var pos: Vector2 = b.position + Vector2.from_angle(randf() * TAU) * randf_range(70.0, 130.0)
+		var mn: Enemy = _make_enemy(bag[randi() % bag.size()], pos, sc)
+		mn.dmg *= DMG_K
+		mn.set_meta("minion", true)
+		_ring(pos, 4.0, 46.0, MG.COLOR, 0.35)
+	_ring(b.position, 10.0, 150.0, MG.COLOR, 0.5, 4.0)
+	if not bool(ainfo.get("minions_said", false)):
+		ainfo["minions_said"] = true
+		_say(L.t("%s calls for help!") % b.enemy_name, 2.6)
+
+
 func _legend_down(e) -> void:
 	if arena == null or String(ainfo.get("phase", "")) != "fight":
 		return
@@ -10051,11 +10104,36 @@ func _legend_down(e) -> void:
 			o.pulled = true
 	bonds += 1
 	Aud.sfx("bossDown")
+	for en in enemies:   # its minions flee with it
+		if is_instance_valid(en) and not en.dead and bool(en.get_meta("minion", false)):
+			en.hp = 0.0
+			en.dead = true
+			en.queue_free()
 	# Como el original: aviso de victoria y "¡Vínculo!" sobre el jugador (la eleccion llega al volver de la grieta)
 	_say(L.t("You defeated {x}! Grab your reward…").replace("{x}", String(e.enemy_name)), 3.4)
+	if bool(ainfo.get("mega", false)):
+		_mega_stone_reward(pos)
 	add_text(player.position + Vector2(0.0, -player.body_h - 10.0), L.t("Bond!"), Color("#ff8ad8"), 26)
 	_ring(player.position, 8.0, 90.0, Color("#ff8ad8"), 0.7)
 	shake = 12.0
+
+
+# Beating a Mega rift: your Pokémon's Mega Stone (Mega Evolve at the next level-up); a Pokémon that can't Mega Evolve
+# (or already did) gets a Legend Shard instead.
+func _mega_stone_reward(pos: Vector2) -> void:
+	if MG.wants_stone(self):
+		mega_stone = true
+		pending_levels += 1   # the Mega card comes right after the rift
+		var fm: Dictionary = MG.form_for(int(_pdex()))
+		var item: String = String(fm.get("item", "Mega Stone"))
+		get_tree().create_timer(1.2).timeout.connect(func():
+			Aud.sfx("shinyGet")
+			add_text(player.position + Vector2(0.0, -player.body_h - 40.0), item, MG.COLOR, 26)
+			_ring(player.position, 10.0, 200.0, MG.COLOR, 0.7, 5.0)
+			_say(L.t("You got %s! Mega Evolve at the next level-up.") % item, 4.0))
+	else:
+		lshards_run += 1   # paid out with the run's other rewards
+		get_tree().create_timer(1.2).timeout.connect(func(): _say(L.t("Mega rift cleared: +1 Legend Shard"), 3.2))
 
 
 # Victoria en una guarida Dynamax: premio, Caramelo Dynamax (recarga el Dynamax) y, la primera vez, lo desbloquea.
@@ -13350,6 +13428,8 @@ class Hud extends Node2D:
 	var rift_intro_t := 0.0
 	var rift_intro_name := ""
 	var rift_intro_sub := ""
+	var rift_intro_tex: Texture2D = null   # the boss's current frame: it appears on the banner as a silhouette, then in colour
+	var rift_intro_reg := Rect2()
 	var fusion_name := ""
 	var coins := 0
 	var balls := 0
@@ -13875,6 +13955,22 @@ class Hud extends Node2D:
 		var sx: float = vp.x * 0.5 - bw * 0.5 + fmod(tt * 900.0, bw + 160.0) - 80.0
 		if sx < vp.x * 0.5 + bw * 0.5 - 60.0:
 			draw_rect(Rect2(maxf(sx, vp.x * 0.5 - bw * 0.5), cy - 42.0, 60.0, 84.0), Color(1, 1, 1, 0.10 * al))
+		# the legendary itself on the left of the banner: a dark silhouette with a glowing edge that flashes into colour
+		if rift_intro_tex != null and rift_intro_reg.size.y > 0.0:
+			var sh: float = 118.0
+			var sk: float = minf(sh / rift_intro_reg.size.y, 150.0 / rift_intro_reg.size.x)
+			var ssz: Vector2 = rift_intro_reg.size * sk
+			var pop: float = 1.0 + 0.35 * (1.0 - e)
+			var bob: float = sin(tt * 3.0) * 3.0
+			var sc: Vector2 = Vector2(vp.x * 0.5 - bw * 0.5 + 24.0 + ssz.x * 0.5, cy - 6.0 + bob)
+			var rr := Rect2(sc - ssz * pop * 0.5, ssz * pop)
+			var reveal: float = clampf((tt - 0.45) / 0.25, 0.0, 1.0)   # 0 = silhouette, 1 = full colour
+			for o in [Vector2(-3, 0), Vector2(3, 0), Vector2(0, -3), Vector2(0, 3)]:
+				draw_texture_rect_region(rift_intro_tex, Rect2(rr.position + o, rr.size), rift_intro_reg, Color(col.lightened(0.5), al * (1.0 - 0.6 * reveal)))
+			draw_texture_rect_region(rift_intro_tex, rr, rift_intro_reg, Color(0.06, 0.03, 0.12, al).lerp(Color(1, 1, 1, al), reveal))
+			var fl: float = clampf(1.0 - absf(tt - 0.55) / 0.12, 0.0, 1.0)   # the white flash as the colour comes in
+			if fl > 0.0:
+				draw_texture_rect_region(rift_intro_tex, rr, rift_intro_reg, Color(10, 10, 10, fl * al))
 		PXF.dstr(self, f, Vector2(0.0, cy - 14.0), rift_intro_sub, HORIZONTAL_ALIGNMENT_CENTER, vp.x, roundi(18.0 * TXS.k()), Color(col.lightened(0.45), al))
 		var fs: int = roundi(40.0 * TXS.k() * (1.0 + 0.15 * (1.0 - e)))
 		PXF.dstro(self, f, Vector2(0.0, cy + 30.0), rift_intro_name, HORIZONTAL_ALIGNMENT_CENTER, vp.x, fs, 10, Color(col.darkened(0.6), al))

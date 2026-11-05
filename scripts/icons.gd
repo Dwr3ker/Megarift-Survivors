@@ -100,6 +100,11 @@ static func _emblem(type: String, kind: String, evo: bool = false, glyph: String
 
 static func image(name: String) -> Image:
 	_load()
+	if name.begins_with("mstone:"):   # the item a Pokémon uses to change form (Mega Stone, orb, rusted sword / shield)
+		var st: Texture2D = load("res://scripts/megastone.gd").tex(int(name.substr(7)))
+		if st != null:
+			return st.get_image().duplicate()
+		name = "star"
 	if name.begins_with("move:") or name.begins_with("evo:"):
 		var evo: bool = name.begins_with("evo:")
 		var id: String = name.substr(4 if evo else 5)
@@ -309,6 +314,8 @@ static func scale_for(name: String, size: float) -> int:
 	var w: int = 16
 	if name.begins_with("zc:"):
 		return maxi(1, roundi(size / 24.0))
+	if name.begins_with("mstone:"):
+		return maxi(1, roundi(size / 14.0))
 	if not (name.begins_with("move:") or name.begins_with("type:") or name.begins_with("evo:") or name.begins_with("zc:")):
 		if EXTRA.has(name) or name.begins_with("ti_") or name.begins_with("kec:"):
 			return maxi(1, roundi(size / 16.0))
