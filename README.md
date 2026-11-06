@@ -70,6 +70,9 @@ Current version: **0.1.2** (0.1.0 was the first stable release, after ten alpha 
 | **Mega Stones on cards** | In the Pokémon list a Pokémon that can change form in runs shows the item it uses instead of a letter: its Mega Stone (coloured after its Mega form's types), the Red or Blue Orb, Rayquaza's shard, or Zacian's and Zamazenta's rusted sword and shield. The same icon sits next to the line about it in the details, and on the Mega Evolution / Primal Reversion / Crowned Form card during a run. The icons are drawn in code (scripts/megastone.gd). |
 | **IVs and nature in Upgrades** | The Upgrades screen shows the chosen Pokémon's nature and IVs, with *Train IVs* and *Change nature* buttons, the same as in the Pokémon list. |
 | **Fits any screen** | The main menu, the Pokémon list and the level-up cards size themselves as shares of the screen, so 16:9, 16:10 and 4:3 screens (handhelds) are filled without empty bands: the stage and the menu tiles stretch, collection cards grow to fill the grid, and the level-up screen is drawn bigger on taller screens. |
+| **Clear attack warnings** | Enemy attacks are marked on the ground as clear danger zones on any floor (a thick outline with a dark edge, a fill that deepens as the hit nears and a core that grows to the edge). Your allies' attacks never hurt you, so they look different: a dashed outline in the ally's colour that slowly turns, with no danger fill. |
+| **Allies keep their own spot** | A summoned legendary and caught allies (Alphas, caught bosses) each wait on their own spot around you (left, right, below) and step apart when they get close, instead of walking on top of each other. |
+| **Buffs beside the stats** | The chip with your active buffs and altar power (e.g. *ATK x6 · Fury 25s*) sits beside the stats panel, so it no longer covers the MAX, Z-Move and Dash buttons. |
 
 ## Feature guide (PDF)
 

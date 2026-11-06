@@ -8009,19 +8009,40 @@ func _summon_legend(p: Prop) -> void:
 	p.queue_redraw()
 
 
+# Where each ally waits near you: the summoned legendary on the left, caught allies on the right and below, so two
+# allies never stand on the same spot (and walk the same path on top of each other).
+const ALLY_SPOTS := [Vector2(-70.0, 30.0), Vector2(70.0, 30.0), Vector2(0.0, 75.0), Vector2(-110.0, -15.0), Vector2(110.0, -15.0)]
+const ALLY_GAP := 46.0
+
+
 func _upd_legend(delta: float) -> void:
 	for lx in allies_extra.duplicate():
 		if not is_instance_valid(lx) or lx.dead:
 			allies_extra.erase(lx)
-		else:
-			_upd_ally(lx, delta)
 	if not is_instance_valid(legend):
 		legend = null
-		return
-	_upd_ally(legend, delta)
+	var all: Array = []
+	if legend != null:
+		all.append(legend)
+	all.append_array(allies_extra)
+	for i in range(all.size()):
+		_upd_ally(all[i], delta, i)
+	# allies that end up close (chasing the same enemy) step apart
+	for i in range(all.size()):
+		for j in range(i + 1, all.size()):
+			var a = all[i]
+			var b = all[j]
+			if a.dead or b.dead:
+				continue
+			var dv: Vector2 = b.position - a.position
+			var dl: float = dv.length()
+			if dl < ALLY_GAP:
+				var push: Vector2 = (dv / dl if dl > 0.01 else Vector2.RIGHT) * (ALLY_GAP - dl) * 0.5
+				a.position -= push
+				b.position += push
 
 
-func _upd_ally(lg, delta: float) -> void:
+func _upd_ally(lg, delta: float, slot: int = 0) -> void:
 	if lg.dead:
 		return
 	lg.atk_t -= delta
@@ -8041,7 +8062,7 @@ func _upd_ally(lg, delta: float) -> void:
 		_legend_die(lg)
 		return
 	var tg: Node2D = _nearest_enemy(lg.position, 380.0)
-	var want: Vector2 = player.position + Vector2(-70.0, 30.0)
+	var want: Vector2 = player.position + ALLY_SPOTS[slot % ALLY_SPOTS.size()]
 	var spd := 150.0
 	if tg != null and lg.position.distance_to(tg.position) > 170.0 and lg.position.distance_to(player.position) < 420.0:
 		want = tg.position
@@ -11069,23 +11090,60 @@ class Hazard extends Node2D:
 		if hit:
 			return
 		var k: float = clampf(t / maxf(0.01, delay), 0.0, 1.0)
-		var warn := Color(color.r, color.g, color.b, 0.16 + 0.22 * k)
-		var edge := Color(color.r, color.g, color.b, 0.75)
+		if ally_dmg > 0.0:
+			_draw_ally(k)
+			return
+		# an enemy attack: a clear danger zone on any ground (dark under-line, thick outline, a fill that deepens)
+		var warn := Color(color.r, color.g, color.b, 0.24 + 0.26 * k)
+		var edge := Color(color.r, color.g, color.b, 0.95)
+		var dark := Color(0.05, 0.02, 0.08, 0.55)
+		var core := Color(color.r, color.g, color.b, 0.38 + 0.2 * k)
 		if kind == "zone":
 			draw_set_transform(Vector2.ZERO, 0.0, Vector2(1.0, 0.8))
 			draw_circle(Vector2.ZERO, r, warn)
-			draw_arc(Vector2.ZERO, r, 0.0, TAU, 40, edge, 2.0)
-			draw_circle(Vector2.ZERO, r * k, Color(color.r, color.g, color.b, 0.3))
+			draw_arc(Vector2.ZERO, r, 0.0, TAU, 48, dark, 6.0)
+			draw_arc(Vector2.ZERO, r, 0.0, TAU, 48, edge, 3.0)
+			draw_circle(Vector2.ZERO, r * k, core)
+			draw_arc(Vector2.ZERO, r * k, 0.0, TAU, 40, Color(1, 1, 1, 0.55), 2.0)
 			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		else:
 			var d := Vector2.from_angle(angle)
 			var n := Vector2(-d.y, d.x) * width * 0.5
 			var p1: Vector2 = d * length
 			draw_colored_polygon(PackedVector2Array([n, p1 + n, p1 - n, -n]), warn)
-			draw_line(n, p1 + n, edge, 2.0)
-			draw_line(-n, p1 - n, edge, 2.0)
+			for sd in [n, -n]:
+				draw_line(sd, p1 + sd, dark, 5.0)
+				draw_line(sd, p1 + sd, edge, 3.0)
 			var q: Vector2 = d * length * k
-			draw_colored_polygon(PackedVector2Array([n, q + n, q - n, -n]), Color(color.r, color.g, color.b, 0.3))
+			draw_colored_polygon(PackedVector2Array([n, q + n, q - n, -n]), core)
+
+	# A caught ally's attack: it never hurts you, so no danger fill, just a dashed outline in the ally's colour that turns
+	# slowly, and a thin ring growing to show when it lands.
+	func _draw_ally(k: float) -> void:
+		var c := Color(color.r, color.g, color.b, 0.8)
+		var spin: float = t * 1.5
+		if kind == "zone":
+			draw_set_transform(Vector2.ZERO, 0.0, Vector2(1.0, 0.8))
+			var dashes: int = clampi(int(r / 9.0), 10, 40)
+			for i in range(dashes):
+				var a0: float = spin + float(i) * TAU / float(dashes)
+				draw_arc(Vector2.ZERO, r, a0, a0 + TAU / float(dashes) * 0.5, 4, c, 2.0)
+			draw_arc(Vector2.ZERO, r * k, 0.0, TAU, 40, Color(color.r, color.g, color.b, 0.45), 1.5)
+			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		else:
+			var d := Vector2.from_angle(angle)
+			var n := Vector2(-d.y, d.x) * width * 0.5
+			var seg := 18.0
+			var off: float = fmod(t * 60.0, seg * 2.0)
+			var x := -off
+			while x < length:
+				var x0: float = maxf(0.0, x)
+				var x1: float = minf(length, x + seg)
+				if x1 > x0:
+					for sd in [n, -n]:
+						draw_line(d * x0 + sd, d * x1 + sd, c, 2.0)
+				x += seg * 2.0
+			draw_line(d * length * k + n, d * length * k - n, Color(color.r, color.g, color.b, 0.6), 2.0)
 
 
 # Disparo enemigo
@@ -13494,7 +13552,9 @@ class Hud extends Node2D:
 	var off_skill := Vector2.ZERO
 	var show_map := true
 	var slot_n := 0   # number of skill slots (held items sit to their left)
-	var stats_bottom := 134.0   # y just under the stats panel (buffs hang from it)
+	var stats_bottom := 134.0   # y just under the stats panel
+	var stats_left := -1.0      # x of the stats panel's left edge (-1 = hidden): the buff chip sits beside it
+	var stats_top := 134.0
 	var pops := {}   # recogidas recientes: tipo -> {n, t}, se muestran como "+N" bajo el contador
 	var stats_compact := false
 	var _sp_keys: Array = []
@@ -13612,6 +13672,8 @@ class Hud extends Node2D:
 		var org := Vector2(vp.x - pw * k - 14.0 - ins.z, 134.0 + ins.y + (20.0 * float(ch_lines.size()) + 8.0 if ch_mode else 0.0) + (52.0 * float(team.size()) + 8.0 if not team.is_empty() else 0.0))
 		org += off_stats
 		stats_bottom = org.y + ph * k
+		stats_left = org.x
+		stats_top = org.y
 		draw_set_transform(org, 0.0, Vector2(k, k))
 		draw_rect(Rect2(UIS.SHADOW_OFF, Vector2(pw, ph)), UIS.SHADOW)
 		draw_style_box(UIS.frame(Color(UIS.BG.r, UIS.BG.g, UIS.BG.b, 0.9), UIS.EDGE), Rect2(Vector2.ZERO, Vector2(pw, ph)))
@@ -13695,10 +13757,12 @@ class Hud extends Node2D:
 
 	func draw_powers(font: Font, vp: Vector2) -> void:
 		var ins: Vector4 = DSP.insets(get_tree())
-		# active buff: right side, just under the stats panel
+		# active buffs and altar power: beside the stats panel, top-aligned with it (under it they covered the MAX / Z-Move /
+		# Dash buttons on the right); with the stats panel hidden, at the top right under the pause button
 		if buff_text != "":
-			var by: float = stats_bottom + 34.0
-			_chip(font, vp, by, L.t(buff_text), Color("#ffd65c"), WTex.get_t("altar_" + power_id) if power_id != "" else null, "", vp.x - 14.0 - ins.z)
+			var bx: float = (stats_left - 10.0) if stats_left > 0.0 else (vp.x - 14.0 - ins.z)
+			var by: float = (stats_top + 24.0) if stats_left > 0.0 else (stats_bottom + 34.0)
+			_chip(font, vp, by, L.t(buff_text), Color("#ffd65c"), WTex.get_t("altar_" + power_id) if power_id != "" else null, "", bx)
 		# held items: stacked to the left of the skill bar, bottom-aligned with it
 		var n: int = maxi(1, slot_n)
 		var total: float = (80.0 * float(n) + 10.0 * float(n - 1)) * sc_skill
@@ -14553,6 +14617,7 @@ class Hud extends Node2D:
 			draw_rect(Rect2(bx + 1.0, by + 29.0, (bw - 2.0) * pbar, 12.0), Color("#9ad0ff"))
 			_ds(font, Vector2(bx, by + 60.0), L.t("Your partner's HP"), HORIZONTAL_ALIGNMENT_CENTER, bw, 16, Color("#cfe6ff"))
 		stats_bottom = 134.0 + ins.y
+		stats_left = -1.0
 		if show_stats and not stats.is_empty():
 			draw_stats_panel(font, vp, ins)
 		draw_powers(font, vp)

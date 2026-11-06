@@ -160,5 +160,14 @@
  ],
  "Sharper small text": [
   "screens/pokemon_list_small_grid.jpg"
+ ],
+ "Clear attack warnings": [
+  "screens/attack_warnings.jpg"
+ ],
+ "Allies keep their own spot": [
+  "screens/allies_spots.jpg"
+ ],
+ "Buffs beside the stats": [
+  "screens/buff_chip.jpg"
  ]
 }

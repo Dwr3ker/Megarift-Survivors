@@ -79,6 +79,10 @@ func _init() -> void:
 		await _shop_and_gacha()
 		_finish()
 		return
+	if OS.get_cmdline_user_args().has("--hud-only"):
+		await _hud_bits()
+		_finish()
+		return
 	if OS.get_cmdline_user_args().has("--more-only"):   # only the screens added in 0.1.3: `... -- --more-only`
 		await _more()
 		await _four_three()
@@ -281,6 +285,7 @@ func _init() -> void:
 	await _frames(3)
 	await _shop_and_gacha()
 	await _more()
+	await _hud_bits()
 	await _four_three()
 	_finish()
 
@@ -685,6 +690,51 @@ func _more() -> void:
 	await _shot("traps")
 	await _end(m)
 	SV.d = saved.duplicate(true)
+
+
+# ---------- attack warnings, the buff chip, allies on their own spots (also: `-- --hud-only`) ----------
+func _hud_bits() -> void:
+	var m = await _run(887)
+	await _quiet(m)
+	m.player.active = false
+	var c: Vector2 = m.player.position
+	var hs: Array = [m._hazard_zone(c + Vector2(-260, 40), 110.0, 30.0, 0.0, "fire", Color("#ff7b3d")),
+		m._hazard_beam(c + Vector2(-380, -150), 0.2, 300.0, 30.0, 30.0, 0.0, "psychic", Color("#ff6bd6"))]
+	var a1 = m._hazard_zone(c + Vector2(280, 40), 180.0, 30.0, 0.0, "water", Color("#5aa0ff"))
+	m._ally_hz(a1, 50.0)
+	var a2 = m._hazard_beam(c + Vector2(120, -170), -0.1, 300.0, 30.0, 30.0, 0.0, "water", Color("#5aa0ff"))
+	m._ally_hz(a2, 50.0)
+	hs.append(a1)
+	hs.append(a2)
+	for h in hs:
+		h.t = 15.0
+	await _frames(30)
+	await _shot("attack_warnings")
+	await _end(m)
+	# the buff chip beside the stats panel
+	m = await _run(6)
+	await _quiet(m)
+	var bf: Dictionary = m.player.buffs["atk"]
+	bf["t"] = 30.0
+	bf["amount"] = 0.1
+	bf["ts"] = [29.0, 28.0, 27.0, 26.0, 25.0, 24.0]
+	bf["n"] = 6
+	m.power_kind = "fury"
+	m.power_t = 25.0
+	await _frames(30)
+	await _shot("buff_chip")
+	# a summoned legendary and a caught ally on their own spots
+	var alt = m.Prop.new()
+	alt.position = m.player.position + Vector2(5, 5)
+	m._summon_legend(alt)
+	m.alpha._make_ally({"dex": 150, "types": ["psychic"], "name": "Mewtwo", "pos": m.player.position + Vector2(-5, 5)})
+	await _frames(200)
+	m.join_t = -1.0   # the "has joined you" banner is done
+	m.hud.join_t = -1.0
+	m._say("", 0.1)
+	await _frames(30)
+	await _shot("allies_spots")
+	await _end(m)
 
 
 # ---------- 4:3 screens (run last: the window size changes) ----------
