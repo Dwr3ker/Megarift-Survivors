@@ -29,9 +29,6 @@
   "screens/dynamax_max_wave.jpg",
   "screens/z_move_cinematic.jpg"
  ],
- "Chained fusions": [
-  "screens/fusion_four_moves.jpg"
- ],
  "Boss HP bar": [
   "screens/boss_hp_bar.jpg"
  ],
@@ -114,9 +111,54 @@
  ],
  "Pokémon list filters": [
   "screens/pokemon_list_small_grid.jpg",
-  "screens/pokemon_list_type_filter.jpg"
+  "screens/pokemon_list_type_filter.jpg",
+  "screens/pokemon_list_favorites.jpg"
  ],
  "New trap look": [
   "screens/traps.jpg"
+ ],
+ "Fusion is a choice": [
+  "screens/fuse_choice_card.jpg",
+  "screens/move_bar_bonds.jpg",
+  "screens/fusion_four_moves.jpg"
+ ],
+ "Bond pairs": [
+  "screens/move_bar_bonds.jpg"
+ ],
+ "Mega Rifts": [
+  "screens/mega_rift_minions.jpg"
+ ],
+ "Mega Stones from Mega rifts": [
+  "screens/mega_stone_rift.jpg",
+  "screens/mega_rift_minions.jpg",
+  "screens/mega_card_stone.jpg"
+ ],
+ "Entering a rift": [
+  "screens/rift_entry_pull.jpg",
+  "screens/rift_intro_banner.jpg"
+ ],
+ "Shiny Charms": [
+  "screens/gacha_shiny_charm.jpg"
+ ],
+ "Region banners open with their region": [
+  "screens/gacha_locked_banner.jpg"
+ ],
+ "Types at a glance": [
+  "screens/pokemon_list_types.jpg"
+ ],
+ "Mega Stones on cards": [
+  "screens/pokemon_list_mega_stones.jpg",
+  "screens/mega_card_stone.jpg"
+ ],
+ "IVs and nature in Upgrades": [
+  "screens/upgrades_ivs.jpg"
+ ],
+ "Fits any screen": [
+  "screens/main_menu_4x3.jpg",
+  "screens/pokemon_list_4x3.jpg",
+  "screens/level_up_cards_4x3.jpg"
+ ],
+ "Sharper small text": [
+  "screens/pokemon_list_small_grid.jpg"
  ]
 }
