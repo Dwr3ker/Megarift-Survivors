@@ -918,6 +918,15 @@ class Portal extends Node2D:
 				var sz: float = 5.0 if front2 else 3.0
 				draw_rect(Rect2(hp - Vector2(sz, sz) * 0.5, Vector2(sz, sz)), Color(hc.r, hc.g, hc.b, (1.0 if front2 else 0.5) * al))
 
+	# Height of the top of the portal above its foot (the floating Mega Stone on a Mega Stone rift): the timer sits above it.
+	func top() -> float:
+		if style == "stone" and stone_tex != null:
+			return 190.0
+		var fr: Array = frames_stone if style == "stone" else frames
+		if fr.is_empty() or fr[0] == null:
+			return 110.0
+		return float((fr[0] as Texture2D).get_height()) * 3.0 - 12.0
+
 	func _draw() -> void:
 		var open: float = clampf(t / 0.8, 0.0, 1.0)
 		open = 1.0 - pow(1.0 - open, 3.0)

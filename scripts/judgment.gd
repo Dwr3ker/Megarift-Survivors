@@ -244,7 +244,7 @@ class Overlay extends Node2D:
 		if b > 0.0:
 			var sz: int = int(clampf(vp.x / 20.0, 20.0, 40.0))
 			_gold_text(L.t("ARCEUS HAS DESCENDED!"), Vector2(0.0, vp.y * 0.24), sz, vp.x, b)
-			var sub: String = L.t("He is invincible: run and hold out as long as you can")
+			var sub: String = L.t("Arceus can be defeated! Hold on and take him down")
 			draw_string_outline(f, Vector2(0.0, vp.y * 0.24 + float(sz) * 1.1), sub, HORIZONTAL_ALIGNMENT_CENTER, vp.x, int(float(sz) * 0.5), 4, Color(0, 0, 0, 0.8 * b))
 			draw_string(f, Vector2(0.0, vp.y * 0.24 + float(sz) * 1.1), sub, HORIZONTAL_ALIGNMENT_CENTER, vp.x, int(float(sz) * 0.5), Color(1.0, 0.91, 0.69, b))
 		if jd.can_skip and t < jd.T_BACK:
@@ -487,7 +487,9 @@ func fight() -> void:
 	A.def["scripted"] = true
 	A.set_meta("jd_arceus", true)
 	m.enemies.append(A)
-	m.ainfo = {"phase": "jd", "back": m.player.position, "stash_e": m.ainfo.get("stash_e", []), "stash_o": m.ainfo.get("stash_o", []), "boss": A}
+	# "back" is where you stood before the arena (saved by _jd_port): by now you are inside it. Returning to the arena's spot
+	# left you far from the map with the waiting enemies filling the cap, so nothing could spawn.
+	m.ainfo = {"phase": "jd", "back": m.ainfo.get("back", m.player.position), "stash_e": m.ainfo.get("stash_e", []), "stash_o": m.ainfo.get("stash_o", []), "boss": A}
 
 
 # --- cada fotograma ---------------------------------------------

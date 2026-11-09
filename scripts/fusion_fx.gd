@@ -70,7 +70,7 @@ const DEFAULT_SPEC := {"cd": 8.0, "k": 1.8, "steps": [["nova", {"rings": 2, "rma
 
 
 func _ready() -> void:
-	z_index = 12
+	z_index = 0   # drawn under the Pokémon with the rest of your moves (main.gd mfx layer)
 	process_mode = Node.PROCESS_MODE_PAUSABLE
 
 

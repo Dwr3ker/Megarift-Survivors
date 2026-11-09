@@ -65,6 +65,8 @@ const PG = preload("res://scripts/progress.gd")
 const CH = preload("res://scripts/challenges.gd")
 const VFX = preload("res://scripts/vfx.gd")
 const PFX = preload("res://scripts/pfx.gd")
+const GMX = preload("res://scripts/gmax.gd")
+const HFX = preload("res://scripts/hover_fx.gd")
 const PAUSEUI = preload("res://scripts/pause_ui.gd")
 
 
@@ -396,6 +398,7 @@ var gen_q: Array = []
 var gfx: Node2D
 var world: Node2D
 var fx: Node2D
+var mfx: Node2D   # your moves (projectiles, orbiting orbs, evolved and Fusion Move effects): under the Pokémon
 var pfx: Node2D
 var pfx_low: Node2D
 var player: Player
@@ -609,6 +612,7 @@ func _ready() -> void:
 	randomize()
 	L.apply()
 	PXF.apply()
+	HFX.hook.call_deferred(self)   # mouse hover on the pause menu and the other in-run buttons: they grow and brighten
 	DSP.menu_mode = false
 	DSP.apply(get_tree())
 	DisplayServer.screen_set_keep_on(true)   # que el movil no se apague en plena partida
@@ -624,6 +628,8 @@ func _ready() -> void:
 	add_child(ground)
 	gfx = Node2D.new()
 	add_child(gfx)
+	mfx = Node2D.new()   # between the ground effects and the y-sorted world: attacks come out from under the Pokémon,
+	add_child(mfx)       # so you still see every Pokémon when the screen is full of moves (enemy attacks stay on top)
 	world = Node2D.new()
 	world.y_sort_enabled = true
 	add_child(world)
@@ -638,10 +644,10 @@ func _ready() -> void:
 	pfx.under = pfx_low
 	ffx = FFX.new()
 	ffx.main = self
-	fx.add_child(ffx)
+	mfx.add_child(ffx)
 	evfx = EVFX.new()
 	evfx.main = self
-	fx.add_child(evfx)
+	mfx.add_child(evfx)
 	evab = EVAB.new(self)
 
 	_load_data()
@@ -1617,6 +1623,13 @@ func _process(delta: float) -> void:
 			if run_time >= JDM.ARC_AT and not jd.done and pending_levels == 0 and mode != "rush" and mode != "tower":
 				jd.begin()
 		else:
+			# nothing on the map can be touched from inside: the map's action button (a paid chest's price, Open,
+			# Throw Poké Ball...) and its markers are only refreshed out there, so the last one stayed stuck on screen
+			# in the rift, and Space opened nothing instead of dashing
+			hud.act_txt = ""
+			hud.act_sp = Vector2(-9999.0, -9999.0)
+			hud.poi_marks = []
+			act_req = false
 			_update_arena(delta)
 			if bool(ainfo.get("cave", false)):
 				if String(ainfo.get("owner", "cave")) == "lab":
@@ -1724,6 +1737,7 @@ func _process(delta: float) -> void:
 	hud.dyn_type = String(player.types[0])
 	hud.dyn_btn = 0 if (mode == "tower" or not DYN.unlocked(SV.d["stats"]) or _dyn_on()) else (3 if dyn_used else (2 if run_time >= DYN.MIN_TIME else 0))
 	hud.dyn_cd = dyn_cd
+	hud.dyn_gmax = GMX.has_factor(SV.d, int(_cur_dex())) and mode != "tower"
 	hud.ab_name = L.t(String(AB.FX[AB.of(_cur_dex())]["name"]))
 	hud.show_stats = bool(SV.setting("stats_box"))
 	if hud.show_stats:
@@ -2065,7 +2079,10 @@ func _dyn_start() -> void:
 	dyn = DYN.new()
 	dyn.start(self)
 	dyn_flash = 0.0
+	hud.dyn_word = "GIGANTAMAX" if dyn.giga else "DYNAMAX"
 	Aud.sfx("legend")
+	if dyn.giga:
+		_say(L.t("Gigantamax! Every big wave is %s") % GMX.move_name(int(_cur_dex())), 3.4)
 
 
 func _dyn_stop() -> void:
@@ -2231,14 +2248,14 @@ func _atk() -> float:
 		k *= 1.4
 	if _has_item("lifeorb"):
 		k *= 1.3   # antes, con las dos a la vez (Doble equipaje) la Vidasfera no sumaba daño pero seguía quitando vida
-	return base_atk * pow(1.10, _lvf("atk")) * (1.0 + _buff_mul("atk")) * k * (1.5 if _pw("fury") else 1.0) * (1.5 if wp_t > 0.0 else 1.0) * _rk("atk") * (1.0 + 0.003 * float(reap_kills)) * (1.0 + _abn("dmg") + _moxie() + (_abn("defiant") if defiant_t > 0.0 else 0.0)) * (DYN.DMG_K if _dyn_on() else 1.0) * (MG.ATK_K * DM.mega_atk_k(eter_kills) if _mega_on() else 1.0) * (FM.ATK_K if forme == "attack" else 1.0) * KYU.atk_k(self) * (1.0 + evo_dmg + seas_dmg) * (1.0 + MOM_PER * mom)
+	return base_atk * pow(1.10, _lvf("atk")) * (1.0 + _buff_mul("atk")) * k * (1.5 if _pw("fury") else 1.0) * (1.5 if wp_t > 0.0 else 1.0) * _rk("atk") * (1.0 + 0.003 * float(reap_kills)) * (1.0 + _abn("dmg") + _moxie() + (_abn("defiant") if defiant_t > 0.0 else 0.0)) * (dyn.dmg_k if _dyn_on() else 1.0) * (MG.ATK_K * DM.mega_atk_k(eter_kills) if _mega_on() else 1.0) * (FM.ATK_K if forme == "attack" else 1.0) * KYU.atk_k(self) * (1.0 + evo_dmg + seas_dmg) * (1.0 + MOM_PER * mom)
 
 
 func _spd() -> float:
 	if mode == "chal" and _ch_rs("no_move"):
 		return 0.0
 	var k: float = (1.35 if _has_item("choicescarf") else 1.0) * (1.1 if _has_item("ti_flying") else 1.0)
-	return minf(base_spd * SPD_MAX, base_spd * pow(1.07, _lvf("spd")) * (1.0 + _buff_mul("spd")) * k * (1.4 if _pw("haste") else 1.0) * (0.8 if _has_mod("slow") else 1.0) * _rk("spd") * (1.0 + _abn("spd") + _ab_wspd()) * (DYN.STAT_K if _dyn_on() else 1.0) * (MG.SPD_K if _mega_on() else 1.0) * (FM.SPD_K if forme == "speed" else 1.0) * (1.0 + evo_spd + seas_spd) * (kec.spd_mul() if kec != null else 1.0))
+	return minf(base_spd * SPD_MAX, base_spd * pow(1.07, _lvf("spd")) * (1.0 + _buff_mul("spd")) * k * (1.4 if _pw("haste") else 1.0) * (0.8 if _has_mod("slow") else 1.0) * _rk("spd") * (1.0 + _abn("spd") + _ab_wspd()) * (dyn.stat_k if _dyn_on() else 1.0) * (MG.SPD_K if _mega_on() else 1.0) * (FM.SPD_K if forme == "speed" else 1.0) * (1.0 + evo_spd + seas_spd) * (kec.spd_mul() if kec != null else 1.0))
 
 
 func _cd_mul() -> float:
@@ -2247,12 +2264,12 @@ func _cd_mul() -> float:
 
 func _cd_mul_raw() -> float:
 	var k: float = 0.8 if _has_item("quickclaw") else 1.0
-	return pow(0.92, _lvf("cd")) * k * float(perks["cd"]) * (0.65 if _pw("frenzy") else 1.0) * _rk("cd") * (1.0 - _abn("cd")) / (DYN.STAT_K if _dyn_on() else 1.0) * (MG.CD_K if _mega_on() else 1.0) * KYU.cd_k(self) * (kec.cd_mul() if kec != null else 1.0)
+	return pow(0.92, _lvf("cd")) * k * float(perks["cd"]) * (0.65 if _pw("frenzy") else 1.0) * _rk("cd") * (1.0 - _abn("cd")) / (dyn.stat_k if _dyn_on() else 1.0) * (MG.CD_K if _mega_on() else 1.0) * KYU.cd_k(self) * (kec.cd_mul() if kec != null else 1.0)
 
 
 func _reduction() -> float:
 	var vest: float = (0.2 if _has_item("assaultvest") else 0.0) + (0.08 if _has_item("ti_rock") else 0.0)
-	return minf(0.8, minf(0.7, 0.06 * _lvf("def")) + vest + float(perks["def"]) + _buff_mul("def") + _rk_add("def") + _abn("taken") + (kec.def_add() if kec != null else 0.0) + (0.4 if _pw("aegis") else 0.0) + (DYN.TAKEN if _dyn_on() else 0.0) + (FM.TAKEN if forme == "defense" else 0.0))
+	return minf(0.8, minf(0.7, 0.06 * _lvf("def")) + vest + float(perks["def"]) + _buff_mul("def") + _rk_add("def") + _abn("taken") + (kec.def_add() if kec != null else 0.0) + (0.4 if _pw("aegis") else 0.0) + (dyn.taken if _dyn_on() else 0.0) + (0.4 if _dyn_on() and dyn.gm != null and dyn.gm.guard_t > 0.0 else 0.0) + (FM.TAKEN if forme == "defense" else 0.0))
 
 
 func _regen() -> float:
@@ -3267,7 +3284,7 @@ func _make_bullet(m: Dictionary, pos: Vector2, vel: Vector2, life: float, pierce
 	b.shape = String(vv["proj"])
 	b.pal = String(vv["pal"])
 	b.trail = String(vv.get("trail", ""))
-	fx.add_child(b)
+	mfx.add_child(b)
 	bullets.append(b)
 	if bool(m.get("evolved", false)):
 		evfx.track(b, m)
@@ -4212,7 +4229,7 @@ func _orbit(m: Dictionary, delta: float) -> void:
 		nb.life = 1.0e9
 		nb.pierce = 999999
 		nb.position = player.position
-		fx.add_child(nb)
+		mfx.add_child(nb)
 		bullets.append(nb)
 		mine.append(nb)
 	for i in range(mine.size()):
@@ -9649,8 +9666,8 @@ func _update_rift(delta: float) -> void:
 	if MG.wants_stone(self) and run_time >= MG.STONE_FORCE and not MG.evo_start(self):
 		rift_miss = 0
 		_open_rift(-1, false, true)
-		if stone_tried:
-			return
+		if stone_tried or rift != null:
+			return   # never a second rift on top of this one
 	var chance: float = 1.0 if mode == "rifts" else minf(RIFT_CHANCE_MAX, RIFT_CHANCE + RIFT_PITY * float(rift_miss))
 	if randf() < chance:
 		rift_miss = 0
@@ -9671,6 +9688,8 @@ func _pick_legend(capable_only: bool = false) -> Dictionary:
 	var pool: Array = _region_filter(_legend_pool(), 3)   # rifts on a region map open onto its legendaries
 	if capable_only:   # Grieta Mega: solo legendarios con forma Mega / Primigenia / Corona
 		var cap: Array = pool.filter(func(q): return MG.is_capable(int(q["dex"])))
+		if cap.is_empty():   # Johto, Unova and Paldea have none: their Mega rifts open onto one from any region
+			cap = _legend_pool().filter(func(q): return MG.is_capable(int(q["dex"])))
 		if not cap.is_empty():
 			pool = cap
 	if pool.is_empty():
@@ -9691,10 +9710,25 @@ func _open_rift(force_dex: int = -1, den: bool = false, force_stone: bool = fals
 	var p: Dictionary = {}
 	var mega_rift := false
 	var stone_rift := false
+	var gden := false
 	if den:
 		var cl: Array = _candidates(_tier_at(run_time))
 		if not cl.is_empty():
 			p = cl[randi() % cl.size()]
+		# a Gigantamax den (after the first den, which unlocks Dynamax): its boss is a Pokémon that can Gigantamax,
+		# often yours when it can and doesn't have the Factor yet
+		if DYN.unlocked(SV.d["stats"]) and randf() < GMX.DEN_CHANCE:
+			var gp: Array = []
+			for gd in GMX.SPECIES:
+				if _dex_by.has(gd) and _smeta.has(str(gd)):
+					gp.append(_dex_by[gd])
+			var mine: int = int(_cur_dex())
+			if GMX.capable(mine) and not GMX.has_factor(SV.d, mine) and _dex_by.has(mine) and randf() < 0.5:
+				p = _dex_by[mine]
+				gden = true
+			elif not gp.is_empty():
+				p = gp[randi() % gp.size()]
+				gden = true
 	elif force_dex > 0:
 		p = _dex_by[force_dex]
 	else:
@@ -9726,7 +9760,9 @@ func _open_rift(force_dex: int = -1, den: bool = false, force_stone: bool = fals
 		rift.self_modulate = Color(1, 1, 1, 0)   # no se dibuja el torbellino de la grieta: la guarida tiene su propio aspecto
 		rift.ttl = DEN_TTL
 		rift.add_child(DYN.Den.new())
-		rift.add_child(DYN.Pillar.new())
+		var pil = DYN.Pillar.new()
+		pil.gmax = gden
+		rift.add_child(pil)
 	elif stone_rift:   # the Mega Stone rift looks its own: Mega pink and gold, with your Pokémon's stone above it
 		rift.style = "stone"
 		rift.stone_tex = MST.tex(int(_cur_dex()))
@@ -9734,7 +9770,7 @@ func _open_rift(force_dex: int = -1, den: bool = false, force_stone: bool = fals
 	var ar: Node2D = ARENA.new()
 	ar.setup(ty, randi() % 100000)
 	ar.start_bake()
-	rift_info = {"dex": dex, "type": ty, "shiny": (not den) and bool(_sm(dex).get("sh", 0)) and randf() < (SV.CHARM_RIFT if charm_gens.has(_gen_of(dex)) else 1.0) / 512.0, "arena": ar, "den": den, "mega": mega_rift, "stone": stone_rift}
+	rift_info = {"dex": dex, "type": ty, "shiny": (not den) and bool(_sm(dex).get("sh", 0)) and randf() < (SV.CHARM_RIFT if charm_gens.has(_gen_of(dex)) else 1.0) / 512.0, "arena": ar, "den": den, "mega": mega_rift, "stone": stone_rift, "gmax": gden}
 	Aud.sfx("rift")
 	if mega_rift:
 		_say(L.t("A Mega Rift has opened!"), 3.0)
@@ -9798,12 +9834,14 @@ func _update_rift_hud() -> void:
 		var to: Vector2 = rift.position - player.position
 		var vp: Vector2 = get_viewport_rect().size
 		hud.rift_den = bool(rift_info.get("den", false))
+		hud.rift_gmax = bool(rift_info.get("gmax", false))
 		hud.rift_stone = bool(rift_info.get("stone", false))
 		hud.rift_ttl = rift.ttl
 		hud.rift_dir = to.normalized()
-		hud.rift_scr = get_viewport().get_canvas_transform() * (rift.position + Vector2(0.0, -40.0))
+		hud.rift_scr = get_viewport().get_canvas_transform() * (rift.position + Vector2(0.0, -rift.top() - 8.0))   # above the portal
 		hud.rift_m = roundi(to.length() / ground.TS)
-		hud.rift_off = hud.rift_scr.x < 0.0 or hud.rift_scr.x > vp.x or hud.rift_scr.y < 0.0 or hud.rift_scr.y > vp.y
+		var foot: Vector2 = get_viewport().get_canvas_transform() * (rift.position + Vector2(0.0, -40.0))   # the portal itself on screen?
+		hud.rift_off = foot.x < 0.0 or foot.x > vp.x or foot.y < 0.0 or foot.y > vp.y
 
 
 func _free_list(arr: Array) -> void:
@@ -9883,7 +9921,7 @@ func _rift_arrive() -> void:
 	hud.rift_notice = -1.0   # the "A rift has opened!" sign is done: you are inside
 	hud.rift_intro_t = RIFT_INTRO
 	hud.rift_intro_name = String(boss.enemy_name) if boss != null and is_instance_valid(boss) else ""
-	hud.rift_intro_sub = L.t("DYNAMAX DEN") if bool(ainfo.get("den", false)) else (L.t("MEGA RIFT") if bool(ainfo.get("mega", false)) else L.t("LEGENDARY RIFT"))
+	hud.rift_intro_sub = L.t("GIGANTAMAX DEN") if bool(ainfo.get("gmax", false)) else L.t("DYNAMAX DEN") if bool(ainfo.get("den", false)) else (L.t("MEGA RIFT") if bool(ainfo.get("mega", false)) else L.t("LEGENDARY RIFT"))
 	hud.rift_intro_tex = null
 	if boss != null and is_instance_valid(boss):
 		_ring(boss.position, 8.0, 160.0, rift_fx_col, 0.7, 4.0)
@@ -9905,7 +9943,7 @@ func _arena_begin() -> void:
 	var ty: String = String(rift_info["type"])
 	var new_arena: Node2D = rift_info["arena"]
 	ainfo = {"phase": "fight", "t": 0.0, "back": player.position, "dex": dex, "type": ty,
-		"shiny": bool(rift_info["shiny"]), "stash_e": enemies.duplicate(), "stash_o": orbs.duplicate(), "end": 0.0, "boss": null, "den": bool(rift_info.get("den", false)), "mega": bool(rift_info.get("mega", false)), "stone": bool(rift_info.get("stone", false))}
+		"shiny": bool(rift_info["shiny"]), "stash_e": enemies.duplicate(), "stash_o": orbs.duplicate(), "end": 0.0, "boss": null, "den": bool(rift_info.get("den", false)), "mega": bool(rift_info.get("mega", false)), "stone": bool(rift_info.get("stone", false)), "gmax": bool(rift_info.get("gmax", false))}
 	for e in enemies:
 		e.visible = false
 	for o in orbs:
@@ -9957,7 +9995,17 @@ func _arena_begin() -> void:
 		wx_kind = ""
 		wx.clear()
 	Aud.sfx("legend")
-	_say((L.t("Dynamax %s challenges you!") if is_den else L.t("%s challenges you!")) % e.enemy_name, 3.0)
+	if bool(ainfo.get("gmax", false)):   # a Gigantamax boss: bigger, gold and red, with the storm crown
+		e.sprite.scale *= 1.15   # a little bigger than a Dynamax boss
+		e.body_h *= 1.15
+		var cr = DYN.Crown.new()
+		cr.h = e.body_h
+		cr.w = e.radius * 1.8
+		e.add_child(cr)
+		e.modulate = Color(1.2, 0.95, 0.85)
+		_say(L.t("Gigantamax %s challenges you!") % e.enemy_name, 3.0)
+	else:
+		_say((L.t("Dynamax %s challenges you!") if is_den else L.t("%s challenges you!")) % e.enemy_name, 3.0)
 	shake = maxf(shake, 10.0)
 
 
@@ -10215,6 +10263,21 @@ func _den_down(e) -> void:
 	dyn_used = false
 	dyn_cd = 0.0
 	Aud.sfx("bossDown")
+	if bool(ainfo.get("gmax", false)):   # a Gigantamax den gives its Pokémon the Gigantamax Factor, for good
+		var gdx: int = int(ainfo["dex"])
+		var fresh: bool = GMX.grant(SV.d, gdx)
+		SV.save()
+		var nm: String = L.t(String(_dex_by[gdx]["name"])) if _dex_by.has(gdx) else ""
+		if gdx == int(_cur_dex()):
+			_say(L.t("Gigantamax Factor! Your %s can Gigantamax: %s") % [nm, GMX.move_name(gdx)], 4.6)
+		elif fresh:
+			_say(L.t("Gigantamax Factor for %s! Play as it to Gigantamax") % nm, 4.2)
+		else:
+			_say(L.t("Den cleared! Dynamax Candy: you can use Dynamax again"), 3.6)
+		add_text(player.position + Vector2(0.0, -player.body_h - 10.0), "G-MAX", GMX.GOLD, 28)
+		_ring(player.position, 8.0, 130.0, GMX.GOLD, 0.7)
+		shake = 12.0
+		return
 	if first:
 		_say(L.t("Dynamax unlocked! MAX button, C key or left trigger (from minute 3)"), 4.2)
 	else:
@@ -13481,6 +13544,8 @@ class Hud extends Node2D:
 	var z_btn := 0
 	var z_cd := 0.0
 	var dyn_cd := 0.0
+	var dyn_gmax := false     # the button says G-MAX: this Pokémon has the Gigantamax Factor
+	var dyn_word := "DYNAMAX"  # the banner and timer word (GIGANTAMAX for a Gigantamax)
 	var adapt_pct := 0
 	var dyn_left := -1.0
 	var dyn_flash := 99.0
@@ -13490,6 +13555,7 @@ class Hud extends Node2D:
 	var act_sp := Vector2(-9999.0, -9999.0)
 	var poi_marks: Array = []
 	var rift_den := false
+	var rift_gmax := false   # the den is a Gigantamax den
 	var rift_stone := false   # the Mega Stone rift: pink arrow, sign and minimap mark
 	var ab_name := ""
 	var down := false
@@ -13932,7 +13998,10 @@ class Hud extends Node2D:
 		var pop: float = 1.0 + maxf(0.0, 0.25 - rift_notice) * 1.6
 		var t1: String = L.t("A RIFT HAS OPENED!")
 		var t2: String = L.t("Follow the purple arrow: a legendary awaits inside")
-		if rift_den:
+		if rift_den and rift_gmax:
+			t1 = L.t("A GIGANTAMAX DEN HAS OPENED!")
+			t2 = L.t("Follow the red arrow: win its Gigantamax Factor inside")
+		elif rift_den:
 			t1 = L.t("A DYNAMAX DEN HAS OPENED!")
 			t2 = L.t("Follow the red arrow: a giant Pokémon awaits inside")
 		elif rift_stone:
@@ -14134,18 +14203,24 @@ class Hud extends Node2D:
 				var lp: Vector2 = e + Vector2(-ca * 34.0, -sin(a) * 30.0 + 4.0)
 				var lw: float = 240.0
 				var lx: float = lp.x - (lw if ha == HORIZONTAL_ALIGNMENT_RIGHT else (0.0 if ha == HORIZONTAL_ALIGNMENT_LEFT else lw * 0.5))
-				_dso(font, Vector2(lx, lp.y), label, ha, lw, 16, 5, Color(0, 0, 0, 0.85))
-				_ds(font, Vector2(lx, lp.y), label, ha, lw, 16, tcol)
+				_dso(font, Vector2(lx, lp.y + 2.0), label, ha, lw, 20, 6, Color(0.04, 0.02, 0.1, 0.95))
+				_ds(font, Vector2(lx, lp.y + 2.0), label, ha, lw, 20, tcol)
 			else:
-				# Encima de la grieta: flecha que bota con la cuenta atras
-				var by: float = rift_scr.y - 46.0 - absf(sin(Time.get_ticks_msec() * 0.001 * 4.0)) * 10.0
+				# Above the portal: a bobbing arrow pointing down at it, and the countdown on a dark plate above the arrow
+				var by: float = rift_scr.y - 12.0 - absf(sin(Time.get_ticks_msec() * 0.001 * 4.0)) * 8.0
 				var p := Vector2(rift_scr.x, by)
+				var fs2: int = roundi(24.0 * TXS.k())
+				p.y = maxf(p.y, 96.0 + float(fs2))   # a tall portal near the top of the screen: the timer stays on screen
 				var tri := PackedVector2Array([p + Vector2(-17.0, -14.0), p + Vector2(17.0, -14.0), p + Vector2(0.0, 11.0)])
 				draw_colored_polygon(tri, Color("#1a0b33"))
 				draw_colored_polygon(PackedVector2Array([p + Vector2(-14.0, -12.0), p + Vector2(14.0, -12.0), p + Vector2(0.0, 8.0)]), fcol)
 				var l2: String = "%s %d s" % [lbl, ceili(rift_ttl)]
-				_dso(font, p + Vector2(-100.0, -22.0), l2, HORIZONTAL_ALIGNMENT_CENTER, 200.0, 15, 5, Color(0, 0, 0, 0.85))
-				_ds(font, p + Vector2(-100.0, -22.0), l2, HORIZONTAL_ALIGNMENT_CENTER, 200.0, 15, tcol)
+				var tw2: float = font.get_string_size(l2, HORIZONTAL_ALIGNMENT_LEFT, -1.0, fs2).x
+				var plate := Rect2(p.x - tw2 * 0.5 - 12.0, p.y - 22.0 - fs2 - 8.0, tw2 + 24.0, fs2 + 14.0)
+				draw_rect(plate, Color(0.06, 0.03, 0.14, 0.82))
+				draw_rect(plate, Color(fcol.r, fcol.g, fcol.b, 0.9), false, 2.0)
+				_dso(font, Vector2(p.x - 160.0, plate.position.y + fs2 + 2.0), l2, HORIZONTAL_ALIGNMENT_CENTER, 320.0, 24, 6, Color(0.04, 0.02, 0.1, 0.95))
+				_ds(font, Vector2(p.x - 160.0, plate.position.y + fs2 + 2.0), l2, HORIZONTAL_ALIGNMENT_CENTER, 320.0, 24, Color.WHITE)
 		# (rift and den fights: the boss's HP is the top boss bar; the time left is drawn under it, see draw_boss_bar)
 
 	var team: Array = []
@@ -14308,15 +14383,15 @@ class Hud extends Node2D:
 			var fr: float = clampf(dyn_left / DYN.DUR, 0.0, 1.0)
 			draw_rect(Rect2(x0 - 2.0, DYN_BAR_Y, w + 4.0, 22.0), Color(0, 0, 0, 0.7))
 			draw_rect(Rect2(x0, DYN_BAR_Y + 2.0, w * fr, 18.0), tcol if fr > 0.25 else Color("#ffb347"))
-			_dso(font, Vector2(x0, DYN_BAR_Y + 17.0), "DYNAMAX  %d s" % ceili(dyn_left), HORIZONTAL_ALIGNMENT_CENTER, w, 15, 3, Color(UIS.INK, 0.9))
-			_ds(font, Vector2(x0, DYN_BAR_Y + 17.0), "DYNAMAX  %d s" % ceili(dyn_left), HORIZONTAL_ALIGNMENT_CENTER, w, 15, Color.WHITE)
+			_dso(font, Vector2(x0, DYN_BAR_Y + 17.0), (dyn_word + "  %d s") % ceili(dyn_left), HORIZONTAL_ALIGNMENT_CENTER, w, 15, 3, Color(UIS.INK, 0.9))
+			_ds(font, Vector2(x0, DYN_BAR_Y + 17.0), (dyn_word + "  %d s") % ceili(dyn_left), HORIZONTAL_ALIGNMENT_CENTER, w, 15, Color.WHITE)
 		if dyn_flash < 2.7:
 			var fl: float = clampf(1.0 - dyn_flash / 0.25, 0.0, 1.0)
 			if fl > 0.0:
 				draw_rect(Rect2(Vector2.ZERO, vp), Color(1.0, 0.6, 0.7, 0.45 * fl * flash_k))
 			var al: float = clampf((2.7 - dyn_flash) / 0.5, 0.0, 1.0)
 			var fs: int = 84
-			var word := "DYNAMAX"
+			var word: String = dyn_word
 			var widths: Array = []
 			var tw: float = 0.0
 			for ch in word:
@@ -14363,7 +14438,9 @@ class Hud extends Node2D:
 				draw_circle(c, 52.0 + beat * 6.0, Color(tcol.r, tcol.g, tcol.b, 0.25 + beat * 0.25))
 			draw_circle(c, 46.0, Color(0.14, 0.03, 0.07, 0.88))
 			draw_arc(c, 46.0, 0.0, TAU, 40, tcol if ready else Color(0.5, 0.52, 0.58), 4.0)
-			_ds(font, Vector2(c.x - 44.0, c.y + (2.0 if dyn_btn == 3 else 11.0)), "MAX", HORIZONTAL_ALIGNMENT_CENTER, 88.0, 28 if dyn_btn == 3 else 32, Color.WHITE if ready else Color(0.6, 0.62, 0.68))
+			if dyn_gmax and ready:   # Gigantamax ready: a gold ring around the button
+				draw_arc(c, 52.0, 0.0, TAU, 40, Color("#ffb347"), 3.0)
+			_ds(font, Vector2(c.x - 44.0, c.y + (2.0 if dyn_btn == 3 else 11.0)), "G-MAX" if dyn_gmax else "MAX", HORIZONTAL_ALIGNMENT_CENTER, 88.0, (24 if dyn_gmax else 28) if dyn_btn == 3 else (26 if dyn_gmax else 32), Color.WHITE if ready else Color(0.6, 0.62, 0.68))
 			if dyn_btn == 3:
 				if dyn_cd_max > 0.0:   # the ring fills as the cooldown runs out
 					draw_arc(c, 46.0, -PI * 0.5, -PI * 0.5 + TAU * clampf(1.0 - dyn_cd / dyn_cd_max, 0.0, 1.0), 40, tcol, 4.0)

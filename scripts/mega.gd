@@ -23,7 +23,7 @@ const STONE_FORCE := 1200.0
 # A run started with a Pokémon that can still evolve (e.g. Charmander) trades Mega access for the evolution: the stone
 # rift is much rarer (x EVO_STONE_K) and never forced, and without the stone the Mega card stays a random chance at
 # level-ups after minute 30 (OFFER_CHANCE) instead of guaranteed.
-const EVO_STONE_K := 0.15
+const EVO_STONE_K := 0.45   # about 4.5% a rift from minute 15, 11% from minute 20 (raised from 0.15)
 # Mega rift bosses call minions: a few wild Pokémon of their type every MINION_EVERY seconds, at most MINION_CAP alive.
 const MINION_EVERY := 7.0
 const MINION_N := 3

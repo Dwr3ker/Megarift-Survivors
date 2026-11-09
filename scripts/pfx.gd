@@ -96,6 +96,9 @@ func sp(shape: String, pal: String, pos: Vector2, o: Dictionary = {}) -> void:
 
 
 func trail(kind: String, pal: String, pos: Vector2, vel: Vector2) -> void:
+	if under != null:   # a projectile's trail stays under the Pokémon with the projectile
+		under.trail(kind, pal, pos, vel)
+		return
 	if randf() > dens:
 		return
 	var back: float = (-vel).angle()

@@ -114,10 +114,21 @@ func _init() -> void:
 	await process_frame
 	check("the reminder opens when a run is waiting", is_instance_valid(menu.run_prompt))
 	var btns: Array = menu.run_prompt.find_children("*", "Button", true, false)
-	check("it offers Resume and Give up", btns.size() == 2, str(btns.size()))
-	var gave := [false]
-	menu.run_prompt.queue_free()
+	check("it offers Resume, Give up and Not now", btns.size() == 3, str(btns.size()))
+	# the reminder on launch: Esc (and B) closes it, and the run is kept for the Resume button
+	var esc := InputEventKey.new()
+	esc.keycode = KEY_ESCAPE
+	esc.pressed = true
+	menu._input(esc)
 	await process_frame
+	check("Esc closes the reminder on launch", not is_instance_valid(menu.run_prompt))
+	check("closing it keeps the run", RS.exists())
+	menu._ongoing_prompt()
+	await process_frame
+	(menu.run_prompt.find_children("*", "Button", true, false)[2] as Button).pressed.emit()
+	await process_frame
+	check("Not now closes it too and keeps the run", not is_instance_valid(menu.run_prompt) and RS.exists())
+	var gave := [false]
 	menu._ongoing_prompt(func(): gave[0] = true)
 	await process_frame
 	btns = menu.run_prompt.find_children("*", "Button", true, false)

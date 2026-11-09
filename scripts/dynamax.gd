@@ -4,6 +4,7 @@ extends RefCounted
 const ZMS = preload("res://scripts/zmove.gd")
 const Aud = preload("res://scripts/audio.gd")
 const PWF = preload("res://scripts/power_fx.gd")
+const GM = preload("res://scripts/gmax.gd")
 
 const COOLDOWN := 240.0   # 4 minutos desde que acaba
 const DUR := 60.0
@@ -30,6 +31,12 @@ var type := "normal"
 var aura := 0.0
 var since := 0.0
 var aura_node = null
+var giga := false   # Gigantamax: the species has the Gigantamax Factor (gmax.gd)
+var gm = null
+# the stat boost while it lasts (Gigantamax is a little stronger than Dynamax)
+var stat_k := STAT_K
+var dmg_k := DMG_K
+var taken := TAKEN
 
 
 # Aura roja que envuelve al Pokemon Dynamax (como en Espada y Escudo): niebla roja y violeta que sube en espiral y chispas.
@@ -38,6 +45,8 @@ class Aura extends Node2D:
 	var h := 40.0
 	var w := 24.0
 	var col := Color(0.9, 0.08, 0.25)
+	var gmax := false   # Gigantamax: a red storm cloud crown with gold lightning over its head
+	var crown = null
 
 	func _init() -> void:
 		show_behind_parent = true
@@ -45,6 +54,16 @@ class Aura extends Node2D:
 	func _process(d: float) -> void:
 		t += d
 		queue_redraw()
+		if gmax and crown == null:   # the crown is drawn in front of the Pokémon, the aura behind it
+			crown = Crown.new()
+			crown.h = h
+			crown.w = w
+			get_parent().add_child(crown)
+
+
+	func _exit_tree() -> void:
+		if crown != null and is_instance_valid(crown):
+			crown.queue_free()
 
 	func _draw() -> void:
 		var beat: float = 0.5 + 0.5 * sin(t * 4.0)
@@ -75,6 +94,52 @@ class Aura extends Node2D:
 			var yy: float = c.y + h * 0.5 - ph2 * h * 1.5
 			var sz: float = 2.0 + 2.0 * (1.0 - ph2)
 			draw_rect(Rect2(xx - sz * 0.5, yy - sz * 0.5, sz, sz), Color(1.0, 0.85, 0.9, sin(ph2 * PI) * 0.9))
+
+
+# Gigantamax crown: a dark red storm cloud swirling over the head, glowing from inside, with gold sparks and lightning.
+class Crown extends Node2D:
+	var t := 0.0
+	var h := 40.0
+	var w := 24.0
+
+	func _ready() -> void:
+		z_index = 2
+
+	func _process(d: float) -> void:
+		t += d
+		queue_redraw()
+
+	func _draw() -> void:
+		var top := Vector2(0.0, -h * 0.98)
+		var beat: float = 0.5 + 0.5 * sin(t * 3.0)
+		var cw: float = w * 0.62   # a crown, not a hat: a small ring of storm puffs over the head
+		# soft glow inside the ring
+		draw_set_transform(top, 0.0, Vector2(1.0, 0.45))
+		draw_circle(Vector2.ZERO, cw * 1.2, Color(1.0, 0.3, 0.3, 0.14 + 0.08 * beat))
+		draw_circle(Vector2.ZERO, cw * 0.7, Color(1.0, 0.8, 0.35, 0.18 + 0.1 * beat))
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		# storm puffs turning around the head (back ones darker and fainter)
+		for i in range(9):
+			var a: float = t * 0.9 + TAU * float(i) / 9.0
+			var p: Vector2 = top + Vector2(cos(a) * cw * 1.15, sin(a) * cw * 0.38)
+			var front: bool = sin(a) > 0.0
+			var r: float = cw * (0.26 + 0.06 * sin(float(i) * 2.3 + t))
+			var al: float = 0.8 if front else 0.45
+			draw_circle(p, r + 1.5, Color(0.12, 0.02, 0.06, al))
+			draw_circle(p, r, Color(0.62, 0.07, 0.17, al))
+			draw_circle(p + Vector2(-r * 0.25, -r * 0.3), r * 0.45, Color(1.0, 0.45, 0.35, al * 0.7))
+		# gold sparks rising from it
+		for i in range(8):
+			var ph: float = fposmod(t * 0.8 + float(i) * 0.125, 1.0)
+			var xx: float = sin(float(i) * 5.7 + t) * cw
+			var yy: float = top.y - 6.0 - ph * h * 0.45
+			draw_rect(Rect2(xx - 1.5, yy - 1.5, 3.0, 3.0), Color(1.0, 0.85, 0.4, sin(ph * PI)))
+		# lightning now and then
+		var ph2: float = fposmod(t * 0.7, 1.0)
+		if ph2 < 0.12:
+			var x0: float = sin(floorf(t * 0.7) * 3.1) * cw
+			var pts := PackedVector2Array([top + Vector2(x0, -10.0), top + Vector2(x0 + 5.0, -2.0), top + Vector2(x0 - 2.0, 4.0), top + Vector2(x0 + 3.0, 14.0)])
+			draw_polyline(pts, Color(1.0, 0.9, 0.5, 1.0 - ph2 / 0.12), 3.0)
 
 
 # Guarida Dynamax (estilo Espada y Escudo): crater rocoso con cristales rojos y, encima, una columna de luz con anillos que suben.
@@ -140,6 +205,7 @@ class Den extends Node2D:
 # Columna de luz roja de la guarida: haz vertical con nucleo claro, anillos que suben, polvo de cristal y chispas.
 class Pillar extends Node2D:
 	var t := randf() * 10.0
+	var gmax := false   # Gigantamax den: a gold and red column with a storm cloud at the top
 
 	func _init() -> void:
 		var mat := CanvasItemMaterial.new()
@@ -155,6 +221,14 @@ class Pillar extends Node2D:
 		var beat: float = 0.5 + 0.5 * sin(t * 3.0)
 		var hgt: float = 1100.0
 		var layers: Array = [[70.0, 0.14, Color(1.0, 0.15, 0.3)], [46.0, 0.22, Color(1.0, 0.25, 0.4)], [28.0, 0.34, Color(1.0, 0.45, 0.58)], [14.0, 0.55, Color(1.0, 0.85, 0.9)]]
+		if gmax:
+			layers = [[84.0, 0.16, Color(1.0, 0.12, 0.2)], [56.0, 0.24, Color(1.0, 0.45, 0.2)], [32.0, 0.36, Color(1.0, 0.72, 0.3)], [16.0, 0.6, Color(1.0, 0.95, 0.75)]]
+			# the storm cloud swirling at the top of the column
+			for i in range(12):
+				var a: float = t * 0.8 + TAU * float(i) / 12.0
+				var cp := Vector2(cos(a) * 90.0, -560.0 + sin(a) * 24.0)
+				draw_circle(cp, 30.0 + 6.0 * sin(float(i) + t), Color(0.6, 0.06, 0.14, 0.55))
+				draw_circle(cp + Vector2(-6.0, -8.0), 14.0, Color(1.0, 0.5, 0.3, 0.35))
 		for ly in layers:
 			var w: float = float(ly[0]) + beat * 5.0
 			var c: Color = ly[2]
@@ -195,6 +269,14 @@ func start(main) -> void:
 	pulse = 0.6
 	since = 0.0
 	type = String(m.player.types[0])
+	var cdx: int = int(m._cur_dex())
+	giga = m.mode != "tower" and GM.has_factor(m.SV.d, cdx)
+	if giga:
+		gm = GM.new()
+		gm.setup(m, cdx)
+		stat_k = GM.STAT_K
+		dmg_k = GM.DMG_K
+		taken = GM.TAKEN
 	bonus = roundf(m.player.max_hp * HP_BONUS)
 	m.player.max_hp += bonus
 	m.player.hp += bonus
@@ -202,6 +284,8 @@ func start(main) -> void:
 	# Crecimiento por pasos, como la seta gigante de Super Mario Bros DS: crece, se encoge un poco y vuelve a crecer, cada vez mas.
 	var tw = m.create_tween()
 	var steps: Array = [[1.22, 1.0, 0.14], [1.04, 1.04, 0.10], [1.42, 1.3, 0.16], [1.16, 1.2, 0.10], [GROW * 1.12, GROW * 1.12, 0.22], [GROW, GROW, 0.18]]
+	if giga:   # Gigantamax grows one step further
+		steps.append_array([[GM.GROW * 1.1, GM.GROW * 1.1, 0.2], [GM.GROW, GM.GROW, 0.18]])
 	for stp in steps:
 		tw.tween_property(m.player, "scale", Vector2(float(stp[0]), float(stp[1])), float(stp[2])).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 	m.get_tree().create_timer(0.14).timeout.connect(func(): _grow_fx(0.4))
@@ -211,6 +295,9 @@ func start(main) -> void:
 	aura_node.h = m.player.body_h
 	aura_node.w = m.player.radius * 1.8
 	aura_node.col = Color(0.9, 0.08, 0.25).lerp(Color.html(String(m.MD.TYPE_COLOR.get(type, "#ff2a6d"))), 0.22)   # red, with a hint of the type
+	if giga:
+		aura_node.col = Color(0.95, 0.12, 0.2).lerp(GM.GOLD, 0.3)
+		aura_node.gmax = true
 	m.player.add_child(aura_node)
 	m.player.invuln = maxf(m.player.invuln, 1.2)
 	m.shake = maxf(m.shake, 9.0)
@@ -257,6 +344,8 @@ func stop() -> void:
 func tick(delta: float) -> void:
 	if not active:
 		return
+	if gm != null:
+		gm.tick(delta)
 	t -= delta
 	since += delta
 	var col: Color = Color.html(String(m.MD.TYPE_COLOR.get(type, "#ff2a6d")))
@@ -282,6 +371,8 @@ func _pulse(big: bool, col: Color) -> void:
 	z.c = m.player.position
 	z.dmg = (30.0 + 8.0 * float(m.player.level)) * m._atk() * (1.9 if big else 1.0)
 	var r: float = 420.0 if big else 280.0
+	if giga and big:   # Gigantamax: the full big wave AND, on top, the Pokémon's own G-Max move
+		gm.fire(z.dmg / 1.9)
 	z.boom(z.c, r, 6.0 if big else 3.0)
 	PWF.dyn_wave(m, z.c, r, type, big)
 	var st: Array = STATUS.get(type, ["", 0, 0.0])

@@ -72,7 +72,8 @@
  ],
  "Legend Shards and Legend Pick": [
   "screens/gacha_legend_shards.jpg",
-  "screens/legend_pick.jpg"
+  "screens/legend_pick.jpg",
+  "screens/legend_shard_icon.jpg"
  ],
  "Move previews": [
   "screens/move_previews.jpg",
@@ -135,7 +136,8 @@
  ],
  "Entering a rift": [
   "screens/rift_entry_pull.jpg",
-  "screens/rift_intro_banner.jpg"
+  "screens/rift_intro_banner.jpg",
+  "screens/rift_timer_above.jpg"
  ],
  "Shiny Charms": [
   "screens/gacha_shiny_charm.jpg"
@@ -169,5 +171,19 @@
  ],
  "Buffs beside the stats": [
   "screens/buff_chip.jpg"
+ ],
+ "Gigantamax": [
+  "screens/gigantamax_charizard.jpg",
+  "screens/gigantamax_den.jpg",
+  "screens/gigantamax_boss.jpg"
+ ],
+ "Pull rewards by rarity": [
+  "screens/pull_rewards_rarity.jpg"
+ ],
+ "Big pull results": [
+  "screens/max_pull_results.jpg"
+ ],
+ "Clear mouse hover": [
+  "screens/mouse_hover.jpg"
  ]
 }

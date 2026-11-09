@@ -9,6 +9,31 @@ const UPD = preload("res://scripts/updater.gd")
 
 const ENTRIES := [
 	{
+		"ver": "0.1.3-alpha.12",
+		"date": "2026-11-09",
+		"title": "Megarift Survivors 0.1.3-alpha.12: Gigantamax (test build)",
+		"new": [
+			"Gigantamax: 32 Pokémon can Gigantamax. Beat a Gigantamax den to earn a species' Gigantamax Factor; then its Dynamax becomes Gigantamax, bigger and stronger, with its own G-Max move.",
+			"Pull rewards by rarity: Pokémon pop in one by one over an aura of their rarity, and Very rare and Legendary pulls get a headline, a flash and a fanfare.",
+			"Legend Shards have their own icon, and your count shows in the top bar beside the tickets.",
+		],
+		"changes": [
+			"Pull results are much bigger and sized to your screen; a long Max pull list scrolls with the right stick.",
+			"Your attacks come out from under the Pokémon, so every Pokémon stays visible in busy fights.",
+			"The rift timer sits above the portal in bigger, clearer text.",
+			"Every Pokémon in the Pokédex details is shown at the same, bigger size.",
+			"Mouse hover is clearer: buttons grow, brighten and glow.",
+			"The resume reminder can be closed with B, Esc or Not now; the run is kept.",
+			"Runs started with a Pokémon that can still evolve have a better chance at the Mega Stone rift.",
+		],
+		"fixes": [
+			"After defeating Arceus, enemies spawn again: you return to where you stood.",
+			"The Arceus banner no longer says he is invincible.",
+			"Johto, Unova and Paldea maps can open Mega rifts and the Mega Stone rift.",
+			"A chest's price button no longer stays stuck on screen inside a rift.",
+		],
+	},
+	{
 		"ver": "0.1.3-alpha.11",
 		"date": "2026-11-06",
 		"title": "Megarift Survivors 0.1.3-alpha.11: clearer attack warnings (test build)",

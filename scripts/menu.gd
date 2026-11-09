@@ -33,6 +33,8 @@ const PADI = preload("res://scripts/padicons.gd")
 const UPD = preload("res://scripts/updater.gd")
 const PN = preload("res://scripts/patchnotes.gd")
 const UIS = preload("res://scripts/ui_style.gd")
+const HFX = preload("res://scripts/hover_fx.gd")
+const GMX = preload("res://scripts/gmax.gd")
 
 var C_PANEL := Color("#2b2547")
 var C_PANEL_D := Color("#1c1833")
@@ -71,6 +73,7 @@ var mute_top: Button
 var set_top: Button
 var ticket_lbl: Label
 var ticket10_lbl: Label
+var shard_lbl: Label   # Legend Shards, beside the tickets
 var toast_lbl: Label
 var is_overlay := false
 signal closed
@@ -162,6 +165,33 @@ class Preview extends Control:
 	var tr: TextureRect = null
 	var walk := false     # usa la hoja Walk (8 direcciones) en lugar de Idle
 	var row := 0          # fila de la hoja = dirección
+	# > 0: size the Pokémon by its BODY (the pixels it really covers, over the whole animation), not by its frame, so it
+	# fills this share of the box's height. Big frames with lots of empty space (Gyarados) no longer come out small.
+	var fit := 0.0
+	static var _body_cache := {}
+
+	# The rectangle the Pokémon covers across every frame of row 0 of the sheet (cached per sheet).
+	static func body_rect(tx: Texture2D, w: float, h: float, n: int) -> Rect2:
+		var key: String = tx.resource_path + ":%d:%d" % [int(w), int(h)]
+		if _body_cache.has(key):
+			return _body_cache[key]
+		var out := Rect2(0.0, 0.0, w, h)
+		var img: Image = tx.get_image()
+		if img != null:
+			if img.is_compressed():
+				img.decompress()
+			var u := Rect2i()
+			for i in range(maxi(1, n)):
+				var fr := Rect2i(int(float(i) * w), 0, int(w), int(h))
+				if fr.end.x > img.get_width() or fr.end.y > img.get_height():
+					break
+				var ur: Rect2i = img.get_region(fr).get_used_rect()
+				if ur.size.x > 0 and ur.size.y > 0:
+					u = ur if u.size.x == 0 else u.merge(ur)
+			if u.size.x > 0 and u.size.y > 0:
+				out = Rect2(u)
+		_body_cache[key] = out
+		return out
 
 	func setup(d: int, shn: bool = false, k: float = 5.0, drk: bool = false) -> void:
 		dex = d
@@ -221,10 +251,18 @@ class Preview extends Control:
 		var k: float = scale_k
 		# ajusta para que no se salga del cuadro
 		k = minf(k, minf(size.x / w, size.y / h) * 0.92)
+		var body := Rect2()
+		if fit > 0.0 and size.y > 0.0:
+			body = body_rect(tx, w, h, int(info["n"]))
+			k = minf(size.y * fit / body.size.y, size.x * 0.8 / body.size.x)
 		var pos := Vector2(size.x * 0.5 - float(info["ax"]) * k, size.y * 0.5 + h * k * 0.5 - (h - float(info["ay"])) * k * 0.0 - float(info["ay"]) * k + (float(info["ay"]) * k) * 0.0)
 		pos = Vector2(size.x * 0.5 - float(info["ax"]) * k, size.y * 0.84 - float(info["ay"]) * k)
+		var shw: float = w * k * 0.28
+		if body.size.x > 0.0:   # body fit: the body stands centred on the floor spot
+			pos = Vector2(size.x * 0.5 - (body.position.x + body.size.x * 0.5) * k, size.y * 0.84 - body.end.y * k)
+			shw = body.size.x * k * 0.4
 		draw_set_transform(Vector2(size.x * 0.5, size.y * 0.84), 0.0, Vector2(1.0, 0.35))
-		draw_circle(Vector2.ZERO, w * k * 0.28, Color(0, 0, 0, 0.3))
+		draw_circle(Vector2.ZERO, shw, Color(0, 0, 0, 0.3))
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		if tr == null:
 			tr = TextureRect.new()
@@ -241,6 +279,55 @@ class Preview extends Control:
 		tr.position = pos
 		tr.size = Vector2(w * k, h * k)
 		tr.modulate = Color(0, 0, 0, 0.9) if dark else Color.WHITE
+
+
+# Aura behind a pulled Pokémon, by rarity: nothing for Common, a soft glow (Uncommon, Rare), turning light rays
+# (Very rare) and gold rays with orbiting sparkles (Legendary). Shinies twinkle. Drawn behind the Pokémon.
+class RarityAura extends Control:
+	var tier := 1          # 1 Common .. 5 Legendary
+	var col := Color.WHITE
+	var shiny := false
+	var t := 0.0
+
+	func _ready() -> void:
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+		set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)   # fills the Pokémon's box
+		show_behind_parent = true
+
+	func _process(delta: float) -> void:
+		t += delta
+		queue_redraw()
+
+	func _draw() -> void:
+		var c := Vector2(size.x * 0.5, size.y * 0.52)
+		var r: float = minf(size.x, size.y) * 0.5
+		var beat: float = 0.5 + 0.5 * sin(t * 3.0)
+		if tier >= 4:   # light rays turning slowly behind it
+			var n: int = 12 if tier == 5 else 8
+			for i in range(n):
+				var a: float = t * (0.5 if tier == 5 else 0.3) + TAU * float(i) / float(n)
+				var w: float = 0.11 if tier == 5 else 0.09
+				var ln: float = r * (1.25 if tier == 5 else 1.05)
+				draw_colored_polygon(PackedVector2Array([c, c + Vector2.from_angle(a - w) * ln, c + Vector2.from_angle(a + w) * ln]),
+					Color(col.r, col.g, col.b, (0.22 if tier == 5 else 0.16) + 0.06 * beat))
+		if tier >= 2:   # soft glow, stronger with rarity
+			var k: float = [0.0, 0.0, 0.10, 0.16, 0.22, 0.30][tier]
+			for i in range(4):
+				draw_circle(c, r * (0.95 - 0.18 * float(i)) * (0.92 + 0.08 * beat), Color(col.r, col.g, col.b, k * (0.35 + 0.22 * float(i))))
+		if tier == 5:   # sparkles orbiting
+			for i in range(6):
+				var a2: float = -t * 1.4 + TAU * float(i) / 6.0
+				var p: Vector2 = c + Vector2(cos(a2) * r * 0.95, sin(a2) * r * 0.55)
+				var s: float = 3.0 + 2.0 * sin(t * 6.0 + float(i))
+				draw_rect(Rect2(p - Vector2(s, 1.0), Vector2(s * 2.0, 2.0)), Color(1, 0.95, 0.7, 0.9))
+				draw_rect(Rect2(p - Vector2(1.0, s), Vector2(2.0, s * 2.0)), Color(1, 0.95, 0.7, 0.9))
+		if shiny:   # twinkles
+			for i in range(4):
+				var ph: float = fmod(t * 1.3 + float(i) * 0.25, 1.0)
+				var q: Vector2 = c + Vector2(cos(float(i) * 2.1) * r * 0.7, sin(float(i) * 1.7) * r * 0.6)
+				var s2: float = 5.0 * sin(ph * PI)
+				draw_rect(Rect2(q - Vector2(s2, 1.0), Vector2(s2 * 2.0, 2.0)), Color(1, 1, 1, 0.9))
+				draw_rect(Rect2(q - Vector2(1.0, s2), Vector2(2.0, s2 * 2.0)), Color(1, 1, 1, 0.9))
 
 
 
@@ -828,12 +915,16 @@ func _build_theme() -> void:
 	theme_main.default_font_size = 22
 	PXF.apply(theme_main)
 	theme_main.set_stylebox("normal", "Button", _sb(C_BTN, UIS.EDGE, 3))
-	theme_main.set_stylebox("hover", "Button", _sb(C_BTN_H, C_ACC.lightened(0.25), 3))
+	var bhv: StyleBoxFlat = _sb(C_BTN_H.lerp(UIS.WAVE, 0.18), UIS.WAVE, 4)   # hover: bright cyan edge and a soft glow
+	bhv.shadow_color = Color(UIS.WAVE, 0.45)
+	bhv.shadow_size = 8
+	bhv.shadow_offset = Vector2.ZERO
+	theme_main.set_stylebox("hover", "Button", bhv)
 	theme_main.set_stylebox("pressed", "Button", _sb(UIS.INK, UIS.GOLD, 3, 0))
 	theme_main.set_stylebox("focus", "Button", _sb(C_BTN_H, UIS.GOLD, 4))
 	theme_main.set_stylebox("disabled", "Button", _sb(UIS.BG, UIS.EDGE, 3, 0))
 	theme_main.set_color("font_color", "Button", UIS.TEXT)
-	theme_main.set_color("font_hover_color", "Button", UIS.TITLE)
+	theme_main.set_color("font_hover_color", "Button", Color.WHITE)
 	theme_main.set_color("font_disabled_color", "Button", UIS.MUTED)
 	theme_main.set_color("font_color", "Label", UIS.TEXT)
 	theme_main.set_stylebox("panel", "PanelContainer", UIS.frame(C_PANEL, UIS.EDGE))
@@ -863,6 +954,7 @@ func _ready() -> void:
 	if "--autorun" in OS.get_cmdline_args():   # test hook: start a normal run a few seconds after launch (never used by a normal launch)
 		get_tree().create_timer(5.0).timeout.connect(func(): _start_mode("normal"))
 	TXS.hook(self)
+	HFX.hook(self)   # mouse hover: buttons grow and brighten
 	get_tree().node_added.connect(_on_node_added)
 	SV.ensure()
 	var th0: Array = UI_THEMES[clampi(int(SV.d.get("ui_theme", DEFAULT_THEME)), 0, UI_THEMES.size() - 1)]
@@ -956,9 +1048,10 @@ func _ready() -> void:
 	coin_pill = _pill()
 	coin_lbl = _pill_item(coin_pill, "coin", C_GOLD)
 	tix_pill = _pill()
-	tix_pill.tooltip_text = L.t("Tickets · ×10 tickets")
+	tix_pill.tooltip_text = L.t("Tickets · ×10 tickets") + " · " + L.t("Legend Shards")
 	ticket_lbl = _pill_item(tix_pill, "ticket", C_GOLD)
 	ticket10_lbl = _pill_item(tix_pill, "ticket10", Color("#c47bff"))
+	shard_lbl = _pill_item(tix_pill, "lshard", Color("#9ff0ff"))
 	name_pill = _icon_btn("crown", func(): _show("profile"))
 	name_pill.custom_minimum_size = Vector2(0, 44)
 	name_pill.icon_alignment = HORIZONTAL_ALIGNMENT_LEFT
@@ -1400,6 +1493,7 @@ func _update_top() -> void:
 	coin_lbl.text = "%d" % int(SV.d["coins"])
 	ticket_lbl.text = "%d" % int(SV.d["tickets"])
 	ticket10_lbl.text = "%d" % int(SV.d.get("tickets10", 0))
+	shard_lbl.text = "%d" % int(SV.d.get("lshards", 0))
 	var tt: String = String(SV.d.get("title", ""))
 	name_lbl.text = _nick().left(12)
 	var muted: bool = bool(SV.d["settings"].get("mute", false))
@@ -1462,7 +1556,20 @@ func _touch_pass(node: Node) -> void:
 
 
 # Stick izquierdo y cruceta (mantenidos): desplazan las listas del Lexico y de Misiones/logros/Cristales Z (el contenido no tiene botones que enfocar).
+# Scrolls the pull results list by a right-stick push gy (-1..1), faster the further it is pushed.
+func _results_scroll(gy: float, delta: float) -> void:
+	var rsc: Array = gacha_result.find_children("*", "ScrollContainer", true, false)
+	if not rsc.is_empty():
+		(rsc[0] as ScrollContainer).scroll_vertical += int(signf(gy) * (absf(gy) - 0.25) / 0.75 * 1100.0 * delta + signf(gy))
+
+
 func _stick_scroll(delta: float) -> void:
+	if gacha_result != null and gacha_result.visible:   # right stick: scroll the pull results (a Max pull's list scrolls)
+		for pd in Input.get_connected_joypads():
+			var gy: float = Input.get_joy_axis(int(pd), JOY_AXIS_RIGHT_Y)
+			if absf(gy) > 0.25:
+				_results_scroll(gy, delta)
+				break
 	if cur == "dex" and dex_dsc != null and is_visible_in_tree() and not _popup_open():
 		for pd in Input.get_connected_joypads():
 			var ry: float = Input.get_joy_axis(int(pd), JOY_AXIS_RIGHT_Y)
@@ -1689,8 +1796,8 @@ func _input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 		return
 	if is_instance_valid(run_prompt):
-		# the run reminder owns the input: Back closes it only when it was opened by pressing Play (the run is kept)
-		if PAD.is_cancel(event) and bool(run_prompt.get_meta("cancel_ok", false)):
+		# the run reminder owns the input: Back (B / Esc) closes it, on launch too; the run is kept
+		if PAD.is_cancel(event):
 			run_prompt.queue_free()
 			get_viewport().set_input_as_handled()
 		elif PAD.stick_event(event):
@@ -2730,17 +2837,23 @@ func _ongoing_prompt(then: Callable = Callable()) -> void:
 		if then.is_valid():
 			then.call(), Vector2(0, 52))
 	v.add_child(giv)
-	# focus stays on these two buttons (up/down swap, left/right stay put) so a controller cannot wander into the menu behind
-	for pair in [[res, giv], [giv, res]]:
-		var b: Button = pair[0]
-		b.focus_neighbor_top = b.get_path_to(pair[1])
-		b.focus_neighbor_bottom = b.get_path_to(pair[1])
+	# Not now (or B / Esc): just closes the reminder. The run is kept and the main menu's Resume button still has it.
+	var later := _btn("Not now", func(): ov.queue_free(), Vector2(0, 46))
+	later.add_theme_font_size_override("font_size", 18)
+	v.add_child(later)
+	# focus stays on these three buttons (up/down cycle, left/right stay put) so a controller cannot wander into the menu behind
+	var bl: Array = [res, giv, later]
+	for i in range(bl.size()):
+		var b: Button = bl[i]
+		var up: Button = bl[(i + bl.size() - 1) % bl.size()]
+		var dn: Button = bl[(i + 1) % bl.size()]
+		b.focus_neighbor_top = b.get_path_to(up)
+		b.focus_neighbor_bottom = b.get_path_to(dn)
 		b.focus_neighbor_left = b.get_path_to(b)
 		b.focus_neighbor_right = b.get_path_to(b)
-		b.focus_next = b.get_path_to(pair[1])
-		b.focus_previous = b.get_path_to(pair[1])
+		b.focus_next = b.get_path_to(dn)
+		b.focus_previous = b.get_path_to(up)
 	_gf(res)
-	ov.set_meta("cancel_ok", then.is_valid())
 
 
 func _start_mode(mode: String, region_ok: bool = false) -> void:
@@ -5110,6 +5223,7 @@ func _dex_detail() -> void:
 	pv.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	dex_pv_box.add_child(pv)
 	var shiny_owned: bool = owned and bool(SV.d["owned"][str(dx)].get("shiny", false))
+	pv.fit = 0.80   # every Pokémon's body fills the same share of the stage (4/5 of its height), whatever the size of its sprite frame
 	pv.setup(dx, shiny_owned and SV.shiny_wanted(dx), 6.0, not owned)
 	var ball_name: String = String(RARITY_BALL[clampi(int(p["rarity"]) - 1, 0, 4)])   # the Poké Ball shows the Pokémon's rarity
 	var ball := IC.rect(ball_name, 52)
@@ -5232,6 +5346,17 @@ func _dex_detail() -> void:
 	var ad := _label(L.t(String(abd["desc"])), 16, Color("#dbe6ff"))
 	ad.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	av.add_child(ad)
+	# Gigantamax: whether this Pokémon has the Gigantamax Factor, and its G-Max move
+	if GMX.capable(dx):
+		var gp := _dpanel()
+		var gv := VBoxContainer.new()
+		gp.add_child(gv)
+		dex_detail.add_child(gp)
+		var has_f: bool = GMX.has_factor(SV.d, dx)
+		gv.add_child(_label(L.t("Gigantamax Factor ✓") if has_f else L.t("Can Gigantamax"), 20, Color("#ffb347") if has_f else Color("#ff8a8a")))
+		var gd := _label((L.t("Its Dynamax becomes Gigantamax: %s.") if has_f else L.t("Beat a Gigantamax den of this Pokémon to earn its Gigantamax Factor (%s).")) % GMX.move_name(dx), 16, Color("#dbe6ff"))
+		gd.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		gv.add_child(gd)
 	# movimiento inicial
 	var mv: String = SV.start_move_of(dx)
 	var mp := _dpanel()
@@ -6273,7 +6398,7 @@ func _refresh_gacha() -> void:
 	var bmp := _cost_btn(L.t("Max purple ×%d") % (mp * 10), str(mp), "", "ticket10", func(): _confirm_max_pull("t10"), Vector2(0, 44), open and mp >= 1, false, true)
 	# Legend Pick: Legend Shards (legendary duplicates, Eternatus) buy any legendary you don't own; the button shows the count
 	var shards: int = int(SV.d.get("lshards", 0))
-	var blp := _cost_btn(L.t("Legend Pick"), "%d/%d" % [shards, SV.SHARD_COST], "", "ballLux", func(): _legend_picker(), Vector2(0, 44),
+	var blp := _cost_btn(L.t("Legend Pick"), "%d/%d" % [shards, SV.SHARD_COST], "", "lshard", func(): _legend_picker(), Vector2(0, 44),
 		shards >= SV.SHARD_COST and not SV.legend_pickable().is_empty(), false, true)
 	blp.tooltip_text = L.t("1 per legendary duplicate from the gacha and 1 per Eternatus defeat.")
 	for b in [b1, b10, bt, bmx, bmp, blp]:
@@ -6583,6 +6708,70 @@ func _do_max_pull(use: String) -> void:
 	_show_batch(results, crystals)
 
 
+
+# A sense of accomplishment by rarity: the best rarity's headline (pulsing), a flash in its colour for Very rare and
+# Legendary, and a shake for a Legendary. The headline goes under the title.
+func _pull_flair(v: VBoxContainer, panel: Control, results: Array) -> void:
+	var best := 1
+	for r in results:
+		best = maxi(best, clampi(int(r.get("rarity", 1)), 1, 5))
+	if best < 3:
+		return
+	var col := Color.html(String(RARITY_COL[best - 1]))
+	var txt: String = [L.t("Rare pull!"), L.t("Very rare pull!"), L.t("LEGENDARY PULL!")][best - 3]
+	var hl := _label(txt, [26, 30, 36][best - 3], col)
+	hl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hl.add_theme_constant_override("outline_size", 8)
+	hl.add_theme_color_override("font_outline_color", Color(0.06, 0.03, 0.14))
+	v.add_child(hl)
+	v.move_child(hl, 1)
+	hl.resized.connect(func(): hl.pivot_offset = hl.size * 0.5)
+	var tw := hl.create_tween().set_loops()
+	tw.tween_property(hl, "scale", Vector2.ONE * (1.06 if best < 5 else 1.12), 0.45).set_trans(Tween.TRANS_SINE)
+	tw.tween_property(hl, "scale", Vector2.ONE, 0.45).set_trans(Tween.TRANS_SINE)
+	if best >= 4:
+		var fl := ColorRect.new()
+		fl.color = Color(col.r, col.g, col.b, 0.55 if best == 5 else 0.35)
+		fl.set_anchors_preset(Control.PRESET_FULL_RECT)
+		fl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		gacha_result.add_child(fl)
+		var tf := fl.create_tween()
+		tf.tween_property(fl, "color:a", 0.0, 0.7 if best == 5 else 0.45)
+		tf.tween_callback(fl.queue_free)
+	if best == 5:   # shake once the panel has its place (its position is only set by the layout a frame later)
+		await get_tree().process_frame
+		await get_tree().process_frame
+		if not is_instance_valid(panel):
+			return
+		var base: Vector2 = panel.position
+		var sk := panel.create_tween()
+		for i in range(6):
+			sk.tween_property(panel, "position", base + Vector2(randf_range(-9.0, 9.0), randf_range(-6.0, 6.0)), 0.04)
+		sk.tween_property(panel, "position", base, 0.05)
+
+
+# A pulled Pokémon pops in after the ones before it; rarer ones bounce bigger, a Legendary lands with a fanfare.
+func _pull_reveal(pv: Control, i: int, tier: int, shiny: bool) -> void:
+	var au := RarityAura.new()
+	au.tier = tier
+	au.col = Color.html(String(RARITY_COL[tier - 1]))
+	au.shiny = shiny
+	pv.add_child(au)
+	pv.pivot_offset = pv.custom_minimum_size * 0.5
+	pv.scale = Vector2.ONE * 0.2
+	pv.modulate.a = 0.0
+	var tw := pv.create_tween()
+	tw.tween_interval(0.12 + minf(float(i), 18.0) * 0.07)
+	tw.tween_property(pv, "modulate:a", 1.0, 0.08)
+	var over: float = [1.05, 1.08, 1.14, 1.22, 1.32][tier - 1]
+	tw.parallel().tween_property(pv, "scale", Vector2.ONE * over, 0.14).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tw.tween_property(pv, "scale", Vector2.ONE, 0.18).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	if tier == 5:
+		tw.parallel().tween_callback(func(): Aud.sfx("legend"))
+	elif tier == 4 or shiny:
+		tw.parallel().tween_callback(func(): Aud.sfx("shinyGet"))
+
+
 # Summary for a Max pull: totals per rarity, then only the new Pokémon and shinies (a 70-card grid would not fit).
 func _show_batch(results: Array, crystals: Array) -> void:
 	_clear(gacha_result)
@@ -6619,33 +6808,47 @@ func _show_batch(results: Array, crystals: Array) -> void:
 	rrow.alignment = BoxContainer.ALIGNMENT_CENTER
 	v.add_child(rrow)
 	for j in range(4, -1, -1):
-		rrow.add_child(_icon_label(String(["ball", "ball2", "ball3", "ball4", "ballLux"][j]), "×%d" % int(by_rar[j]), 18, Color("#b4aed6"), 24.0))
+		rrow.add_child(_icon_label(String(["ball", "ball2", "ball3", "ball4", "ballLux"][j]), "×%d" % int(by_rar[j]), 20, Color("#b4aed6"), 30.0))
 	if keep.is_empty():
 		v.add_child(_label(L.t("Nothing new this time: every Pokémon was a duplicate."), 18, Color("#b4aed6")))
 	else:
 		# rarest first (then shinies), so a legendary from a Max pull is never buried at the end of the list
 		keep.sort_custom(func(a, b): return [int(a["rarity"]), int(bool(a["shiny"]))] > [int(b["rarity"]), int(bool(b["shiny"]))])
+		# cells sized from the screen (bigger on large and 4:3 screens); up to 3 rows show, the rest scroll
+		var cols: int = mini(6, keep.size())
+		var vp: Vector2 = get_viewport_rect().size
+		var cw: float = clampf((vp.x * 0.88 - 40.0) / 6.0, 130.0, 240.0)
+		var ph: float = cw * 0.78
+		var rows_fit: int = clampi(int((vp.y * 0.72 - 150.0) / (ph + 64.0)), 1, 3)
+		if rows_fit == 1 and keep.size() > cols:
+			ph = clampf((vp.y * 0.72 - 150.0) / 2.0 - 70.0, 80.0, ph)   # a short screen: shrink a little so two rows show
+			rows_fit = 2
 		var sc := ScrollContainer.new()
-		sc.custom_minimum_size = Vector2(880, mini(3, ceili(float(keep.size()) / 8.0)) * 130)
+		sc.custom_minimum_size = Vector2(cw * float(cols) + 24.0, mini(rows_fit, ceili(float(keep.size()) / float(cols))) * (ph + 74.0))
 		sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 		v.add_child(sc)
 		var grid := GridContainer.new()
-		grid.columns = 8
+		grid.columns = cols
 		sc.add_child(grid)
 		for r in keep:
 			var cell := VBoxContainer.new()
-			cell.custom_minimum_size = Vector2(106, 0)
+			cell.custom_minimum_size = Vector2(cw, 0)
 			grid.add_child(cell)
 			var pv := Preview.new()
-			pv.custom_minimum_size = Vector2(106, 80)
+			pv.custom_minimum_size = Vector2(cw, ph)
+			pv.fit = 0.8   # every Pokémon the same size, whatever its sprite frame
 			cell.add_child(pv)
 			pv.setup(int(r["dex"]), bool(r["shiny"]), 2.2)
-			var nm := _label(L.t(String(r["name"])) + (" ✨" if bool(r["shiny"]) else ""), 14)
+			_pull_reveal(pv, grid.get_child_count() - 1, clampi(int(r["rarity"]), 1, 5), bool(r["shiny"]))
+			var nm := _label(L.t(String(r["name"])) + (" ✨" if bool(r["shiny"]) else ""), 18)
 			nm.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			nm.autowrap_mode = TextServer.AUTOWRAP_OFF
+			nm.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+			nm.custom_minimum_size = Vector2(cw - 6.0, 0)
 			cell.add_child(nm)
 			# rarity as its ball icon only (no name), next to NEW! / Shiny
 			var rar: int = clampi(int(r["rarity"]), 1, 5)
-			var tl := _icon_label(String(["ball", "ball2", "ball3", "ball4", "ballLux"][rar - 1]), "NEW!" if bool(r["new"]) else "Shiny", 13, Color("#6fd08a") if bool(r["new"]) else Color("#ffd65c"), 20.0)
+			var tl := _icon_label(String(["ball", "ball2", "ball3", "ball4", "ballLux"][rar - 1]), "NEW!" if bool(r["new"]) else "Shiny", 16, Color("#6fd08a") if bool(r["new"]) else Color("#ffd65c"), 26.0)
 			tl.alignment = BoxContainer.ALIGNMENT_CENTER
 			cell.add_child(tl)
 	for zc in crystals:
@@ -6657,6 +6860,7 @@ func _show_batch(results: Array, crystals: Array) -> void:
 	var ok := _btn_close("Accept", func(): gacha_result.visible = false; _refresh_gacha(), Vector2(0, 54))
 	v.add_child(ok)
 	gacha_result.visible = true
+	_pull_flair(v, pc, results)
 	_gf(ok)
 
 
@@ -6696,30 +6900,43 @@ func _show_pulls(results: Array) -> void:
 	var grid := GridContainer.new()
 	grid.columns = 5 if results.size() > 1 else 1
 	v.add_child(grid)
+	# cells sized from the screen: as big as the screen allows for the rows needed (bigger on large and 4:3 screens)
+	var vp: Vector2 = get_viewport_rect().size
+	var rows_n: int = ceili(float(results.size()) / float(grid.columns))
+	var cw: float = clampf((vp.x * 0.88 - 40.0) / 5.0, 150.0, 250.0)
+	var ph: float = clampf(minf(cw * 0.8, (vp.y * 0.8 - 170.0) / float(rows_n) - 66.0), 96.0, 230.0)
+	if results.size() == 1:
+		cw = 300.0
+		ph = clampf(vp.y * 0.4, 200.0, 320.0)
 	for r in results:
 		var cell := VBoxContainer.new()
-		cell.custom_minimum_size = Vector2(150, 0)
+		cell.custom_minimum_size = Vector2(cw, 0)
 		grid.add_child(cell)
 		var pv := Preview.new()
-		pv.custom_minimum_size = Vector2(150, 110)
+		pv.custom_minimum_size = Vector2(cw, ph)
+		pv.fit = 0.8   # every Pokémon the same size, whatever its sprite frame
 		cell.add_child(pv)
 		pv.setup(int(r["dex"]), bool(r["shiny"]), 3.0)
-		var nm := _label(L.t(String(r["name"])) + (" ✨" if bool(r["shiny"]) else ""), 18)
+		_pull_reveal(pv, grid.get_child_count() - 1, clampi(int(r["rarity"]), 1, 5), bool(r["shiny"]))
+		var nm := _label(L.t(String(r["name"])) + (" ✨" if bool(r["shiny"]) else ""), 20)
 		nm.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		cell.add_child(nm)
-		if bool(r["new"]) or int(r["refund"]) <= 0:
-			var tag := "NEW!" if bool(r["new"]) else "Shiny"
-			var tl := _label(tag, 16, Color("#6fd08a") if bool(r["new"]) else Color("#ffd65c"))
-			tl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-			cell.add_child(tl)
-		else:
-			var rf := _icon_label("coin", "+%d" % int(r["refund"]), 16, Color("#ffd65c"), 24.0)
-			rf.alignment = BoxContainer.ALIGNMENT_CENTER
-			cell.add_child(rf)
+		# one line under the name: the rarity ball, then NEW! / Shiny or the coins a duplicate gives back
 		var rar: int = clampi(int(r["rarity"]), 1, 5)
-		var rl := _icon_label(String(["ball", "ball2", "ball3", "ball4", "ballLux"][rar - 1]), SV.RARITY_NAME[rar - 1], 14, Color("#b4aed6"), 24.0)
-		rl.alignment = BoxContainer.ALIGNMENT_CENTER
-		cell.add_child(rl)
+		var line := HBoxContainer.new()
+		line.alignment = BoxContainer.ALIGNMENT_CENTER
+		line.add_theme_constant_override("separation", 8)
+		line.tooltip_text = L.t(SV.RARITY_NAME[rar - 1])
+		var ball := IC.rect(String(["ball", "ball2", "ball3", "ball4", "ballLux"][rar - 1]), 28)
+		ball.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		line.add_child(ball)
+		if bool(r["new"]) or int(r["refund"]) <= 0:
+			var tg := _label("NEW!" if bool(r["new"]) else "Shiny", 18, Color("#6fd08a") if bool(r["new"]) else Color("#ffd65c"))
+			tg.autowrap_mode = TextServer.AUTOWRAP_OFF
+			line.add_child(tg)
+		else:
+			line.add_child(_icon_label("coin", "+%d" % int(r["refund"]), 18, Color("#ffd65c"), 24.0))
+		cell.add_child(line)
 		if int(r.get("shard", 0)) > 0:
 			var shl := _label(L.t("+1 Legend Shard"), 14, Color("#ffcb3d"))
 			shl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -6733,6 +6950,7 @@ func _show_pulls(results: Array) -> void:
 	var ok := _btn_close("Accept", func(): gacha_result.visible = false; _refresh_gacha(), Vector2(0, 54))
 	v.add_child(ok)
 	gacha_result.visible = true
+	_pull_flair(v, pc, results)
 	_gf(ok)
 
 
