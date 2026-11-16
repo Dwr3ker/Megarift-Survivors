@@ -185,5 +185,58 @@
  ],
  "Clear mouse hover": [
   "screens/mouse_hover.jpg"
+ ],
+ "Terastallization": [
+  "screens/tera_terastallize.jpg",
+  "screens/tera_activation_scene.jpg",
+  "screens/tera_type_picker.jpg",
+  "screens/tera_jewels.jpg",
+  "screens/tera_boss.jpg"
+ ],
+ "Necrozma: Dusk Mane, Dawn Wings and Ultra Burst": [
+  "screens/necrozma_forms.jpg"
+ ],
+ "Eggs and the Incubator": [
+  "screens/egg_drop.jpg",
+  "screens/egg_incubator.jpg",
+  "screens/egg_looks.jpg",
+  "screens/egg_hatch_crack.jpg",
+  "screens/egg_hatched.jpg"
+ ],
+ "Difficulty: Hard and Nightmare": [
+  "screens/difficulty_badge.jpg",
+  "screens/difficulty_summary.jpg",
+  "screens/difficulty_records.jpg"
+ ],
+ "New mode select": [
+  "screens/mode_select.jpg",
+  "screens/mode_select_43.jpg"
+ ],
+ "Full-screen region select": [
+  "screens/region_select.jpg"
+ ],
+ "Eggs and Legend Shards on the run HUD": [
+  "screens/hud_eggs_shards.jpg"
+ ],
+ "Wardrobe": [
+  "screens/wardrobe_screen.jpg",
+  "screens/wardrobe_looks.jpg",
+  "screens/wardrobe_in_run.jpg",
+  "screens/wardrobe_hud_frames.jpg"
+ ],
+ "Aurora": [
+  "screens/aurora_night.jpg"
+ ],
+ "New record line": [
+  "screens/record_line.jpg"
+ ],
+ "Erase a taught TM": [
+  "screens/tm_erase.jpg"
+ ],
+ "Evolution items on the choice cards": [
+  "screens/evolution_stones.jpg"
+ ],
+ "Redeem codes": [
+  "screens/profile_redeem.jpg"
  ]
 }

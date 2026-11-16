@@ -4,8 +4,9 @@ extends RefCounted
 # used to be sliders in Settings live here now. Older saves are migrated from the hud_plate / hud_radar / ... settings.
 const SV = preload("res://scripts/save_data.gd")
 
-const IDS := ["plate", "radar", "stats", "items", "counters", "skills", "dash"]
-const NAMES := {"plate": "Health plate", "radar": "Radar", "stats": "Stats panel", "items": "Item list", "counters": "Resource counters", "skills": "Move bar", "dash": "Dash button"}
+const IDS := ["plate", "radar", "stats", "items", "counters", "skills", "dash", "zmove", "dynamax", "tera"]
+const NAMES := {"plate": "Health plate", "radar": "Radar", "stats": "Stats panel", "items": "Item list", "counters": "Resource counters", "skills": "Move bar", "dash": "Dash button", "zmove": "Z-Move button", "dynamax": "MAX button", "tera": "TERA button"}
+const SHORT := {"dash": "Dash", "zmove": "Z-Move", "dynamax": "MAX", "tera": "TERA"}   # labels for the small button boxes
 const OLD_KEYS := {"plate": "hud_plate", "radar": "hud_radar", "stats": "hud_stats", "items": "hud_items", "counters": "hud_counters", "skills": "hud_skills"}
 const S_MIN := 60
 const S_MAX := 150
@@ -160,4 +161,38 @@ static func default_rect(id: String, vp: Vector2, ins: Vector4, team_rows: int =
 			return Rect2(vp.x * 0.5 - 215.0, vp.y - 14.0 - ins.w - 70.0, 430.0, 70.0)
 		"dash":   # the golden Dash button, bottom right (Hud.dash_rect applies the saved offset and size)
 			return Rect2(vp.x - 126.0 - ins.z, vp.y - 218.0 - ins.w, 100.0, 100.0)
+		"zmove", "dynamax", "tera":   # where they stack above Dash with all three shown (see power_slots)
+			var dd: Rect2 = default_rect("dash", vp, ins)
+			var dash := Rect2(dd.position + offset("dash"), dd.size * scale_of("dash"))
+			var sd: Rect2 = default_rect("stats", vp, ins)
+			var stats := Rect2(sd.position + offset("stats"), sd.size * scale_of("stats"))
+			var sl: Array = power_slots(vp, dash, [stats.grow(8.0)])
+			var i: int = ["zmove", "dynamax", "tera"].find(id)
+			return sl[i] if i < sl.size() else Rect2(dash.position.x, dash.position.y - 112.0 * float(i + 1), 100.0, 100.0)
 	return Rect2()
+
+
+# Spots for the power buttons (Z-Move, MAX, TERA, then the action button), in order: stacked above Dash, then a second
+# and third column beside it towards the middle of the screen, skipping any spot that covers something in `avoid`.
+static func power_slots(vp: Vector2, dash: Rect2, avoid: Array) -> Array:
+	var cx: float = dash.position.x + dash.size.x * 0.5
+	var side: float = -112.0 if cx > vp.x * 0.5 else 112.0
+	var free: Array = []
+	for col in range(3):
+		for row in range(1, 4):
+			var r := Rect2(cx - 50.0 + side * float(col), dash.position.y - 112.0 * float(row) + (dash.size.y - 100.0) * 0.5, 100.0, 100.0)
+			if r.position.y < 96.0 or r.position.x < 0.0 or r.end.x > vp.x:
+				continue
+			var hit := false
+			for a in avoid:
+				if (a as Rect2).intersects(r):
+					hit = true
+			if not hit:
+				free.append(r)
+	return free
+
+
+# True once the player has moved or resized this element in the layout editor.
+static func moved(id: String) -> bool:
+	var e: Dictionary = layout()[id]
+	return float(e["x"]) != 0.0 or float(e["y"]) != 0.0 or int(e["s"]) != 100

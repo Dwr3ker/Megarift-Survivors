@@ -14,6 +14,7 @@ static var smeta: Dictionary = {}
 static var starter_by: Dictionary = {}
 static var run_dex := 25
 static var run_mode := "normal"    # normal | daily | rush | party | type | team
+static var run_diff := "normal"   # difficulty of the Normal run about to be played (difficulty.gd; not saved)
 static var run_hyper := false      # Modo Hyper elegido para la partida normal que se va a jugar (no se guarda)
 static var run_region := 0         # Normal run: region map (1 Kanto ... 9 Paldea), 0 = every region
 static var run_mods: Array = []
@@ -86,7 +87,6 @@ const UPGRADES := [
 	{"id": "tm", "name": "TM", "unit": "Choose your starting move (from your types)", "max": 1, "base": 3200.0, "grow": 1.0},
 	{"id": "ban", "name": "Ban", "unit": "Ban 1 move: it never shows up in your cards", "max": 6, "base": 480.0, "grow": 1.7},
 	{"id": "revive", "name": "Second Chance", "unit": "+1 heart: when you fall, revive with full HP", "max": 2, "base": 4000.0, "grow": 2.04},
-	{"id": "wslot", "name": "Weapon slots", "unit": "4 base slots: +1 per level (max 6)", "max": 2, "base": 9000.0, "grow": 2.2},
 	{"id": "bag", "name": "Backpack", "unit": "Carry 2 items at once per run", "max": 1, "base": 12000.0, "grow": 1.0},
 	{"id": "bag3", "name": "Big Backpack", "unit": "You carry 3 items at once per run (requires Backpack)", "max": 1, "base": 28000.0, "grow": 1.0},
 ]
@@ -120,7 +120,7 @@ const GOALS := [
 
 static func default_data() -> Dictionary:
 	return {
-		"v": 1, "created": int(Time.get_unix_time_from_system()), "title": "", "nick": "", "favs": [0, 0, 0], "coins": 600, "tickets": 10, "tickets10": 3, "lshards": 0, "gmax": {}, "regions_migrated": true, "regions_rule2": true, "pity": {}, "bpity": 0, "charms": {}, "banners_claimed": {}, "legends": {}, "arenas": {}, "lshiny": {}, "owned": {}, "selected": 25, "shiny_on": false,
+		"v": 1, "created": int(Time.get_unix_time_from_system()), "title": "", "nick": "", "favs": [0, 0, 0], "coins": 600, "tickets": 10, "tickets10": 3, "lshards": 0, "gmax": {}, "tera": {}, "eggs": [], "egg_id": 0, "regions_migrated": true, "regions_rule2": true, "pity": {}, "bpity": 0, "charms": {}, "banners_claimed": {}, "legends": {}, "arenas": {}, "lshiny": {}, "owned": {}, "selected": 25, "shiny_on": false,
 		"fusions": [], "upgrades": {}, "pup": {}, "claimed": {}, "pban": {}, "pbind": {}, "ptm": {}, "pz": {},
 		"stats": {"runs": 0, "kills": 0, "best_time": 0, "best_level": 1, "bosses": 0, "chests": 0, "pulls": 0, "shinies": 0, "total_time": 0, "coins_total": 0, "defeated_runs": 0, "rifts": 0},
 		"settings": {"master": 80, "music": 70, "sfx": 80, "dmg_numbers": true, "vibration": true, "shake": true, "stick": 1, "stick_fixed": false, "manual_aim": false, "lang": "en", "view": 100, "fov": 165, "pad": 0, "padmap": {}, "mute": false, "quality": 0, "fps": false, "stats_box": true, "stats_mode": 0, "mirror": false, "hud_scale": 100, "colorblind": false, "adaptive": true, "mono_bonus": false, "fx_op": 1, "act_side": 0, "text_sz": 0, "show_map": true, "test_builds": false, "dex_gen": 0, "dex_type": "", "dex_sort": 0, "dex_show": 0, "dex_grid": 1, "dex_mine": false},
@@ -161,6 +161,7 @@ static func ensure() -> void:
 	if parsed is Dictionary:
 		d = _merge(d, parsed)
 	_migrate_upgrades()
+	_migrate_wslot()
 	# 6h: regalo unico de 1 Gachapon Coin por la actualizacion
 	if not bool(d.get("gift_6h", false)):
 		d["gift_6h"] = true
@@ -259,6 +260,30 @@ static func _read_json(path: String):
 
 
 # Las mejoras eran globales; ahora cada Pokemon tiene las suyas. Las antiguas pasan al companero actual.
+# Weapon slots (5th and 6th move slot) was removed in 0.1.3-alpha.13: every bought level is paid back in full, once.
+# wslot_refund keeps the total for the one-time notice in the menu (menu.gd clears it after showing it).
+const WSLOT_BASE := 9000.0
+const WSLOT_GROW := 2.2
+
+
+static func wslot_cost(lvl: int) -> int:
+	return int(roundf(WSLOT_BASE * pow(WSLOT_GROW, float(lvl)) * UP_COST_MUL / 10.0)) * 10
+
+
+static func _migrate_wslot() -> void:
+	var total := 0
+	for key in (d.get("pup", {}) as Dictionary):
+		var u: Dictionary = d["pup"][key]
+		if u.has("wslot"):
+			for l in range(clampi(int(u["wslot"]), 0, 2)):
+				total += wslot_cost(l)
+			u.erase("wslot")
+	if total > 0:
+		d["coins"] = int(d.get("coins", 0)) + total
+		d["wslot_refund"] = int(d.get("wslot_refund", 0)) + total
+		save()
+
+
 static func _migrate_upgrades() -> void:
 	if not d.has("pup"):
 		d["pup"] = {}
@@ -306,6 +331,34 @@ static func setting(k: String):
 
 static func owns(dex: int) -> bool:
 	return d["owned"].has(str(dex))
+
+
+# Tera type per Pokémon (docs/tera.md): any of the 18 types, chosen in the Pokédex details; free to change.
+# Not set (or not a real type) means the Pokémon's first type.
+const TERA_TYPES := ["normal", "fire", "water", "electric", "grass", "ice", "fighting", "poison", "ground", "flying",
+	"psychic", "bug", "rock", "ghost", "dragon", "dark", "steel", "fairy"]
+
+
+static func tera_type(dex: int) -> String:
+	var t: String = String((d.get("tera", {}) as Dictionary).get(str(dex), ""))
+	if TERA_TYPES.has(t):
+		return t
+	if dex_by.has(dex) and not (dex_by[dex]["types"] as Array).is_empty():
+		return String(dex_by[dex]["types"][0])
+	return "normal"
+
+
+static func set_tera_type(dex: int, t: String) -> bool:
+	if not TERA_TYPES.has(t):
+		return false
+	if not (d.get("tera") is Dictionary):
+		d["tera"] = {}
+	var first: String = String(dex_by[dex]["types"][0]) if dex_by.has(dex) and not (dex_by[dex]["types"] as Array).is_empty() else ""
+	if t == first:
+		d["tera"].erase(str(dex))   # back to the default: nothing to keep
+	else:
+		d["tera"][str(dex)] = t
+	return true
 
 
 # Shiny look per Pokémon: you own its shiny version AND chose to use it ("Use shiny version" on that Pokémon only).
@@ -384,6 +437,8 @@ static func natural_start_of(dex: int) -> String:
 		return "judgment"
 	if dex == 646:   # Kyurem empieza con Gelogenia (Glaciate), su movimiento propio
 		return "glaciate"
+	if dex == 800:   # Necrozma starts with its own move, Photon Geyser (necrozma.gd)
+		return "photon-geyser"
 	if starter_by.has(dex):
 		return String(starter_by[dex]["start"])
 	var MDd = load("res://scripts/moves_data.gd")
@@ -424,6 +479,21 @@ static func tm_pool(dex: int) -> Array:
 		if dex == 151 or ty == "normal" or types.has(ty):
 			out.append(String(id))
 	return out
+
+
+# The move the TM taught this Pokémon ("" = none: it starts with its own move).
+static func tm_taught(dex: int) -> String:
+	var pick: String = String(d.get("ptm", {}).get(str(dex), ""))
+	if pick == "" or pick == natural_start_of(dex) or not tm_pool(dex).has(pick):
+		return ""
+	return pick
+
+
+# Erases the taught TM: back to the Pokémon's own starting move. The TM stays bought, so another can be taught for free.
+static func tm_erase(dex: int) -> void:
+	if d.has("ptm"):
+		(d["ptm"] as Dictionary).erase(str(dex))
+	save()
 
 
 static func tm_set(dex: int, id: String) -> void:
@@ -549,7 +619,6 @@ static func perks() -> Dictionary:
 		"xp": 1.0 + float(L.call("xp")) * 0.05,
 		"coins": 1.0 + float(L.call("coins")) * 0.08,
 		"moves": 1 + L.call("moves"),
-		"wslots": L.call("wslot"),
 		"crit": float(L.call("crit")) * 0.03,
 		"size": 1.0 + float(L.call("size")) * 0.08,
 		"rerolls": L.call("reroll"),
@@ -889,10 +958,12 @@ const Z_CRYSTAL_P := 0.03   # probabilidad de cristal Z por tirada de 10
 const Z_CRYSTAL_P_PURPLE := 0.06   # con el ticket morado ×10 se dobla
 const PURPLE_LEGEND_P := 0.12      # ticket morado: la ultima tirada es legendaria con esta probabilidad (si no, Muy raro o mejor)
 static var last_crystal := ""
+static var last_look := ""   # a Wardrobe item from this 10-pull (wardrobe.gd), "" when none
 
 
 static func pull(region: int, n: int = 1, use: String = "t1") -> Array:
 	last_crystal = ""
+	last_look = ""
 	if not can_pull(n, use) or not banner_open(region):
 		return []
 	var banner_on: bool = is_banner(region)
@@ -959,19 +1030,19 @@ static func pull(region: int, n: int = 1, use: String = "t1") -> Array:
 			d["pity"][key] = 0
 		var dex: int = int(sp["dex"])
 		var shiny: bool = randf() < sh_p and bool(smeta[str(dex)].get("sh", 0))
-		var shiny_owned: bool = owns(dex) and bool(d["owned"][str(dex)]["shiny"])
+		var shiny_owned: bool = owns(dex) and bool((d["owned"][str(dex)] as Dictionary).get("shiny", false))
 		if shiny and shiny_owned:
 			var missing: Array = []
 			for p in list:
 				var pk := str(int(p["dex"]))
-				if bool(smeta[pk].get("sh", 0)) and not (owns(int(p["dex"])) and bool(d["owned"][pk]["shiny"])):
+				if bool(smeta[pk].get("sh", 0)) and not (owns(int(p["dex"])) and bool((d["owned"][pk] as Dictionary).get("shiny", false))):
 					missing.append(p)
 			if missing.is_empty():
 				shiny = false
 			else:
 				sp = missing[randi() % missing.size()]
 				dex = int(sp["dex"])
-				shiny_owned = owns(dex) and bool(d["owned"][str(dex)]["shiny"])
+				shiny_owned = owns(dex) and bool((d["owned"][str(dex)] as Dictionary).get("shiny", false))
 		var was_new: bool = not owns(dex)
 		var refund := 0
 		var shard := 0
@@ -1000,6 +1071,8 @@ static func pull(region: int, n: int = 1, use: String = "t1") -> Array:
 		if not locked.is_empty():
 			last_crystal = String(locked[randi() % locked.size()])
 			d["stats"]["zcr_" + last_crystal] = 1
+	if n >= 10:   # Wardrobe: sometimes a gacha-only look you don't own (docs/wardrobe.md)
+		last_look = load("res://scripts/wardrobe.gd").gacha_roll()
 	return out
 
 
@@ -1024,6 +1097,13 @@ static func daily_mod(sd: int) -> String:
 	return String(MOD_IDS[(sd * 31 + 7) % MOD_IDS.size()])
 
 
+const TIME_REC_MODES := ["normal", "type", "team", "coop"]   # modes whose record is the time survived
+
+
+static func rec_mode_key(mode: String, diff: String, hyper: bool, sub: String = "") -> String:
+	return "%s%s|%s%s" % [mode, (":" + sub) if mode == "type" and sub != "" else "", diff, "|hyper" if hyper else ""]
+
+
 static func finish_run(r: Dictionary) -> Dictionary:
 	# r: time, kills, level, bosses, chests, coins, tickets
 	var pk: Dictionary = perks()
@@ -1032,7 +1112,29 @@ static func finish_run(r: Dictionary) -> Dictionary:
 	var tickets: int = int(r["tickets"])
 	var s: Dictionary = d["stats"]
 	var hyper: bool = bool(r.get("hyper", false))   # Hyper tiene su propio record y no toca el de partida normal
+	var diff: String = String(r.get("diff", "normal"))   # Hard / Nightmare keep their own records (difficulty.gd rec_key)
 	var record: bool = (int(r["time"]) > int(s.get("hyper_best", 0)) and int(s.get("hyper_runs", 0)) > 0) if hyper else (int(r["time"]) > int(s["best_time"]) and int(s["runs"]) > 0)
+	var rk: String = "best_%s%s" % [diff, "_hyper" if hyper else ""]
+	if diff != "normal":
+		record = int(r["time"]) > int(s.get(rk, 0)) and int(s.get(rk, 0)) > 0
+	# "New record!" on the run summary: a time record per mode and difficulty (and per type in Survival). Old saves
+	# only have the shared records, so Classic starts from those; the other modes start from their first run.
+	var rmode: String = String(r.get("mode", ""))
+	var rec_prev := 0
+	if rmode != "":
+		record = false
+		if TIME_REC_MODES.has(rmode):
+			var mk: String = rec_mode_key(rmode, diff, hyper, String(r.get("sub", "")))
+			var tbl: Dictionary = s.get("mode_rec", {})
+			var prev: int = int(tbl.get(mk, -1))
+			if prev < 0:
+				prev = 0
+				if rmode == "normal":
+					prev = int(s.get(rk if diff != "normal" else ("hyper_best" if hyper else "best_time"), 0))
+			record = int(r["time"]) > prev and prev > 0
+			rec_prev = prev
+			tbl[mk] = maxi(prev, int(r["time"]))
+			s["mode_rec"] = tbl
 	var picked: int = int(roundf(float(r["coins"]) * float(pk["coins"])))
 	s["runs"] = int(s["runs"]) + 1
 	s["kills"] = int(s["kills"]) + int(r["kills"])
@@ -1043,7 +1145,11 @@ static func finish_run(r: Dictionary) -> Dictionary:
 	s["big_hit"] = maxi(int(s.get("big_hit", 0)), int(r.get("big", 0)))
 	s["meters"] = int(s.get("meters", 0)) + int(r.get("meters", 0))
 	s["pr_" + str(int(r.get("dex", 25)))] = int(s.get("pr_" + str(int(r.get("dex", 25))), 0)) + 1
-	if hyper:
+	if diff != "normal":
+		s[rk] = maxi(int(s.get(rk, 0)), int(r["time"]))
+		if hyper:
+			s["hyper_runs"] = int(s.get("hyper_runs", 0)) + 1
+	elif hyper:
 		s["hyper_runs"] = int(s.get("hyper_runs", 0)) + 1
 		s["hyper_best"] = maxi(int(s.get("hyper_best", 0)), int(r["time"]))
 	else:
@@ -1058,10 +1164,10 @@ static func finish_run(r: Dictionary) -> Dictionary:
 	s["lshardsTotal"] = int(s.get("lshardsTotal", 0)) + int(r.get("lshards", 0))
 	d["gcoins"] = int(d.get("gcoins", 0)) + int(r.get("gcoins", 0))
 	d["gold_coins"] = int(d.get("gold_coins", 0)) + int(r.get("gold_gcoins", 0))
-	if not hyper:
+	if not hyper and diff == "normal":
 		_add_top({"time": int(r["time"]), "doom": int(r.get("doom", 0)), "kills": int(r["kills"]), "level": int(r["level"]), "dex": int(r.get("dex", 25)), "judge": int(r.get("judge", {}).get("time", 0)) if r.get("judge", {}) is Dictionary else 0, "date": Time.get_date_string_from_system()})
 	last_run = {"judge": r.get("judge", {}), "time": int(r["time"]), "kills": int(r["kills"]), "level": int(r["level"]), "coins": coins, "tickets": tickets, "tickets10": tickets10, "gcoins": int(r.get("gcoins", 0)), "bosses": int(r["bosses"]), "dex": int(r.get("dex", 25)),
-		"dead": bool(r.get("dead", true)), "record": record, "moves": r.get("moves", []), "other_dmg": int(r.get("other_dmg", 0)), "other_kills": int(r.get("other_kills", 0)), "ally_dmg": int(r.get("ally_dmg", 0)), "ally_kills": int(r.get("ally_kills", 0)),
+		"dead": bool(r.get("dead", true)), "record": record, "rec_prev": rec_prev, "mode": rmode, "sub": String(r.get("sub", "")), "diff": diff, "hyper": hyper, "moves": r.get("moves", []), "other_dmg": int(r.get("other_dmg", 0)), "other_kills": int(r.get("other_kills", 0)), "ally_dmg": int(r.get("ally_dmg", 0)), "ally_kills": int(r.get("ally_kills", 0)),
 		"breakdown": "Collected %d · Time +%d · Defeated +%d" % [picked, int(float(r["time"]) / 6.0), int(float(r["kills"]) / 10.0)] + String(r.get("extra", ""))}
 	save()
 	return last_run

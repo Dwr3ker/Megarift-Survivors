@@ -191,6 +191,7 @@ func _success() -> void:
 	done[cur["id"]] = true
 	var pos: Vector2 = cur["pos"]
 	var reward: String = _reward(pos)
+	m._egg_try("rescue", pos + Vector2(0.0, 20.0))
 	m.ach_event("rescue", {})
 	m._say(m.L.t("Rescue complete!"), 2.0)
 	m.pfx.burst(pos + Vector2(0, -24), Color("#ff8ad8"), 26, 150.0)

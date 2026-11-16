@@ -17,6 +17,7 @@ const RAR = preload("res://scripts/rarity.gd")
 const WL = preload("res://scripts/wildleg.gd")
 const FM = preload("res://scripts/forme.gd")
 const KYU = preload("res://scripts/kyurem.gd")
+const NZ = preload("res://scripts/necrozma.gd")
 const EVL = preload("res://scripts/evolution.gd")
 const PWF = preload("res://scripts/power_fx.gd")
 const ETX = preload("res://scripts/eternamax.gd")
@@ -32,7 +33,12 @@ const POI = preload("res://scripts/poi.gd")
 const KC = preload("res://scripts/kecleon.gd")
 const RSC = preload("res://scripts/rescue.gd")
 const ALP = preload("res://scripts/alpha.gd")
+const EG = preload("res://scripts/eggs.gd")
+const EGA = preload("res://scripts/egg_art.gd")
 const DNC = preload("res://scripts/daynight.gd")
+const AURC = preload("res://scripts/aurora.gd")
+const PRC = preload("res://scripts/pressure.gd")
+const FFC = preload("res://scripts/flowfield.gd")
 const HZD = preload("res://scripts/hazard.gd")
 const CVE = preload("res://scripts/cave.gd")
 const INV = preload("res://scripts/invasion.gd")
@@ -62,10 +68,15 @@ const TXS = preload("res://scripts/textscale.gd")
 const TW = preload("res://scripts/tileworld.gd")
 const JDM = preload("res://scripts/judgment.gd")
 const PG = preload("res://scripts/progress.gd")
+const DIF = preload("res://scripts/difficulty.gd")
+const COSFX = preload("res://scripts/cosmetics_fx.gd")
+const WR = preload("res://scripts/wardrobe.gd")
 const CH = preload("res://scripts/challenges.gd")
 const VFX = preload("res://scripts/vfx.gd")
 const PFX = preload("res://scripts/pfx.gd")
 const GMX = preload("res://scripts/gmax.gd")
+const TERA = preload("res://scripts/tera.gd")
+const INP = preload("res://scripts/input_mode.gd")
 const HFX = preload("res://scripts/hover_fx.gd")
 const PAUSEUI = preload("res://scripts/pause_ui.gd")
 
@@ -107,7 +118,34 @@ const MULT_KEYS := ["dmg", "cd", "speed", "radius", "dur", "amount", "arc", "wid
 const ADD_KEYS := ["count", "pierce", "stacks"]
 const TARGETED := ["melee", "beam", "projectile", "boomerang", "chain", "meteor", "dash", "cone"]
 
-const FLASH_SHADER := "shader_type canvas_item;\nuniform float flash : hint_range(0.0, 1.0) = 0.0;\nvoid fragment() {\n\tCOLOR = vec4(mix(COLOR.rgb, vec3(1.0), flash), COLOR.a);\n}\n"
+# Every Pokémon's sprite shader: the white hit flash, and the Tera crystal look (step 9): the sprite turns into a
+# faceted crystal in its Tera type's colour, with bright facet edges on a diagonal grid and a band of light sweeping
+# across, snapped to a few shades so it stays pixel art.
+const FLASH_SHADER := """shader_type canvas_item;
+uniform float flash : hint_range(0.0, 1.0) = 0.0;
+uniform float crystal : hint_range(0.0, 1.0) = 0.0;
+uniform vec3 crystal_col = vec3(0.6, 0.9, 1.0);
+void fragment() {
+	vec3 c = COLOR.rgb;
+	if (crystal > 0.0) {
+		vec2 px = floor(UV / TEXTURE_PIXEL_SIZE);
+		float l = dot(c, vec3(0.3, 0.59, 0.11));
+		float shade = floor((0.15 + l * 1.0) * 4.0) / 4.0;
+		vec3 cr = crystal_col * (0.25 + shade * 0.95);
+		float a = fract((px.x + px.y) / 14.0);
+		float b = fract((px.x - px.y) / 14.0);
+		float edge = max(step(a, 0.07), step(b, 0.07)) * step(0.2, l);
+		cr = mix(cr, mix(crystal_col, vec3(1.0), 0.75), edge * 0.45);
+		if (l < 0.16) {
+			cr = crystal_col * 0.16;   // the sprite's dark outline stays dark, tinted
+		}
+		float sweep = fract((px.x + px.y) * 0.012 - TIME * 0.45);
+		cr = mix(cr, vec3(1.0), step(sweep, 0.06) * 0.75);
+		c = mix(c, cr, crystal);
+	}
+	COLOR = vec4(mix(c, vec3(1.0), flash), COLOR.a);
+}
+"""
 
 # Animaciones de cada Pokemon (sprites.js) y la que se usa al lanzar cada tipo de movimiento.
 const ANIMS := ["Idle", "Walk", "Attack", "Shoot", "Charge", "Hurt", "Faint"]
@@ -266,6 +304,10 @@ var zfx = null
 var z_req := false
 var dyn = null
 var dyn_used := false
+var tera_pts := 0.0      # Tera Orb charge this run (full at TERA.NEED)
+var tera_used := false   # used this run (a Legendary rift recharges it)
+var necrozma := ""       # Necrozma's fusion this run: "", "dusk" or "dawn" (necrozma.gd)
+var necro_ultra := false # Ultra Burst done
 var mom := 0.0           # Impulso: cargas actuales
 var mom_t := 0.0         # segundos desde la ultima derrota
 var dash_req := false    # peticion de dash (tecla, boton, mando)
@@ -275,6 +317,7 @@ var dash_dir := Vector2.DOWN
 var dash_last := Vector2.DOWN   # ultima direccion en la que te moviste (si no pulsas nada, el dash va por ahi)
 var dash_hit := {}       # enemigos ya golpeados en este dash
 var hyper := false       # Modo Hyper activo en esta partida
+var diff := "normal"     # difficulty of this run (difficulty.gd): Normal runs only
 var time_k := 1.0        # velocidad del reloj de la partida (2 en Hyper); run_time son segundos "de partida", no reales
 var mega = null          # Megaevolucion (mega.gd): una vez por partida, carta rara desde el minuto 30
 var mega_done := false
@@ -298,6 +341,10 @@ var kyurem := ""         # Kyurem: "", black or white (DNA Splicers); see kyurem
 var forme_t := -1000000.0   # run_time del ultimo cambio de forma
 var dyn_cd := 0.0
 var dyn_req := false
+var tera_req := false
+var tera_t := 0.0       # time left Terastallized (0 = not Terastallized)
+var tera_type_run := ""  # the type you are Terastallized into ("" when not)
+var pad_chord := {}     # power chords held last frame (rising edge = fire once)
 var dyn_lt_down := false
 var dyn_flash := 0.0
 var run_dens := 0
@@ -398,6 +445,7 @@ var gen_q: Array = []
 var gfx: Node2D
 var world: Node2D
 var fx: Node2D
+var cos_fx = null   # cosmetics_fx.gd (Wardrobe)
 var mfx: Node2D   # your moves (projectiles, orbiting orbs, evolved and Fusion Move effects): under the Pokémon
 var pfx: Node2D
 var pfx_low: Node2D
@@ -415,6 +463,9 @@ var meteor = null
 var mew = null
 var sec = null
 var dn = null
+var aur = null   # Aurora night event (scripts/aurora.gd)
+var pressure = null   # late-run Pressure for overpowered builds (scripts/pressure.gd)
+var flow = null       # paths around walls to the player (scripts/flowfield.gd)
 var balls := 0
 const NORMAL_MOVE_W := 0.15
 const BALL_CAP := 6
@@ -481,6 +532,10 @@ const ETER_PAY_AGAIN := {"coins": 1000, "t10": 1, "t": 5}
 var eter_at := 3600.0     # segundo de partida en que toca el siguiente Eternatus
 var eter_kills := 0
 var lshards_run := 0     # Legend Shards earned this run (paid out with the run's other rewards)
+var eggs_run: Array = []   # eggs picked up this run (docs/eggs.md), stored in the bag when the run ends
+var egg_drops := 0         # eggs dropped this run (picked up or not): at most EG.PER_RUN
+var egg_pend: Dictionary = {}   # egg id -> egg, for eggs lying on the ground
+var eggs_hatchable: Array = []  # eggs that became ready to hatch at this run's end
 var bc_t := 0.0           # breadcrumb timer (see _process)
 var resumed := false      # this run was put back from a mid-run save (run_save.gd)
 var eter_prompt := false  # pantalla de eleccion pendiente (espera a que no haya otras cartas abiertas)
@@ -603,6 +658,7 @@ var cave_type := ""   # mientras se genera la oleada de una cueva: solo Pokemon 
 var ainfo := {}
 var bonds := 0
 var bond_ids: Array = []
+var slot_cap := 0   # a run saved with 5-6 slots (old Weapon slots upgrade) keeps them until it ends
 var bond_first := ""
 
 
@@ -626,6 +682,8 @@ func _ready() -> void:
 
 	ground = TW.new()
 	add_child(ground)
+	cos_fx = COSFX.new()   # Wardrobe trail and aura: right above the ground, under the attack warnings and everything else
+	add_child(cos_fx)
 	gfx = Node2D.new()
 	add_child(gfx)
 	mfx = Node2D.new()   # between the ground effects and the y-sorted world: attacks come out from under the Pokémon,
@@ -653,6 +711,7 @@ func _ready() -> void:
 	_load_data()
 	mode = SV.run_mode
 	hyper = SV.run_hyper and mode == "normal"
+	diff = DIF.valid(SV.run_diff) if mode == "normal" else "normal"
 	time_k = HYPER_SPEED if hyper else 1.0
 	mods = SV.run_mods.duplicate()
 	PG.off = mode == "party"
@@ -721,6 +780,7 @@ func _ready() -> void:
 	shake_on = bool(SV.setting("shake"))
 	Actor.flash_k = 1.0 if shake_on else 0.35
 	quality = int(SV.setting("quality"))
+	cos_fx.setup(self)
 	pfx.setup([1.0, 1.0, 0.65, 0.35][clampi(quality, 0, 3)])
 	pfx_low.setup([1.0, 1.0, 0.65, 0.35][clampi(quality, 0, 3)])
 	var sel_dex: int = SV.run_dex
@@ -806,6 +866,13 @@ func _ready() -> void:
 	dn = DNC.new()
 	dn.m = self
 	dn.setup()
+	aur = AURC.new()
+	aur.m = self
+	aur.setup()
+	pressure = PRC.new()
+	pressure.m = self
+	flow = FFC.new()
+	flow.m = self
 	wx = WeatherFx.new()
 	ui.add_child(wx)
 	hud = Hud.new()
@@ -954,6 +1021,8 @@ func _aim_input(event: InputEvent) -> void:
 
 
 func _input(event: InputEvent) -> void:
+	if INP.feed(event) and hud != null:
+		hud.queue_redraw()   # the button hints switch to keys / controller buttons / nothing
 	_aim_input(event)
 
 
@@ -1024,6 +1093,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			z_req = true
 		elif kact == "dynamax":
 			dyn_req = true
+		elif kact == "tera":
+			tera_req = true
 		elif kact == "dash":
 			dash_req = true
 		elif kact == "options":
@@ -1062,14 +1133,12 @@ func _unhandled_input(event: InputEvent) -> void:
 			z_req = true
 		elif bi == PAD.btn("dynamax"):
 			dyn_req = true
+		elif bi == PAD.btn("tera"):
+			tera_req = true
 		elif _pad_slot(bi) >= 0:
 			slot = _pad_slot(bi)
-		elif bi == JOY_BUTTON_Y:   # en partida: Y / Triángulo = Movimiento Z (con cartas en pantalla sigue siendo relanzar)
-			z_req = true
-			go = true
-		elif bi == JOY_BUTTON_X:   # en partida: X / Cuadrado = Dynamax (con cartas en pantalla sigue siendo vetar)
-			dyn_req = true
-			go = true
+		elif bi == JOY_BUTTON_X or bi == JOY_BUTTON_Y:
+			pass   # in a run X and Y only start the power chords (X + LT / X + RT / Y + RT, see _z_poll)
 		else:
 			go = true
 	elif event is InputEventScreenTouch and event.pressed:
@@ -1108,6 +1177,14 @@ func _unhandled_input(event: InputEvent) -> void:
 			_dyn_start()
 			dyn_req = false
 			return
+		if (tera_req or (tpos.x >= 0.0 and hud.tera_btn > 0 and hud.tera_rect().has_point(tpos))) and _tera_can():
+			_tera_start()
+			tera_req = false
+			return
+		if (dyn_req or (tpos.x >= 0.0 and hud.dyn_btn == 4 and hud.dyn_rect().has_point(tpos))) and hud.dyn_btn == 4:
+			_blocked_say("dynamax")
+		if (tera_req or (tpos.x >= 0.0 and hud.tera_btn == 4 and hud.tera_rect().has_point(tpos))) and hud.tera_btn == 4:
+			_blocked_say("tera")
 		if (dash_req or (tpos.x >= 0.0 and hud.dash_rect().has_point(tpos))) and _dash_can():
 			_dash_start()
 			dash_req = false
@@ -1129,6 +1206,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			_set_active(posmod(player.slot + cyc, _slot_list().size()))
 	z_req = false
 	dyn_req = false
+	tera_req = false
 	dash_req = false
 
 
@@ -1179,6 +1257,7 @@ func _finish_run() -> void:
 	if run_saved:
 		return
 	run_saved = true
+	_tera_end("end")
 	CR.mark_run_end()
 	if resumed:
 		RS.clear()   # the saved run ends with this one
@@ -1249,6 +1328,20 @@ func _finish_run() -> void:
 	mul *= _treasure_k()   # Iman del Tesoro: solo el botin normal de fin de partida (no los premios unicos de los retos)
 	if hyper:
 		mul *= HYPER_COINS   # Hyper paga x1,5 monedas
+	if diff != "normal":
+		mul *= DIF.k(diff, "coins")   # Hard x1.5, Nightmare x2.25
+		var dt_bonus: int = DIF.bonus_tickets(diff, run_time / time_k)
+		tickets += dt_bonus
+		if dt_bonus > 0:
+			extra += " · " + L.t("%s bonus: +%d tickets") % [L.t(String(DIF.NAME[diff])), dt_bonus]
+		var gmin: int = int(run_time / 60.0)   # game minutes (Arceus at 30 on any speed)
+		var st3: Dictionary = SV.d["stats"]
+		var key: String = "hardBestMin" if diff == "hard" else "nightBestMin"
+		st3[key] = maxi(int(st3.get(key, 0)), gmin)
+		if diff == "nightmare" and arceus_beaten:
+			st3["nightArceus"] = int(st3.get("nightArceus", 0)) + 1
+		if diff == "nightmare" and eter_kills > 0:
+			st3["nightEternatus"] = int(st3.get("nightEternatus", 0)) + 1
 	if mode == "type":
 		mul += 0.5
 		extra = " · " + L.t("Survival: %s") % L.t(String(MD.TYPE_NAME.get(SV.run_type, SV.run_type)))
@@ -1275,6 +1368,18 @@ func _finish_run() -> void:
 		extra += " · " + L.t("Eternatus defeated %d times") % eter_kills
 	if lshards_run > 0:
 		extra += " · " + L.t("+%d Legend Shards") % lshards_run
+	# incubated eggs gain this run's distance (before this run's new eggs go in: they start counting next run)
+	eggs_hatchable = EG.credit(run_meters)
+	if not eggs_hatchable.is_empty():
+		extra += " · " + L.t("Oh? The egg is moving!")
+	if not eggs_run.is_empty():
+		var kept := 0
+		for eg in eggs_run:
+			if EG.add(eg):
+				kept += 1
+		eggs_run = []
+		if kept > 0:
+			extra += " · " + L.t("+%d Eggs") % kept
 	if mode == "normal" and region > 0:   # region maps: best time per region; defeating Arceus unlocks the next region
 		var newr: int = SV.region_record(region, int(run_time), arceus_beaten)
 		if newr > 0:
@@ -1314,7 +1419,7 @@ func _finish_run() -> void:
 			st2["mn%d" % k] = maxi(int(st2.get("mn%d" % k, 0)), rmin)
 		for md_id in mods:
 			st2["mb_" + String(md_id)] = maxi(int(st2.get("mb_" + String(md_id), 0)), rmin)
-	SV.finish_run({"judge": js, "time": run_time / time_k, "hyper": hyper, "doom": eter_kills, "kills": kills, "level": player.level, "bosses": run_bosses,
+	SV.finish_run({"judge": js, "time": run_time / time_k, "hyper": hyper, "diff": diff, "mode": mode, "sub": String(SV.run_type) if mode == "type" else "", "doom": eter_kills, "kills": kills, "level": player.level, "bosses": run_bosses,
 		"chests": run_chests, "coins": coins, "tickets": tickets, "tickets10": tickets10, "lshards": lshards_run, "gcoins": gcoins_run, "gold_gcoins": gold_gcoins_run, "dex": SV.run_dex,
 		"dead": player.dead and not timeup, "moves": mv_list, "items": item_list, "mul": mul, "extra": extra,
 		"other_dmg": int(run_dmg.get("_other", 0.0)), "other_kills": int(run_kills_by.get("_other", 0)),
@@ -1467,6 +1572,8 @@ func _process(delta: float) -> void:
 	if hud != null:
 		hud.modulate.a = 0.25 if (cards != null and cards.open) else 1.0   # the run's HUD steps back behind the cards
 	hud.paused = paused
+	if tera_t > 0.0 and (player.dead or down or timeup):
+		_tera_end("faint")
 	if not settings_open:
 		var want_ui: bool = paused and not player.dead
 		if want_ui != pause_ui.visible:
@@ -1595,6 +1702,11 @@ func _process(delta: float) -> void:
 		_update_partner(delta)
 		_z_poll()
 		_cooldowns(delta)
+		if tera_t > 0.0:
+			tera_t -= delta
+			if tera_t <= 0.0:
+				tera_t = 0.001
+				_tera_end("time")
 		_adapt(delta)
 		if z_state == "fx":
 			_z_fx(delta)
@@ -1639,6 +1751,10 @@ func _process(delta: float) -> void:
 			if jd.active():
 				jd.update(delta)
 		dn.update(delta)
+		aur.update(delta)
+		pressure.update(delta)
+		if flow != null:
+			flow.update(delta)
 		_update_weather(delta)
 		_update_enemies(delta)
 		_update_hazards(delta)
@@ -1731,11 +1847,22 @@ func _process(delta: float) -> void:
 	hud.z_type = z_type
 	hud.z_btn = 0 if (mode == "tower" or z_type == "" or z_state != "") else (3 if z_used else (2 if run_time >= ZM.MIN_TIME else 0))
 	hud.z_cd = z_cd
-	hud.adapt_pct = roundi(adapt_k * 100.0) if _adapt_on() else 0
+	hud.adapt_pct = roundi(adapt_k * pressure.hp_k() * 100.0) if _adapt_on() else 0
 	hud.dyn_left = maxf(0.0, dyn.t) if _dyn_on() else -1.0
 	hud.dyn_flash = dyn_flash if dyn != null else 99.0
 	hud.dyn_type = String(player.types[0])
 	hud.dyn_btn = 0 if (mode == "tower" or not DYN.unlocked(SV.d["stats"]) or _dyn_on()) else (3 if dyn_used else (2 if run_time >= DYN.MIN_TIME else 0))
+	if hud.dyn_btn == 2 and _tera_on():
+		hud.dyn_btn = 4   # ready, but not while Terastallized: greyed with "Tera on"
+	# TERA: 1 charging (the ring fills with the orb), 2 ready, 3 Terastallized or used
+	hud.tera_btn = 0 if not TERA.mode_ok(mode) else (3 if (tera_used or tera_t > 0.0) else (2 if tera_pts >= TERA.NEED else 1))
+	if hud.tera_btn == 2 and _dyn_on():
+		hud.tera_btn = 4   # charged, but not while Dynamaxed: greyed with "Max on"
+	hud.tera_frac = clampf(tera_pts / TERA.NEED, 0.0, 1.0)
+	hud.tera_left = tera_t
+	hud.tera_flash += get_process_delta_time()
+	hud.tera_col = Color.html(String(MD.TYPE_COLOR.get(SV.tera_type(int(_pdex())), "#9ff0ff")))
+	hud.pad_on = INP.is_pad()
 	hud.dyn_cd = dyn_cd
 	hud.dyn_gmax = GMX.has_factor(SV.d, int(_cur_dex())) and mode != "tower"
 	hud.ab_name = L.t(String(AB.FX[AB.of(_cur_dex())]["name"]))
@@ -1772,6 +1899,8 @@ func _process(delta: float) -> void:
 		_team_tick(delta)
 	hud.run_time = run_time / time_k   # el reloj de la pantalla muestra tiempo real
 	hud.hyper = hyper
+	hud.diff = diff
+	hud.frame_style = WR.equipped("frame")
 	hud.doom = eter_kills
 	hud.kills = kills
 	hud.dead = player.dead
@@ -1810,6 +1939,9 @@ func _process(delta: float) -> void:
 	hud.balls = balls
 	hud.tickets = tickets
 	hud.tickets10 = tickets10
+	hud.lshards = lshards_run
+	hud.eggs = eggs_run.size()
+	hud.egg_look = String(eggs_run[eggs_run.size() - 1]["look"]) if not eggs_run.is_empty() else "yellow"
 	_update_rift_hud()
 	_update_thief_hud()
 	_update_threat_hud()
@@ -1872,7 +2004,7 @@ func _stat_cap(id: String) -> float:
 
 # Limite de enemigos del spawner normal (sube con el Doom, doom.gd).
 func _cap() -> int:
-	return DM.cap(ENEMY_CAP, eter_kills)
+	return DM.cap(ENEMY_CAP, eter_kills) + (pressure.cap_add() if pressure != null else 0)
 
 
 func _buff_mul(stat: String) -> float:
@@ -2051,18 +2183,167 @@ func _z_can() -> bool:
 
 
 # Gatillo derecho del mando (ademas del boton configurable).
+# Power chords on the controller (pad.gd CHORDS): X + LT = Z-Move, X + RT = Dynamax / Gigantamax, Y + RT = Tera.
+# Each fires once when the chord is completed (in either order) and again only after it is let go.
 func _z_poll() -> void:
 	var pads: Array = Input.get_connected_joypads()
 	if pads.is_empty():
 		return
-	var on: bool = Input.get_joy_axis(int(pads[0]), JOY_AXIS_TRIGGER_RIGHT) > 0.7
-	if on and not z_rt_down and _z_can():
-		_z_start()
-	z_rt_down = on
-	var lt: bool = Input.get_joy_axis(int(pads[0]), JOY_AXIS_TRIGGER_LEFT) > 0.7
-	if lt and not dyn_lt_down and _dyn_can():
-		_dyn_start()
-	dyn_lt_down = lt
+	var pd: int = int(pads[0])
+	var held := {}
+	for act in PAD.CHORDS:
+		var c: Array = PAD.CHORDS[act]
+		held[act] = Input.is_joy_button_pressed(pd, int(c[0])) and Input.get_joy_axis(pd, int(c[1])) > 0.6
+	_chords_tick(held)
+
+
+# held: chord -> held this frame. A chord fires on the frame it becomes held.
+func _chords_tick(held: Dictionary) -> void:
+	for act in PAD.CHORDS:
+		var on: bool = bool(held.get(act, false))
+		if on and not bool(pad_chord.get(act, false)):
+			if act == "zmove" and _z_can():
+				_z_start()
+			elif act == "dynamax" and _dyn_can():
+				_dyn_start()
+			elif act == "tera" and _tera_can():
+				_tera_start()
+			elif (act == "dynamax" and hud.dyn_btn == 4) or (act == "tera" and hud.tera_btn == 4):
+				_blocked_say(act)
+		pad_chord[act] = on
+
+
+# ---- Tera (tera.gd, docs/tera.md) ----
+# Every defeat fills the Tera Orb (a boss counts as 10); it stops at full and doesn't charge once used.
+func _tera_charge(e) -> void:
+	if tera_used or not TERA.mode_ok(mode) or tera_pts >= TERA.NEED:
+		return
+	var was_full: bool = tera_pts >= TERA.NEED
+	tera_pts = minf(TERA.NEED, tera_pts + TERA.pts_for(e))
+	if not was_full and tera_pts >= TERA.NEED:
+		_say(L.t("The Tera Orb is charged!"), 2.6)
+		Aud.sfx("shinyGet")
+
+
+func _tera_ready() -> bool:
+	return not tera_used and TERA.mode_ok(mode) and tera_pts >= TERA.NEED
+
+
+func _tera_can() -> bool:
+	return _tera_ready() and not _dyn_on() and z_state != "cine" and not player.dead and not down and not paused and not choosing and not jd.cinematic() and not timeup
+
+
+func _tera_on() -> bool:
+	return tera_t > 0.0
+
+
+# The crystal look on your Pokémon's sprite (FLASH_SHADER): fades in on Terastallizing, out when it ends.
+func _tera_look(col: Color, on: bool = true) -> void:
+	if player == null or not is_instance_valid(player):
+		return
+	var mt: ShaderMaterial = player.mat
+	mt.set_shader_parameter("crystal_col", Vector3(col.r, col.g, col.b).lerp(Vector3(1, 1, 1), 0.15))
+	for ch in player.get_children():   # the Tera jewel above the head (tera.gd)
+		if ch is TERA.Jewel:
+			ch.queue_free()
+	if on:
+		var jw := TERA.Jewel.new()
+		jw.type = tera_type_run
+		jw.h = float(player.body_h)
+		player.add_child(jw)
+	var from = mt.get_shader_parameter("crystal")
+	var tw := create_tween()
+	tw.tween_method(func(v: float): mt.set_shader_parameter("crystal", v), float(from) if from != null else 0.0, 1.0 if on else 0.0, 0.35)
+
+
+# A Tera boss reaches half HP: it Terastallizes into its Tera type (step 14). Its type and weaknesses change, it turns
+# to crystal with the jewel above it, and a short warning shows. It happens once.
+func _boss_tera(e) -> void:
+	var ty: String = String(e.get_meta("tera_boss"))
+	e.set_meta("tera_done", true)
+	e.types = [ty]
+	var col: Color = Color.html(String(MD.TYPE_COLOR.get(ty, "#9ff0ff")))
+	var mt: ShaderMaterial = e.mat
+	mt.set_shader_parameter("crystal_col", Vector3(col.r, col.g, col.b).lerp(Vector3(1, 1, 1), 0.15))
+	var tw := create_tween()
+	tw.tween_method(func(v: float):
+		if is_instance_valid(e):
+			mt.set_shader_parameter("crystal", v), 0.0, 1.0, 0.35)
+	var jw := TERA.Jewel.new()
+	jw.type = ty
+	jw.h = float(e.body_h)
+	e.add_child(jw)
+	_ring(e.position, 8.0, 180.0, col, 0.6, 6.0)
+	_ring(e.position, 8.0, 120.0, Color.WHITE, 0.45, 4.0)
+	pfx.burst(e.position + Vector2(0.0, -e.body_h * 0.5), col.lightened(0.4), 24, 240.0)
+	Aud.sfx("break")
+	shake = maxf(shake, 8.0)
+	var msg: String = L.t("%s Terastallized into the %s type!") % [e.enemy_name, L.t(String(MD.TYPE_NAME.get(ty, ty)))]
+	get_tree().create_timer(2.0).timeout.connect(func(): _say(msg, 3.0))   # after the boss's own half-HP message (enraged)
+	add_text(e.position + Vector2(0.0, -e.body_h - 30.0), L.t("Tera!"), col, 26)
+
+
+# The types you defend with: your Tera type alone while Terastallized (docs/tera.md), otherwise your own types.
+# Used for type matchups on hits you take, weather, floors (lava, poison, spark...) and biome strike immunity.
+func _def_types() -> Array:
+	return [tera_type_run] if tera_type_run != "" else player.types
+
+
+# Dynamax and Tera are never on at the same time: pressing the other one says why (at most every 1.5 s).
+var _blocked_t := 0
+func _blocked_say(act: String) -> void:
+	var now: int = Time.get_ticks_msec()
+	if now - _blocked_t < 1500:
+		return
+	_blocked_t = now
+	Aud.sfx("hover")
+	_say(L.t("Can't Dynamax while Terastallized") if act == "dynamax" else L.t("Can't Terastallize while Dynamaxed"), 2.0)
+
+
+# Terastallize: once per run, for TERA.DUR seconds, into the Tera type of the Pokémon you started the run with
+# (docs/tera.md; evolving mid-run keeps it). The look and the effects come in steps 7 to 11.
+func _tera_start() -> void:
+	tera_used = true
+	tera_t = TERA.DUR
+	tera_type_run = SV.tera_type(int(_pdex()))
+	var col: Color = Color.html(String(MD.TYPE_COLOR.get(tera_type_run, "#9ff0ff")))
+	# the activation scene (tera.gd Shell): a crystal shell forms, cracks and shatters; the crystal look, the jewel and the
+	# banner come with the shatter. You can't be hurt meanwhile.
+	player.invuln = maxf(player.invuln, TERA.SCENE_LEN + 0.3)
+	var sh := TERA.Shell.new()
+	sh.col = col
+	sh.h = float(player.body_h)
+	sh.w = float(player.radius) * 1.8
+	player.add_child(sh)
+	Aud.sfx("legend")
+	hud.tera_flash = 0.0
+	hud.tera_word = L.t("TERASTALLIZE!")
+	hud.tera_sub = L.t("Tera %s") % L.t(String(MD.TYPE_NAME.get(tera_type_run, tera_type_run)))
+	hud.tera_col = col
+	var ty_now: String = tera_type_run
+	get_tree().create_timer(TERA.SHATTER).timeout.connect(func():
+		if tera_type_run != ty_now or not _tera_on():
+			return   # it already ended (fainted, entered a rift...)
+		_tera_look(col)
+		Aud.sfx("break")
+		_ring(player.position, 8.0, 200.0, col, 0.6, 6.0)
+		_ring(player.position, 8.0, 130.0, Color.WHITE, 0.45, 4.0)
+		pfx.burst(player.position + Vector2(0.0, -player.body_h * 0.5), col.lightened(0.4), 26, 260.0)
+		shake = maxf(shake, 9.0))
+
+
+# Ends Tera: its time is up, you faint, you enter a rift, cave or arena, or the run ends. Safe to call any time.
+func _tera_end(_why: String = "") -> void:
+	if tera_t <= 0.0 and tera_type_run == "":
+		return
+	var col: Color = Color.html(String(MD.TYPE_COLOR.get(tera_type_run, "#9ff0ff")))
+	tera_t = 0.0
+	tera_type_run = ""
+	_tera_look(Color.WHITE, false)
+	if player != null and is_instance_valid(player) and not player.dead:   # the crystal shatters away
+		_ring(player.position, 10.0, 120.0, col, 0.45, 4.0)
+		pfx.burst(player.position + Vector2(0.0, -player.body_h * 0.5), col.lightened(0.4), 18, 200.0)
+		Aud.sfx("break")
 
 
 # ---- Dynamax ----
@@ -2071,7 +2352,7 @@ func _dyn_on() -> bool:
 
 
 func _dyn_can() -> bool:
-	return mode != "tower" and DYN.unlocked(SV.d["stats"]) and not dyn_used and not _dyn_on() and z_state != "cine" and run_time >= DYN.MIN_TIME and not player.dead and not down and not paused and not choosing and not jd.active() and not timeup
+	return not _tera_on() and mode != "tower" and DYN.unlocked(SV.d["stats"]) and not dyn_used and not _dyn_on() and z_state != "cine" and run_time >= DYN.MIN_TIME and not player.dead and not down and not paused and not choosing and not jd.active() and not timeup
 
 
 func _dyn_start() -> void:
@@ -2248,14 +2529,14 @@ func _atk() -> float:
 		k *= 1.4
 	if _has_item("lifeorb"):
 		k *= 1.3   # antes, con las dos a la vez (Doble equipaje) la Vidasfera no sumaba daño pero seguía quitando vida
-	return base_atk * pow(1.10, _lvf("atk")) * (1.0 + _buff_mul("atk")) * k * (1.5 if _pw("fury") else 1.0) * (1.5 if wp_t > 0.0 else 1.0) * _rk("atk") * (1.0 + 0.003 * float(reap_kills)) * (1.0 + _abn("dmg") + _moxie() + (_abn("defiant") if defiant_t > 0.0 else 0.0)) * (dyn.dmg_k if _dyn_on() else 1.0) * (MG.ATK_K * DM.mega_atk_k(eter_kills) if _mega_on() else 1.0) * (FM.ATK_K if forme == "attack" else 1.0) * KYU.atk_k(self) * (1.0 + evo_dmg + seas_dmg) * (1.0 + MOM_PER * mom)
+	return base_atk * pow(1.10, _lvf("atk")) * (1.0 + _buff_mul("atk")) * k * (1.5 if _pw("fury") else 1.0) * (1.5 if wp_t > 0.0 else 1.0) * _rk("atk") * (1.0 + 0.003 * float(reap_kills)) * (1.0 + _abn("dmg") + _moxie() + (_abn("defiant") if defiant_t > 0.0 else 0.0)) * (dyn.dmg_k if _dyn_on() else 1.0) * (MG.ATK_K * DM.mega_atk_k(eter_kills) if _mega_on() else 1.0) * (FM.ATK_K if forme == "attack" else 1.0) * KYU.atk_k(self) * NZ.atk_k(self) * (1.0 + evo_dmg + seas_dmg) * (1.0 + MOM_PER * mom)
 
 
 func _spd() -> float:
 	if mode == "chal" and _ch_rs("no_move"):
 		return 0.0
 	var k: float = (1.35 if _has_item("choicescarf") else 1.0) * (1.1 if _has_item("ti_flying") else 1.0)
-	return minf(base_spd * SPD_MAX, base_spd * pow(1.07, _lvf("spd")) * (1.0 + _buff_mul("spd")) * k * (1.4 if _pw("haste") else 1.0) * (0.8 if _has_mod("slow") else 1.0) * _rk("spd") * (1.0 + _abn("spd") + _ab_wspd()) * (dyn.stat_k if _dyn_on() else 1.0) * (MG.SPD_K if _mega_on() else 1.0) * (FM.SPD_K if forme == "speed" else 1.0) * (1.0 + evo_spd + seas_spd) * (kec.spd_mul() if kec != null else 1.0))
+	return minf(base_spd * SPD_MAX, base_spd * pow(1.07, _lvf("spd")) * (1.0 + _buff_mul("spd")) * k * (1.4 if _pw("haste") else 1.0) * (0.8 if _has_mod("slow") else 1.0) * _rk("spd") * (1.0 + _abn("spd") + _ab_wspd()) * (dyn.stat_k if _dyn_on() else 1.0) * (MG.SPD_K if _mega_on() else 1.0) * NZ.spd_k(self) * (FM.SPD_K if forme == "speed" else 1.0) * (1.0 + evo_spd + seas_spd) * (kec.spd_mul() if kec != null else 1.0))
 
 
 func _cd_mul() -> float:
@@ -2264,7 +2545,7 @@ func _cd_mul() -> float:
 
 func _cd_mul_raw() -> float:
 	var k: float = 0.8 if _has_item("quickclaw") else 1.0
-	return pow(0.92, _lvf("cd")) * k * float(perks["cd"]) * (0.65 if _pw("frenzy") else 1.0) * _rk("cd") * (1.0 - _abn("cd")) / (dyn.stat_k if _dyn_on() else 1.0) * (MG.CD_K if _mega_on() else 1.0) * KYU.cd_k(self) * (kec.cd_mul() if kec != null else 1.0)
+	return pow(0.92, _lvf("cd")) * k * float(perks["cd"]) * (0.65 if _pw("frenzy") else 1.0) * _rk("cd") * (1.0 - _abn("cd")) / (dyn.stat_k if _dyn_on() else 1.0) * (MG.CD_K if _mega_on() else 1.0) * KYU.cd_k(self) * NZ.cd_k(self) * (kec.cd_mul() if kec != null else 1.0)
 
 
 func _reduction() -> float:
@@ -2518,6 +2799,11 @@ func _evo_infos(m: Dictionary) -> Array:
 			if not ki.is_empty():
 				out[0]["name"] = ki["name"]
 				out[0]["text"] = ki["text"]
+		if id == "photon-geyser" and necrozma != "":   # a fused Necrozma's Photon Geyser evolves into its form's move
+			var ni: Dictionary = NZ.evo_info(self)
+			if not ni.is_empty():
+				out[0]["name"] = ni["name"]
+				out[0]["text"] = ni["text"]
 	if MD.EVO_ALT.has(id):
 		var a: Array = MD.EVO_ALT[id]
 		var n2: String = String(a[1])
@@ -2531,6 +2817,14 @@ func _evolve(m: Dictionary, alt: bool = false) -> void:
 		return
 	if _ch_on():
 		ch_m["evolves"] = int(ch_m["evolves"]) + 1
+	if id == "photon-geyser" and necrozma != "":
+		var nn: Dictionary = NZ.evolve_into(self, m)
+		if not nn.is_empty():
+			PG.event("evolve", {"move": id})
+			_ring(player.position, 8.0, 120.0, NZ.COLOR, 0.8)
+			evfx.evolve_burst(nn)
+			shake = 6.0
+			return
 	if id == "glaciate" and kyurem != "":
 		var kn: Dictionary = KYU.evolve_into(self, m)
 		if not kn.is_empty():
@@ -2744,7 +3038,8 @@ func _update_partner(delta: float) -> void:
 			if close != null:
 				want = (partner.position - close.position).normalized()
 		elif to_p.length() > 150.0:
-			want = to_p.normalized()
+			var fdp: Vector2 = flow.dir_for(partner.position) if flow != null else Vector2.ZERO
+			want = fdp if fdp != Vector2.ZERO else to_p.normalized()   # around walls when one is in the way
 		elif near != null and to_p.length() < 120.0:
 			want = (near.position - partner.position).normalized() * 0.5
 		partner_dir = partner_dir.lerp(want, minf(1.0, delta * 5.0))
@@ -2846,6 +3141,7 @@ func _swap_team(i: int, auto: bool = false) -> void:
 	_dyn_stop()
 	if float(team[i]["hp"]) <= 0.0 or (not auto and swap_cd > 0.0):
 		return
+	_tera_end("swap")   # Team mode: the crystal belongs to the Pokémon that Terastallized; switching ends it
 	var cur: Dictionary = team[team_cur]
 	cur["hp"] = maxf(0.0, player.hp)
 	cur["moves"] = player.moves
@@ -2868,6 +3164,7 @@ func _swap_team(i: int, auto: bool = false) -> void:
 	player.slot = clampi(int(nx["slot"]), 0, maxi(0, _slot_list_of(player.moves, nx["bond_ids"]).size() - 1))
 	bond_ids = nx["bond_ids"]
 	bond_first = String(nx["bond_first"])
+	_fix_bonds(true)
 	for mv in player.moves:
 		mv["t"] = minf(_f(mv, "t"), _f(mv, "cd") * 0.35)
 	player.spd = float(nx["spd"])
@@ -2901,13 +3198,19 @@ func _team_tick(delta: float) -> void:
 	hud.swap_cd = swap_cd
 
 
-func _hurt_player(amount: float, atk_type: String = "", pure: bool = false) -> void:
+# `through`: a telegraphed hazard (lava, a strike, a trap, a meteorite...). It hits through short invulnerability
+# (HAZARD_PIERCE: the moment after a hit, a dash) but respects longer protection: transforming, reviving, entering or
+# leaving a rift. Hazards used to set the invulnerability to 0 first, which also cancelled that protection.
+const HAZARD_PIERCE := 0.5
+
+
+func _hurt_player(amount: float, atk_type: String = "", pure: bool = false, through: bool = false) -> void:
 	if player.dead:
 		return
 	if down:
 		_hurt_partner(amount, atk_type, pure)
 		return
-	if player.invuln > 0.0:
+	if player.invuln > (HAZARD_PIERCE if through else 0.0):
 		return
 	if kec.dodge():
 		player.invuln = 0.3
@@ -2915,7 +3218,7 @@ func _hurt_player(amount: float, atk_type: String = "", pure: bool = false) -> v
 		return
 	var eff: String = ""
 	if atk_type != "":
-		var tk: float = _types_mult(atk_type, player.types, true)
+		var tk: float = _types_mult(atk_type, _def_types(), true)   # Terastallized: you take hits as your Tera type
 		amount *= tk * _weather_mult(atk_type)
 		eff = _eff_label(tk)
 	if not ab_fx.is_empty():
@@ -2945,6 +3248,8 @@ func _hurt_player(amount: float, atk_type: String = "", pure: bool = false) -> v
 			add_text(player.position + Vector2(0.0, -player.body_h - 4.0), L.t("Shield"), Color("#7fe0ff"), 18)
 			return
 	player.hp -= d
+	if pressure != null:
+		pressure.note_hurt(d)   # counted when it lands: healing in the same frame would hide it otherwise
 	kec.on_hurt()
 	ch_last_hurt = run_time
 	if mode == "tower" and (tw_boss != null or tw_boss2 != null):
@@ -4312,6 +4617,8 @@ func _hit_enemy(e, dmg: float, col: Color, dir: Vector2, knock: float, mtype: St
 	var d_final: float = dmg * _type_mult(mtype, e) * (1.5 if _has_mod("glass") else 1.0)
 	if player.types.has(mtype):
 		d_final *= STAB_K
+	if tera_type_run != "" and mtype == tera_type_run:
+		d_final *= TERA.mult(player.types.has(mtype))   # Terastallized: moves of the Tera type hit harder (step 7)
 	if mtype == "electric" and e.para_t > 0.0:
 		d_final *= 1.35   # un enemigo paralizado recibe mas daño electrico
 	if eff == "super" and _has_item("expertbelt"):
@@ -4906,7 +5213,7 @@ func _max_moves() -> int:
 		return 1
 	if mode == "chal" and _ch_rs("max_moves"):
 		return 2
-	return MAX_MOVES + clampi(int(perks.get("wslots", 0)), 0, 2)   # 4 base + hasta 2 comprados (Seccion 50)
+	return maxi(MAX_MOVES, slot_cap)   # 4 attack slots (Weapon slots is gone; a run saved with 5-6 keeps them to the end)
 
 
 # Un enemigo recibe un estado (burn, poison, freeze, para, sleep, conf).
@@ -5288,6 +5595,7 @@ func _make_enemy(def: Dictionary, pos: Vector2, sc: Dictionary, boss: bool = fal
 	e.setup(dex, sm, flash_shader, scl, false)
 	e.def = def
 	e.boss = boss
+	e.born = run_time
 	e.behavior = String(def["behavior"])
 	e.enemy_name = L.t(String(p["name"]))
 	var ty: Array = p["types"]
@@ -5385,10 +5693,15 @@ func _spawn_one(angle: float = -999.0, near: bool = false) -> Enemy:
 	pos = _free_spot(pos, 14.0)
 	var base: Dictionary = _scale_at(_dt())
 	var lx: float = _late_x(_dt())
-	var sc := {"hp": float(base["hp"]) * _hp_k(_dt()) * (1.0 + 1.0 * lx), "dmg": float(base["dmg"]) * (1.0 + 0.45 * lx), "spd": float(base["spd"]) * (1.0 + 0.08 * lx)}
+	var sc := {"hp": float(base["hp"]) * _hp_k(_dt()) * (1.0 + 1.0 * lx) * pressure.hp_k(), "dmg": float(base["dmg"]) * (1.0 + 0.45 * lx) * pressure.dmg_k(), "spd": float(base["spd"]) * (1.0 + 0.08 * lx)}
 	var e: Enemy = _make_enemy(def, pos, sc)
 	e.dmg *= DMG_K * DM.enemy_dmg_k(eter_kills)
-	if lx > 0.0 and randf() < DM.elite_chance(eter_kills, 0.04 + 0.12 * lx):   # elite de tramo final: mas duro, mas dano y mas experiencia
+	var elite_p: float = 0.04 + 0.12 * lx if lx > 0.0 else 0.0
+	elite_p += pressure.elite_add()
+	e.knock_k = pressure.knock_k()
+	if diff != "normal" and _dt() >= DIF.k(diff, "elite_from") * 60.0:   # Hard / Nightmare: elites earlier, and more of them
+		elite_p = maxf(elite_p, DIF.k(diff, "elite_min"))
+	if elite_p > 0.0 and randf() < DM.elite_chance(eter_kills, elite_p):   # elite de tramo final: mas duro, mas dano y mas experiencia
 		e.max_hp = roundf(e.max_hp * 2.2)
 		e.hp = e.max_hp
 		e.dmg *= 1.3
@@ -5402,14 +5715,14 @@ func _spawn_one(angle: float = -999.0, near: bool = false) -> Enemy:
 		e.hp = e.max_hp
 		e.dmg *= 1.25
 		e.xp_val = roundf(e.xp_val * 1.6)
-	if enemies.size() >= ENEMY_CAP:   # el enjambre que pasa del limite normal (Doom 2+) es mas debil
+	if enemies.size() >= ENEMY_CAP + pressure.cap_add():   # el enjambre que pasa del limite normal (Doom 2+) es mas debil
 		e.max_hp = roundf(e.max_hp * DM.SWARM_HP_K)
 		e.hp = e.max_hp
 	if _has_item("pureincense"):
 		e.max_hp = roundf(e.max_hp * 1.3)
 		e.hp = e.max_hp
 		e.xp_val = roundf(e.xp_val * 1.5)
-	if bool(_sm(e.dex).get("sh", 0)) and randf() < SHINY_RATE * _charm_k(e.dex):
+	if bool(_sm(e.dex).get("sh", 0)) and randf() < SHINY_RATE * _charm_k(e.dex) * aur.shiny_k():
 		e.make_shiny()
 		Aud.sfx("shiny")
 		_say(L.t("A shiny %s is nearby!") % e.enemy_name, 3.4)
@@ -5431,8 +5744,10 @@ func _spawn_boss(b: Dictionary, t_v: float = -1.0):
 	var t: float = run_time if t_v < 0.0 else t_v
 	var sc := {"hp": (1.0 + t / 600.0) * _adapt_k(), "dmg": (1.0 + t / 600.0) * pow(_adapt_k(), 0.7), "spd": 1.0}
 	var e: Enemy = _make_enemy(b, _ring_point(randf() * TAU), sc, true)
-	if bool(_sm(e.dex).get("sh", 0)) and randf() < SHINY_RATE * _charm_k(e.dex):
+	if bool(_sm(e.dex).get("sh", 0)) and randf() < SHINY_RATE * _charm_k(e.dex) * aur.shiny_k():
 		e.make_shiny()
+	if run_time >= TERA.BOSS_FROM and not e.legend and randf() < TERA.BOSS_CHANCE:
+		e.set_meta("tera_boss", TERA.boss_type(e.types))   # it Terastallizes at half HP (_boss_tera)
 	Aud.sfx("boss")
 	_say(L.t("A wild %s%s appeared!") % [e.enemy_name, " shiny" if e.shiny else ""], 3.2)
 	shake = 14.0
@@ -5493,7 +5808,7 @@ func _update_spawner(delta: float) -> void:
 	var fight: bool = _boss_alive()
 	if enemies.size() < _cap():
 		var rate: float = (1.6 + t * 0.028 + pow(t / 60.0, 1.6) * 0.4) * 0.15 * (1.0 + 0.7 * clampf(1.0 - t / 240.0, 0.0, 1.0)) * (1.8 if _has_mod("horde") else 1.0) * (2.5 if _has_mod("plague") else 1.0) * (0.75 if _has_item("pureincense") else 1.0)
-		spawn_acc += rate * (1.0 - 0.25 * _late_x(t)) * _adapt_k() * (0.25 if fight else 1.0) * delta
+		spawn_acc += rate * (1.0 - 0.25 * _late_x(t)) * _adapt_k() * pressure.spawn_k() * (0.25 if fight else 1.0) * delta
 		while spawn_acc >= 1.0:
 			spawn_acc -= 1.0
 			if enemies.size() < _cap():
@@ -5504,7 +5819,7 @@ func _update_spawner(delta: float) -> void:
 	if surge_t <= 0.0:
 		surge_t = randf_range(38.0, 56.0)
 		var base_a: float = randf() * TAU
-		var n: int = mini(_cap() - enemies.size(), roundi(float(14 + int(t / 22.0)) * 0.28))
+		var n: int = mini(_cap() - enemies.size(), roundi(float(14 + int(t / 22.0)) * 0.28 * pressure.surge_k()))
 		for i in range(maxi(0, n)):
 			_spawn_one(base_a + randf_range(-0.55, 0.55))
 		Aud.sfx("surge")
@@ -5666,6 +5981,8 @@ func _eternatus_win() -> void:
 	tickets += int(pay["t"])
 	tickets10 += int(pay["t10"])
 	lshards_run += 1   # a Legend Shard per Eternatus defeat (spent in the Gacha's Legend Pick)
+	if hud != null:
+		hud.pickup("lshard", 1)
 	add_text(player.position + Vector2(0.0, -player.body_h - 30.0), L.t("+1 Legend Shard"), Color("#ffcb3d"), 22)
 	eter_prompt = true   # la pantalla de eleccion sale en cuanto no haya otras cartas abiertas
 
@@ -6209,7 +6526,7 @@ func _update_events(delta: float) -> void:
 	# vencer, el duende espera 8 s y el evento 10 s.
 	if run_time > 0.0 and not jd.active() and not dir_finale:
 		if thieves < 2:
-			thief_t -= delta
+			thief_t -= delta * DIF.k(diff, "event")
 			if thief_t <= 0.0:
 				if _boss_alive():
 					thief_t = 8.0
@@ -6218,7 +6535,7 @@ func _update_events(delta: float) -> void:
 					thieves += 1
 					thief_t = randf_range(240.0, 360.0)
 		if event_id == "":
-			next_event_t -= delta
+			next_event_t -= delta * DIF.k(diff, "event")
 			if next_event_t <= 0.0:
 				if _boss_alive():
 					next_event_t = 10.0
@@ -6306,11 +6623,30 @@ func _spawn_thief(force_coins: bool = false) -> void:
 # ---------------------------------------------------------------
 # Comportamiento de los enemigos (enemy.js)
 # ---------------------------------------------------------------
+# Difficulty (docs/difficulty.md): every enemy's HP, damage and speed, once, on its first update (after whatever set
+# them up has finished, bosses and legendaries included).
+func _dif_apply(e) -> void:
+	if e.dif_done:
+		return
+	e.dif_done = true
+	if diff == "normal":
+		return
+	var hk: float = DIF.k(diff, "hp")
+	e.max_hp = roundf(e.max_hp * hk)
+	e.hp = minf(e.max_hp, e.hp * hk)
+	e.dmg *= DIF.k(diff, "dmg")
+	e.spd *= DIF.k(diff, "spd")
+
+
 func _update_enemies(delta: float) -> void:
 	var kn_decay: float = pow(0.0015, delta)
 	for e in enemies:
 		if e.dead:
 			continue
+		if not e.dif_done:
+			_dif_apply(e)
+		if e.boss and e.has_meta("tera_boss") and not e.has_meta("tera_done") and e.hp <= e.max_hp * TERA.BOSS_AT:
+			_boss_tera(e)
 		e.touch_cd = maxf(0.0, e.touch_cd - delta * (0.4 if e.para_t > 0.0 else 1.0))
 		# Estados de control: congelar, paralizar, dormir y confundir.
 		if e.cc_imm > 0.0:
@@ -6501,6 +6837,13 @@ func _enemy_step(e: Enemy, delta: float, kn_decay: float) -> void:
 				return
 			else:
 				e.skill_cd = 0.5
+	if not e.flying and flow != null:   # walls in the way: walk around them (flowfield.gd)
+		e.flow_t -= delta
+		if e.flow_t <= 0.0:
+			e.flow_t = randf_range(0.2, 0.3)   # spread over frames
+			e.flow_dir = flow.dir_for(e.position)
+		if e.flow_dir != Vector2.ZERO:
+			dirv = e.flow_dir
 	var v: Vector2 = dirv * spd
 	var abase: String = "Walk"
 	if e.boss:
@@ -6546,6 +6889,7 @@ func _enemy_step(e: Enemy, delta: float, kn_decay: float) -> void:
 		e.position = _collide(e.position, e.radius * 0.5)
 		e.position = _spring_push(e.position)
 	e.knock *= kn_decay
+	_stuck_check(e, dist, delta)
 	var moving: bool = v.length() > 2.0
 	var face: float = to.angle()
 	if e.phase == "dash":
@@ -7081,9 +7425,8 @@ func _update_hazards(delta: float) -> void:
 					if _hazard_hits_enemy(h, en):
 						_damage_enemy(en, h.ally_dmg, h.color, (en.position - h.position).normalized(), 140.0)
 			elif not player.dead and _hazard_inside(h):
-				player.invuln = 0.0
 				if h.pct > 0.0:
-					_hurt_player(maxf(h.dmg, player.max_hp * h.pct), "", h.pure)
+					_hurt_player(maxf(h.dmg, player.max_hp * h.pct), "", h.pure, true)
 				else:
 					_hurt_player(h.dmg, h.mtype)
 				if h.slows:
@@ -7154,10 +7497,13 @@ func _damage_enemy(e, amount: float, col: Color = Color.WHITE, dir: Vector2 = Ve
 	run_big = maxf(run_big, d)
 	add_text(e.position + Vector2(0.0, -e.body_h - 4.0), str(roundi(d)), tc, ts)
 	if knock > 0.0 and dir != Vector2.ZERO and not e.boss:
-		e.knock += dir.normalized() * knock
+		e.knock += dir.normalized() * knock * e.knock_k
 	Aud.sfx("hit")
 	if e.hurt_by(d):
 		kills += 1
+		if pressure != null:
+			pressure.note_kill(e)
+		_tera_charge(e)
 		mom = minf(mom_max, mom + 1.0)
 		mom_t = 0.0
 		run_kills_by[src_k] = int(run_kills_by.get(src_k, 0)) + 1
@@ -7504,6 +7850,27 @@ func _props_near(pos: Vector2) -> Array:
 
 
 # Los enemigos que no vuelan no pisan las fuentes de curacion (solo las usas tu)
+# An enemy that has not come any closer for STUCK_T seconds while off-screen (lost behind walls, out of the path field)
+# goes back to the spawn ring around you, like a new arrival. Bosses, legendaries, thieves and charmed allies are left.
+const STUCK_T := 6.0
+const STUCK_FAR := 600.0
+
+
+func _stuck_check(e: Enemy, dist: float, delta: float) -> void:
+	if e.boss or e.legend or arena != null or e.behavior == "thief" or e.charm_t > 0.0:
+		return
+	if dist < e.best_d - 24.0:
+		e.best_d = dist
+		e.stuck_t = 0.0
+		return
+	e.stuck_t += delta
+	if e.stuck_t >= STUCK_T and dist > STUCK_FAR:
+		e.position = _free_spot(_ring_point(randf() * TAU), 14.0)
+		e.knock = Vector2.ZERO
+		e.best_d = INF
+		e.stuck_t = 0.0
+
+
 func _spring_push(pos: Vector2) -> Vector2:
 	for p in _props_near(pos):
 		if not is_instance_valid(p) or p.kind != "spring" or p.used:
@@ -7611,7 +7978,7 @@ var _terr_bonus_on := false
 func _player_terrain(delta: float) -> float:
 	var base: float = _player_terrain_base(delta)
 	var liq: String = _liquid_at(player.position)
-	var home: bool = TERRAIN_HOME.has(liq) and _has_t(player.types, TERRAIN_HOME[liq])
+	var home: bool = TERRAIN_HOME.has(liq) and _has_t(_def_types(), TERRAIN_HOME[liq])
 	if home and not _terr_bonus_on:
 		add_text(player.position + Vector2(0.0, -player.body_h - 20.0), L.t("+Speed"), Color("#8fe0ff"), 16)
 	_terr_bonus_on = home
@@ -7621,39 +7988,36 @@ func _player_terrain(delta: float) -> float:
 func _player_terrain_base(delta: float) -> float:
 	var liq: String = _liquid_at(player.position)
 	if liq == "water":
-		if _has_t(player.types, ["water", "flying"]):
+		if _has_t(_def_types(), ["water", "flying"]):
 			return 1.0
 		return 0.72
 	if liq == "lava":
-		if _has_t(player.types, ["fire", "flying"]):
+		if _has_t(_def_types(), ["fire", "flying"]):
 			return 1.0
 		player_lava_t -= delta
 		if player_lava_t <= 0.0:
 			player_lava_t = 0.5
-			player.invuln = 0.0
-			_hurt_player(maxf(3.0, player.max_hp * 0.035), "")
+			_hurt_player(maxf(3.0, player.max_hp * 0.035), "", false, true)
 		return 0.85
 	if liq == "swamp":
-		return 1.0 if _has_t(player.types, ["poison", "water", "flying"]) else 0.7
+		return 1.0 if _has_t(_def_types(), ["poison", "water", "flying"]) else 0.7
 	if liq == "ice":
-		return 1.0 if _has_t(player.types, ["ice", "flying"]) else 0.85
+		return 1.0 if _has_t(_def_types(), ["ice", "flying"]) else 0.85
 	if liq == "poison":
-		if _has_t(player.types, ["poison", "steel", "flying"]):
+		if _has_t(_def_types(), ["poison", "steel", "flying"]):
 			return 1.0
 		player_lava_t -= delta
 		if player_lava_t <= 0.0:
 			player_lava_t = 0.6
-			player.invuln = 0.0
-			_hurt_player(maxf(2.0, player.max_hp * 0.025), "")
+			_hurt_player(maxf(2.0, player.max_hp * 0.025), "", false, true)
 		return 0.8
 	if liq == "spark":
-		if _has_t(player.types, ["electric", "ground", "flying"]):
+		if _has_t(_def_types(), ["electric", "ground", "flying"]):
 			return 1.0
 		player_lava_t -= delta
 		if player_lava_t <= 0.0:
 			player_lava_t = 0.8
-			player.invuln = 0.0
-			_hurt_player(maxf(3.0, player.max_hp * 0.03), "")
+			_hurt_player(maxf(3.0, player.max_hp * 0.03), "", false, true)
 		return 0.9
 	return 1.0
 
@@ -7853,19 +8217,18 @@ func _trigger_trap(p: Prop) -> void:
 		else:
 			_damage_enemy(e, 90.0 + lvl * 18.0, col, (e.position - pos).normalized(), 220.0)
 	if not player.dead and player.position.distance_to(pos) < TRAP_R * 0.7 and not _has_item("heavyboots") and _abn("trapimm") == 0.0:
-		player.invuln = 0.0
 		if p.sub == "poison":
-			_hurt_player(player.max_hp * 0.1, "poison")
+			_hurt_player(player.max_hp * 0.1, "poison", false, true)
 		elif p.sub == "ice":
 			trap_slow_t = 3.5
 			add_text(player.position + Vector2(0.0, -34.0), L.t("Sticky!"), Color("#8bd94a"), 20)
 		elif p.sub == "freeze":
 			trap_freeze_t = 1.0
-			_hurt_player(player.max_hp * 0.05, "ice")
+			_hurt_player(player.max_hp * 0.05, "ice", false, true)
 			add_text(player.position + Vector2(0.0, -34.0), L.t("Frozen!"), col, 20)
 		elif p.sub == "shock":
 			trap_para_t = 2.5
-			_hurt_player(player.max_hp * 0.06, "electric")
+			_hurt_player(player.max_hp * 0.06, "electric", false, true)
 			add_text(player.position + Vector2(0.0, -34.0), L.t("Paralyzed!"), col, 20)
 		elif p.sub == "sleep":
 			trap_sleep_t = 3.0
@@ -8288,7 +8651,7 @@ func _xp_for(level: int) -> int:
 
 
 func _gain_xp(amount: float) -> void:
-	player.xp += amount * _xp_mul() * XP_GAIN * (TOWER_XP_K if mode == "tower" else 1.0) * (HYPER_XP if hyper else 1.0)
+	player.xp += amount * _xp_mul() * XP_GAIN * (TOWER_XP_K if mode == "tower" else 1.0) * (HYPER_XP if hyper else 1.0) * DIF.k(diff, "xp") * aur.xp_k()
 	if is_nan(player.xp) or is_inf(player.xp):
 		player.xp = 0.0
 	var guard := 0
@@ -8322,6 +8685,35 @@ func _spawn_orb(pos: Vector2, kind: String, value: float):
 				orbs.remove_at(i)
 				break
 	return o
+
+
+# Eggs (docs/eggs.md): a chance of an egg from a boss, an Alpha or a rescue, at most EG.PER_RUN a run and never past a
+# full bag. What's inside is decided now. force = the test's guaranteed drop. Returns the egg orb or null.
+func _egg_try(src: String, pos: Vector2, force: bool = false):
+	if egg_drops >= EG.PER_RUN or EG.count() + eggs_run.size() + egg_pend.size() >= EG.MAX_EGGS:
+		return null
+	if not force and randf() >= float(EG.DROP.get(src, 0.0)) * DIF.k(diff, "egg"):
+		return null
+	var p: Dictionary = _egg_species()
+	if p.is_empty():
+		return null
+	egg_drops += 1
+	var eg: Dictionary = EG.make(int(p["dex"]), int(p["rarity"]), String((p["types"] as Array)[0]))
+	egg_pend[int(eg["id"])] = eg
+	var o = _spawn_orb(pos + Vector2(randf_range(-18.0, 18.0), 12.0), "egg", float(eg["id"]))
+	o.set_meta("look", String(eg["look"]))
+	o.vel = Vector2.ZERO
+	return o
+
+
+# A first-stage, non-legendary Pokémon of gacha rarity 1-4 with a sprite: from the map's region when it has any.
+func _egg_species() -> Dictionary:
+	var pool: Array = []
+	for p in SV.dex_list:
+		if int(p["rarity"]) <= 4 and not bool(p.get("leg", false)) and _smeta.has(str(int(p["dex"]))) and EVL.stage_of(int(p["dex"])) == 1 				and not (p["types"] as Array).is_empty():
+			pool.append(p)
+	pool = _region_filter(pool, 1)
+	return {} if pool.is_empty() else pool[randi() % pool.size()]
 
 
 func _drop(e) -> void:
@@ -8359,6 +8751,8 @@ func _drop(e) -> void:
 	kec.on_kill(e)
 	if e.boss and not e.judge:
 		run_bosses += 1
+		if not (e.has_meta("enc") and String(e.get_meta("enc")) == "alpha"):
+			_egg_try("boss", e.position)
 	if e.judge:
 		jd.boss_down()
 		progress_event("judgeKill")
@@ -8451,6 +8845,18 @@ func _update_orbs(delta: float) -> void:
 
 
 func _collect(kind: String, value: float) -> void:
+	if kind == "egg":
+		var eg: Dictionary = egg_pend.get(int(value), {})
+		egg_pend.erase(int(value))
+		if not eg.is_empty():
+			eggs_run.append(eg)
+			if hud != null:
+				hud.pickup("egg", 1)
+			Aud.sfx("shinyGet")
+			pfx.sheet("collect_burst", player.position + Vector2(0.0, -player.body_h * 0.5), 1.2)
+			_say("Egg found!", 2.0)
+			add_text(player.position + Vector2(0.0, -player.body_h - 4.0), L.t("Egg found!"), Color("#fff1a8"), 20)
+		return
 	if kind == "xp" or kind == "xpBig" or kind == "xpRare":
 		_gain_xp(value)
 		Aud.xp()
@@ -8666,6 +9072,10 @@ func _offer() -> Array:
 		var kc: Dictionary = KYU.card(self)
 		if not kc.is_empty():
 			picked.append(kc)
+	if picked.is_empty() and randf() < NZ.CHANCE:   # Necrozma: fusion from minute 30, Ultra Burst from 45 (necrozma.gd)
+		var nzc: Dictionary = NZ.card(self)
+		if not nzc.is_empty():
+			picked.append(nzc)
 	if picked.is_empty() and randf() < ZC.CHANCE:   # Cristal Z (zcrystal.gd): desbloquea el Movimiento Z en la partida
 		var zcc: Dictionary = ZC.card(self)
 		if not zcc.is_empty():
@@ -8804,11 +9214,37 @@ func _active_group() -> Array:
 func _bond_options() -> Dictionary:
 	var loose: Array = []
 	for m in player.moves:
+		if _parts_of(m).size() >= FUSE_MAX:
+			continue   # a full fusion (4 moves) takes no more bonds
 		if not bond_ids.has(String(m["id"])):
 			loose.append(m)
 	if loose.size() >= 2:
 		return {"mode": "pair", "loose": loose}
 	return {}
+
+
+# Undoes bonds that are no longer allowed (a full 4-move fusion in the pair, from older versions) and gives the
+# bond back. Called when a saved run is resumed and when a Team-mode Pokémon comes in.
+func _fix_bonds(quiet: bool = false) -> int:
+	var keep: Array = []
+	var dropped := 0
+	for pr in _bond_pairs():
+		var bad := false
+		for id in pr:
+			for m in player.moves:
+				if String(m["id"]) == String(id) and _parts_of(m).size() >= FUSE_MAX:
+					bad = true
+		if bad:
+			dropped += 1
+		else:
+			keep.append_array(pr)
+	if dropped > 0:
+		bond_ids = keep
+		bonds += dropped
+		player.slot = clampi(player.slot, 0, maxi(0, _slot_list().size() - 1))
+		if not quiet:
+			_say(L.t("A bond with a full fusion was undone: you get the bond back"), 3.6)
+	return dropped
 
 
 # A bond that can never be used (fewer than 2 free moves and every move slot taken, so no move can join) turns into
@@ -8995,6 +9431,19 @@ func _do_fuse() -> void:
 const DPS_WIN := 20
 var dmg_hist: Array = []
 var dmg_hist_t := 0.0
+
+
+# Damage per second over the last DPS_WIN seconds (the run summary's DPS window), all sources together.
+func _recent_dps() -> float:
+	if dmg_hist.size() < 2:
+		return 0.0
+	var a := 0.0
+	var b := 0.0
+	for k in dmg_hist[0]:
+		a += float(dmg_hist[0][k])
+	for k in dmg_hist[dmg_hist.size() - 1]:
+		b += float(dmg_hist[dmg_hist.size() - 1][k])
+	return maxf(0.0, b - a) / float(dmg_hist.size() - 1)
 
 
 func _sample_dmg(delta: float) -> void:
@@ -9353,7 +9802,7 @@ func _on_card_chosen(idx: int) -> void:
 			choosing = false
 			return
 		Aud.sfx("select")
-		cards.show_cards(EVL.picks(self), L.t("Choose an evolution"), L.t("Evolution!"), false)
+		cards.show_cards(EVL.picks(self), EVL.pick_heading(self), L.t("Evolution!"), false)
 		return
 	if cat == "evolvepick":
 		_evo_begin(int(id))
@@ -9367,6 +9816,19 @@ func _on_card_chosen(idx: int) -> void:
 		return
 	if cat == "kyurempick":
 		KYU.apply(self, id)
+		pending_levels = maxi(0, pending_levels - 1)
+		cards.hide_cards()
+		choosing = false
+		return
+	if cat == "necrozma":   # first the unique card, then the form is chosen
+		Aud.sfx("select")
+		cards.show_cards(NZ.picks(self), L.t("Choose a form"), L.t("Sun and Moon!"), false)
+		return
+	if cat == "necropick" or cat == "necroultra":
+		if cat == "necropick":
+			NZ.apply(self, id)
+		else:
+			NZ.ultra(self)
 		pending_levels = maxi(0, pending_levels - 1)
 		cards.hide_cards()
 		choosing = false
@@ -9622,9 +10084,12 @@ func _weather_speed(types: Array) -> float:
 
 
 func _weather_text() -> String:
-	if wx_kind == "" or _wx_level() <= 0.0:
-		return ""
-	return "%s  %ds" % [L.t(String(TD.WEATHER[wx_kind]["name"])), ceili(wx_dur - wx_t)]
+	var parts: Array = []
+	if wx_kind != "" and _wx_level() > 0.0:
+		parts.append("%s  %ds" % [L.t(String(TD.WEATHER[wx_kind]["name"])), ceili(wx_dur - wx_t)])
+	if aur != null and aur.active():
+		parts.append("%s  %ds" % [L.t("Aurora"), ceili(aur.left())])
+	return "  ·  ".join(parts)
 
 
 func _weather_banner() -> String:
@@ -9787,6 +10252,10 @@ func _rift_drop_arena() -> void:
 func _exit_tree() -> void:
 	Engine.time_scale = 1.0
 	_rift_drop_arena()
+	# the Arceus arena may still be building in the background (the Judgment's entrance): wait for it before closing
+	if jd != null and jd.pending_arena != null and is_instance_valid(jd.pending_arena):
+		jd.pending_arena.dispose()
+		jd.pending_arena = null
 
 
 func _update_thief_hud() -> void:
@@ -9869,6 +10338,62 @@ func _legend_def(dex: int) -> Dictionary:
 		"behavior": "ranged" if ranged else "charger", "shotDmg": 18.0 + t / 40.0, "shotCd": 0.9, "range": 300.0}
 
 
+# Rift legendaries for strong builds (docs/late_challenge.md): a build that would kill the legendary in under RIFT_FIGHT s
+# gets a longer fight, but more power still means a shorter one (the softer rule): a fight that would take ttk seconds
+# lasts RIFT_FIGHT * (ttk / RIFT_FIGHT) ^ RIFT_SOFT. Kills in 10 s -> ~27 s, in 1.5 s -> ~22 s, in 0.5 s -> ~20 s.
+# A small floor from your recent open-map damage at the start, then calibrated on the boss's real damage per second since
+# the first hit, at 0.75, 1.5, 4 and 10 s
+# (only ever up). Its hits take at least RIFT_HIT of your max HP after your Defense.
+# Normal runs with Adaptive difficulty on; weaker builds keep the usual numbers.
+const RIFT_FIGHT := 30.0
+const RIFT_SOFT := 0.1
+const RIFT_FLOOR_S := 2.5    # start floor: this many seconds of your open-map damage, so the first checks see real hits
+const RIFT_HIT := 0.08
+const RIFT_CAL := [0.75, 1.5, 4.0, 10.0]
+
+
+func _rift_scaling() -> bool:
+	return mode == "normal" and bool(SV.run_setting("adaptive", true))
+
+
+# How long the fight should last when the boss would die in ttk seconds with its usual HP.
+func _rift_target(ttk: float) -> float:
+	if ttk >= RIFT_FIGHT:
+		return ttk
+	return RIFT_FIGHT * pow(maxf(0.001, ttk) / RIFT_FIGHT, RIFT_SOFT)
+
+
+func _rift_scale(e: Enemy) -> void:
+	ainfo["cal"] = 0
+	ainfo["hp0"] = e.max_hp * (DIF.k(diff, "hp") if diff != "normal" else 1.0)   # its usual HP (difficulty applies next frame)
+	if not _rift_scaling():
+		return
+	var floor_hp: float = _recent_dps() * RIFT_FLOOR_S / (DIF.k(diff, "hp") if diff != "normal" else 1.0)
+	if floor_hp > e.max_hp:
+		e.max_hp = roundf(floor_hp)
+		e.hp = e.max_hp
+	var hit: float = player.max_hp * RIFT_HIT / maxf(0.2, 1.0 - _reduction())
+	if hit > e.dmg:
+		e.dmg = hit
+
+
+func _rift_calibrate(b: Enemy) -> void:
+	var ci: int = int(ainfo.get("cal", 0))
+	if not _rift_scaling() or ci >= RIFT_CAL.size() or float(ainfo["t"]) < float(RIFT_CAL[ci]):
+		return
+	ainfo["cal"] = ci + 1
+	var t: float = float(ainfo["t"])
+	var taken: float = b.max_hp - b.hp
+	if taken <= 0.0 or not ainfo.has("t1"):
+		return
+	var rate: float = taken / maxf(0.25, t - float(ainfo["t1"]))   # damage per second since the first hit
+	var want: float = _rift_target(float(ainfo.get("hp0", b.max_hp)) / rate)   # the whole fight's length at this rate
+	var need: float = taken + rate * maxf(0.0, want - t)
+	if need > b.max_hp:
+		b.max_hp = roundf(need)
+		b.hp = b.max_hp - taken
+
+
 func _rift_pull_start() -> void:
 	rift_in_t = RIFT_IN
 	var ty: String = String(rift_info.get("type", ""))
@@ -9939,6 +10464,7 @@ func _rift_arrive() -> void:
 
 
 func _arena_begin() -> void:
+	_tera_end("rift")
 	var dex: int = int(rift_info["dex"])
 	var ty: String = String(rift_info["type"])
 	var new_arena: Node2D = rift_info["arena"]
@@ -9988,6 +10514,7 @@ func _arena_begin() -> void:
 	if bool(ainfo["shiny"]):
 		e.make_shiny()
 	ainfo["boss"] = e
+	_rift_scale(e)
 	var wk: String = String(arena.th.get("weather", ""))
 	if wk != "" and TD.WEATHER.has(wk):
 		_start_weather(wk, 135.0)
@@ -10011,6 +10538,7 @@ func _arena_begin() -> void:
 
 # Entrada a una cueva elemental (cave.gd / cave_int.gd): igual que entrar a una grieta, sin jefe ni limite de tiempo.
 func _cave_begin(ci: Node2D, ty: String, owner: String = "cave") -> void:
+	_tera_end("rift")
 	ainfo = {"phase": "fight", "t": 0.0, "back": player.position, "dex": 0, "type": ty, "shiny": false,
 		"stash_e": enemies.duplicate(), "stash_o": orbs.duplicate(), "end": 0.0, "boss": null, "den": false, "cave": true, "owner": owner}
 	for e in enemies:
@@ -10069,6 +10597,9 @@ func _update_arena(delta: float) -> void:
 			return
 		if bool(ainfo.get("mega", false)):
 			_mega_minions(delta, b)
+		if not ainfo.has("t1") and b.hp < b.max_hp:
+			ainfo["t1"] = float(ainfo["t"])   # first hit: the rate is measured from here
+		_rift_calibrate(b)
 		if float(ainfo["t"]) >= ARENA_LIMIT:
 			_arena_expel()
 	elif ph == "down":
@@ -10102,6 +10633,7 @@ func progress_event(ev: String, _d = null) -> void:
 
 # Viaje a la arena de la Sentencia (judgment.gd): igual que entrar a una grieta.
 func _jd_port(new_arena: Node2D) -> void:
+	_tera_end("rift")
 	ainfo = {"phase": "cine", "back": player.position, "stash_e": enemies.duplicate(), "stash_o": orbs.duplicate()}
 	for e in enemies:
 		e.visible = false
@@ -10171,6 +10703,10 @@ func _legend_down(e) -> void:
 	ainfo["end"] = 5.0
 	var pos: Vector2 = e.position
 	var dex: int = int(ainfo["dex"])
+	if tera_used and TERA.mode_ok(mode):   # a Legendary rift recharges the Tera Orb (docs/tera.md)
+		tera_used = false
+		tera_pts = TERA.NEED
+		get_tree().create_timer(2.4).timeout.connect(func(): _say(L.t("The Tera Orb is recharged!"), 3.0))
 	var lg: Dictionary = SV.d.get("legends", {})
 	lg[str(dex)] = int(lg.get(str(dex), 0)) + 1
 	SV.d["legends"] = lg
@@ -10233,6 +10769,8 @@ func _mega_stone_reward(pos: Vector2) -> void:
 			_say(L.t("You got %s! Mega Evolve at the next level-up.") % item, 4.0))
 	else:
 		lshards_run += 1   # paid out with the run's other rewards
+		if hud != null:
+			hud.pickup("lshard", 1)
 		get_tree().create_timer(1.2).timeout.connect(func(): _say(L.t("Mega rift cleared: +1 Legend Shard"), 3.2))
 
 
@@ -10383,7 +10921,7 @@ func _update_weather(delta: float) -> void:
 		wx_chip = 2.0
 		if wx_kind != "" and _wx_level() > 0.5:
 			var wc := Color.html(String(TD.WEATHER[wx_kind]["color"]))
-			if _weather_hurts(player.types) and not _has_item("safetygoggles") and _abn("wximm") == 0.0:
+			if _weather_hurts(_def_types()) and not _has_item("safetygoggles") and _abn("wximm") == 0.0:
 				var d: float = maxf(1.0, player.max_hp * 0.012)
 				if player.hp > d + 1.0:
 					player.hp -= d
@@ -10393,6 +10931,7 @@ func _update_weather(delta: float) -> void:
 					continue
 				if e.hurt_by(e.max_hp * 0.02 + 1.0):
 					kills += 1
+					_tera_charge(e)
 					if tw_risk.has("l_reap"):
 						reap_kills += 1
 					_drop(e)
@@ -10963,6 +11502,13 @@ class PoisonSweat extends Node2D:
 
 
 class Enemy extends Actor:
+	var born := -1.0        # run_time it appeared (Pressure measures how long regular enemies live)
+	var knock_k := 1.0      # Pressure: enemies spawned under it are harder to push back
+	var best_d := INF       # closest it has come to you lately (stuck check)
+	var stuck_t := 0.0      # seconds without getting closer
+	var flow_t := 0.0       # next route check around walls (flowfield.gd), a few times a second
+	var flow_dir := Vector2.ZERO
+	var dif_done := false   # the run's difficulty has been applied (first update)
 	var judge := false
 	var hp := 10.0
 	var max_hp := 10.0
@@ -11974,7 +12520,7 @@ class Orb extends Node2D:
 
 	# Rare XP (bosses, legendaries, Eternatus) is an animated wisp (pixelfx XP orb, in the game's cyan): only these few
 	# redraw every frame; normal crystals stay still and cheap.
-	const FANCY := ["ticket", "ticket10", "gcoin", "gcoin_gold", "item", "heal", "magnet", "bomb", "ball"]
+	const FANCY := ["ticket", "ticket10", "gcoin", "gcoin_gold", "item", "heal", "magnet", "bomb", "ball", "egg"]
 
 	func _ready() -> void:
 		set_process(kind == "xpRare" or FANCY.has(kind))
@@ -12004,6 +12550,11 @@ class Orb extends Node2D:
 		draw_circle(Vector2.ZERO, 6.0, Color(0, 0, 0, 0.3))
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		var c := Vector2(0.0, -9.0)
+		if kind == "egg":
+			var bob: float = sin(_t * 3.2) * 2.0
+			PKF.glow(self, c + Vector2(0.0, -6.0 + bob), 22.0, Color("#fff1a8"), _t, 0.7)
+			EGA.draw(self, c + Vector2(0.0, -6.0 + bob), 26.0, String(get_meta("look", "yellow")), sin(_t * 2.1) * 0.12)
+			return
 		if kind == "xp":
 			_xp_diamond(c, 0.8 if value < 30.0 else 1.0)
 		elif kind == "xpBig" or kind == "xpRare":
@@ -12557,6 +13108,10 @@ class Cards extends Node2D:
 					_pick(1)
 				KEY_3:
 					_pick(2)
+				KEY_4, KEY_5, KEY_6, KEY_7, KEY_8, KEY_9:   # more than 3 cards (Eevee's evolutions)
+					var ki: int = int(event.keycode - KEY_1)
+					if ki < items.size():
+						_pick(ki)
 				KEY_LEFT, KEY_A:
 					_move(-1)
 				KEY_RIGHT, KEY_D:
@@ -12841,8 +13396,16 @@ class Cards extends Node2D:
 			draw_colored_polygon(PackedVector2Array([Vector2(ax2, dr.position.y + 11.0), Vector2(ax2 + 11.0, dr.position.y + 18.0), Vector2(ax2, dr.position.y + 25.0)]), Color("#ffd65c"))
 			PXF.dstr(self, font, Vector2(ax2 + 19.0, dr.position.y + 26.0), at2, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 22, Color("#6fd08a"))
 			y = dr.end.y + 22.0
-		var lines: int = maxi(1, int((r.end.y - (26.0 if OS.has_feature("mobile") else 8.0) - y) / font.get_height(22)))   # whole lines that fit inside the card
-		draw_multiline_string(font, Vector2(r.position.x + 16.0, y + 20.0), L.t(String(it["desc"])), HORIZONTAL_ALIGNMENT_CENTER, r.size.x - 32.0, 22, lines,
+		# narrow cards (Eevee's 8 evolutions): a smaller size until the longest word fits, so no word is cut
+		var dtxt: String = L.t(String(it["desc"]))
+		var dfs := 22
+		var longest := 0.0
+		for wd in dtxt.replace("\n", " ").split(" ", false):
+			longest = maxf(longest, font.get_string_size(wd, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 22).x)
+		while dfs > 16 and longest * float(dfs) / 22.0 > r.size.x - 32.0:
+			dfs -= 2
+		var lines: int = maxi(1, int((r.end.y - (26.0 if OS.has_feature("mobile") else 8.0) - y) / font.get_height(dfs)))   # whole lines that fit inside the card
+		draw_multiline_string(font, Vector2(r.position.x + 16.0, y + 20.0), dtxt, HORIZONTAL_ALIGNMENT_CENTER, r.size.x - 32.0, dfs, lines,
 			Color("#5a3d1c") if paper else (Color("#3a2600") if legend else Color("#f2e9d8")))
 		if OS.has_feature("mobile"):   # phones: hold a card for its full text
 			PXF.dstr(self, font, Vector2(r.position.x, r.end.y - 10.0), L.t("Hold for details"), HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 15, Color("#8f88b8") if not dark else Color("#5a3d1c"))
@@ -12942,7 +13505,7 @@ class Cards extends Node2D:
 	# Texto de un boton de la pantalla; con mando conectado cambia "[R]" por el icono del boton asignado.
 	func _draw_key_label(r: Rect2, txt: String, action: String) -> void:
 		var font := ThemeDB.fallback_font
-		var pad: bool = Input.get_connected_joypads().size() > 0
+		var pad: bool = INP.is_pad()   # the hint follows the input you are using
 		var by2: float = r.size.y * 0.5 + 7.0
 		if not pad:
 			PXF.dstr(self, font, r.position + Vector2(0.0, by2), txt, HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 20, Color.WHITE)
@@ -12962,13 +13525,13 @@ class Cards extends Node2D:
 		var font := ThemeDB.fallback_font
 		var col := Color("#8fa8cc")
 		var parts: Array = [{"t": (L.t("Tap a card to look, tap again to choose") if OS.has_feature("mobile") else L.t("Tap a card")) + "  |  "}]
-		if Input.get_connected_joypads().size() > 0:
+		if INP.is_pad():
 			parts.append({"t": L.t("Gamepad") + ": "})
 			parts.append({"i": PADI.named("dpad_lr")})
 			parts.append({"t": " + "})
 			parts.append({"i": PADI.tex(PAD.btn("confirm"))})
 			parts.append({"t": "  |  "})
-		parts.append({"t": L.t("Keyboard: 1 2 3")})
+		parts.append({"t": L.t("Keyboard: 1 2 3") if items.size() <= 3 else L.t("Keyboard: 1 to %d") % mini(items.size(), 9)})
 		var isz := 28.0
 		var total := 0.0
 		var fs: int = 14 if not build.is_empty() else 18
@@ -13374,12 +13937,7 @@ class Minimap extends Node2D:
 				continue
 			var tl2: float = 7.0 if ky % 8 == 0 else 3.0
 			draw_rect(Rect2(MX, tyy - 0.5, tl2, 1.0), Color(UIS.TEXT, 0.75))
-		# barrido del radar
-		var sx: float = MX + fposmod(t * 0.3, 1.0) * MW
-		for i in range(7):
-			var tx2: float = sx - float(i) * 3.0
-			if tx2 > MX:
-				draw_rect(Rect2(tx2, MY, 3.0, MH), Color(UIS.WAVE, 0.16 * (1.0 - float(i) / 7.0)))
+		# (the old radar sweep, a cyan band sliding across, was removed: in a still frame it read as a stray line)
 		var radar: float = RADAR * ts
 		var trap_r: float = TRAP_R * ts
 		var foe_r: float = FOE_R * ts
@@ -13530,6 +14088,8 @@ class Hud extends Node2D:
 	var z_cd_max := 120.0     # full Z-Move cooldown, for the ring on the Z button
 	var dyn_cd_max := 0.0     # full Dynamax cooldown
 	var hyper := false
+	var diff := "normal"   # difficulty badge beside the clock (Hard / Nightmare)
+	var frame_style := "classic"   # Wardrobe HUD frame around the Pokémon card
 	var run_time := 0.0
 	var kills := 0
 	var dead := false
@@ -13545,6 +14105,14 @@ class Hud extends Node2D:
 	var z_cd := 0.0
 	var dyn_cd := 0.0
 	var dyn_gmax := false     # the button says G-MAX: this Pokémon has the Gigantamax Factor
+	var tera_btn := 0         # TERA button: 0 hidden, 1 charging, 2 ready, 3 Terastallized / used
+	var tera_frac := 0.0      # Tera Orb charge (0..1)
+	var tera_col := Color("#9ff0ff")   # the Tera type's colour
+	var tera_flash := 99.0    # seconds since Terastallizing (the TERASTALLIZE banner shows for the first 2.4 s)
+	var tera_word := ""
+	var tera_sub := ""
+	var tera_left := 0.0      # seconds left Terastallized
+	var pad_on := false       # a controller is connected: the power buttons show their chord
 	var dyn_word := "DYNAMAX"  # the banner and timer word (GIGANTAMAX for a Gigantamax)
 	var adapt_pct := 0
 	var dyn_left := -1.0
@@ -13592,6 +14160,9 @@ class Hud extends Node2D:
 	var balls := 0
 	var tickets := 0
 	var tickets10 := 0
+	var lshards := 0   # Legend Shards earned this run (counter appears once you have one)
+	var eggs := 0      # eggs picked up this run
+	var egg_look := "yellow"
 	var paused := false
 	var show_fps := false
 	var show_stats := false
@@ -13621,6 +14192,7 @@ class Hud extends Node2D:
 	var stats_bottom := 134.0   # y just under the stats panel
 	var stats_left := -1.0      # x of the stats panel's left edge (-1 = hidden): the buff chip sits beside it
 	var stats_top := 134.0
+	var stats_right := -1.0
 	var pops := {}   # recogidas recientes: tipo -> {n, t}, se muestran como "+N" bajo el contador
 	var stats_compact := false
 	var _sp_keys: Array = []
@@ -13739,6 +14311,7 @@ class Hud extends Node2D:
 		org += off_stats
 		stats_bottom = org.y + ph * k
 		stats_left = org.x
+		stats_right = org.x + pw * k
 		stats_top = org.y
 		draw_set_transform(org, 0.0, Vector2(k, k))
 		draw_rect(Rect2(UIS.SHADOW_OFF, Vector2(pw, ph)), UIS.SHADOW)
@@ -14286,9 +14859,53 @@ class Hud extends Node2D:
 		return n1 * x * x + 0.984375
 
 	func z_rect() -> Rect2:
+		return _pw("zmove")
+
+	# The power buttons (Z-Move, MAX, and later TERA) stack above the Dash button. A spot that would cover the stats panel
+	# or the screen's top area is skipped and the button moves to a second column beside the first, towards the middle.
+	func power_rect(i: int) -> Rect2:
+		var vp: Vector2 = get_viewport_rect().size
+		var avoid: Array = []
+		if stats_left >= 0.0 and stats_right > stats_left:
+			avoid.append(Rect2(stats_left, stats_top, stats_right - stats_left, stats_bottom - stats_top).grow(8.0))
+		for id in ["zmove", "dynamax", "tera"]:   # buttons the player placed: the automatic ones go around them
+			if HL.moved(id):
+				avoid.append(_placed_rect(id).grow(6.0))
+		var free: Array = HL.power_slots(vp, dash_rect(), avoid)
+		if i < free.size():
+			return free[i]
+		var d: Rect2 = dash_rect()
+		return Rect2(d.position.x - 112.0 * float(i + 1), d.position.y, 100.0, 100.0)
+
+	# A power button the player moved or resized in the HUD layout editor: its default spot plus their offset and size.
+	func _placed_rect(id: String) -> Rect2:
 		var vp: Vector2 = get_viewport_rect().size
 		var ins: Vector4 = DSP.insets(get_tree())
-		return DSP.mirror_rect(Rect2(vp.x - 126.0 - ins.z, vp.y - 330.0 - ins.w, 100.0, 100.0), vp, ins)
+		var d: Rect2 = HL.default_rect(id, vp, ins)
+		var r := Rect2(d.position + HL.offset(id), d.size * HL.scale_of(id))
+		r.position = r.position.clamp(Vector2.ZERO, vp - r.size)
+		return r
+
+	# Where a power button goes: the player's spot if they placed it, else the next automatic spot (only the shown,
+	# not-placed buttons before it take automatic spots).
+	func _pw(id: String) -> Rect2:
+		if HL.moved(id):
+			return _placed_rect(id)
+		var n := 0
+		if id != "zmove" and z_btn > 0 and not HL.moved("zmove"):
+			n += 1
+		if id == "tera" and dyn_btn > 0 and not HL.moved("dynamax"):
+			n += 1
+		return power_rect(n)
+
+	# Draws a power button at its size: everything is drawn for a 100 px button and scaled around its centre.
+	func _pw_scale(r: Rect2) -> void:
+		var k: float = r.size.x / 100.0
+		var c: Vector2 = r.position + r.size * 0.5
+		draw_set_transform(c * (1.0 - k), 0.0, Vector2(k, k))
+
+	func _pw_base(r: Rect2) -> Rect2:
+		return Rect2(r.position + r.size * 0.5 - Vector2(50.0, 50.0), Vector2(100.0, 100.0))
 
 	func act_rect() -> Rect2:
 		var vp: Vector2 = get_viewport_rect().size
@@ -14301,10 +14918,11 @@ class Hud extends Node2D:
 		# v5.2.2: encima del boton Dynamax (antes caia justo debajo y se solapaban)
 		var ay: float = vp.y * 0.5 - 50.0
 		if not left:
-			var dy: float = vp.y - 442.0 - ins.w
-			ay = minf(ay, dy - 114.0)
-			if ay < 150.0:   # pantalla baja: al costado del boton Dynamax en vez de encima
-				return Rect2(ax - 114.0, dy, 100.0, 100.0)
+			var na: int = 0   # the next free spot after the shown, automatically placed power buttons
+			for pid in [["zmove", z_btn], ["dynamax", dyn_btn], ["tera", tera_btn]]:
+				if int(pid[1]) > 0 and not HL.moved(String(pid[0])):
+					na += 1
+			return power_rect(na)
 		return Rect2(ax, ay, 100.0, 100.0)
 
 	func draw_poi(font: Font, vp: Vector2) -> void:
@@ -14337,9 +14955,108 @@ class Hud extends Node2D:
 		return sz
 
 	func dyn_rect() -> Rect2:
-		var vp: Vector2 = get_viewport_rect().size
-		var ins: Vector4 = DSP.insets(get_tree())
-		return DSP.mirror_rect(Rect2(vp.x - 126.0 - ins.z, vp.y - 442.0 - ins.w, 100.0, 100.0), vp, ins)
+		return _pw("dynamax")
+
+	func tera_rect() -> Rect2:
+		return _pw("tera")
+
+	# A badge on a power button's lower edge with what starts it, for the input you are using now (input_mode.gd):
+	# the controller chord as button icons (X + RT), the keyboard key (T), or nothing on a touch screen.
+	func draw_chord(font: Font, r: Rect2, action: String) -> void:
+		var im: String = INP.current()
+		if im == "touch":
+			return
+		var c := Vector2(r.position.x + r.size.x * 0.5, r.end.y - 4.0)
+		var isz := 24.0
+		if im == "pad":
+			var texs: Array = []
+			if PAD.CHORDS.has(action):
+				var ch: Array = PAD.CHORDS[action]
+				texs = [PADI.tex(int(ch[0])), PADI.named("lt" if int(ch[1]) == JOY_AXIS_TRIGGER_LEFT else "rt")]
+			elif PAD.btn(action) >= 0:
+				texs = [PADI.tex(PAD.btn(action))]
+			if texs.is_empty():
+				return
+			var w: float = isz * float(texs.size()) + (12.0 if texs.size() > 1 else 0.0) + 10.0
+			var pill := Rect2(c.x - w * 0.5, c.y - isz * 0.5 - 3.0, w, isz + 6.0)
+			draw_rect(pill, Color(0.05, 0.04, 0.12, 0.92))
+			draw_rect(pill, Color(1, 1, 1, 0.5), false, 1.5)
+			var x: float = pill.position.x + 5.0
+			for i in range(texs.size()):
+				draw_texture_rect(texs[i], Rect2(x, pill.position.y + 3.0, isz, isz), false)
+				x += isz
+				if i < texs.size() - 1:
+					_ds(font, Vector2(x - 1.0, pill.position.y + isz * 0.5 + 9.0), "+", HORIZONTAL_ALIGNMENT_CENTER, 14.0, 16, Color.WHITE)
+					x += 12.0
+		else:
+			var kc: int = KB.key(action)
+			if kc <= 0:
+				return
+			var t: String = OS.get_keycode_string(kc)
+			var tw: float = font.get_string_size(t, HORIZONTAL_ALIGNMENT_LEFT, -1.0, roundi(16.0 * TXS.k())).x
+			var pill2 := Rect2(c.x - tw * 0.5 - 9.0, c.y - 13.0, tw + 18.0, 26.0)
+			draw_rect(pill2, Color(0.05, 0.04, 0.12, 0.92))
+			draw_rect(pill2, Color(1, 1, 1, 0.5), false, 1.5)
+			_ds(font, Vector2(pill2.position.x, c.y + 7.0), t, HORIZONTAL_ALIGNMENT_CENTER, pill2.size.x, 16, Color(1.0, 0.95, 0.75))
+
+	# TERASTALLIZE banner: a band sweeps in across the upper screen, the word in white over the type's colour, the type
+	# below; it shines once and fades out.
+	func draw_tera_banner(font: Font, vp: Vector2) -> void:
+		if tera_flash >= 2.4 or tera_word == "":
+			return
+		var tf: float = tera_flash
+		var inn: float = clampf(tf / 0.25, 0.0, 1.0)
+		var out: float = clampf((2.4 - tf) / 0.4, 0.0, 1.0)
+		var al: float = minf(inn, out)
+		var y: float = vp.y * 0.21   # high enough to keep the Pokémon and its jewel clear
+		var room: float = maxf(420.0, vp.x - 600.0)   # between the minimap and the stats panel
+		var fs: int = _fit_size(font, tera_word, room - 50.0, 56)   # longer words (other languages) get smaller
+		var full: float = minf(room, font.get_string_size(tera_word, HORIZONTAL_ALIGNMENT_LEFT, -1.0, roundi(float(fs) * TXS.k())).x + 90.0)
+		var bw: float = full * (0.3 + 0.7 * (1.0 - pow(1.0 - inn, 3.0)))
+		var band := Rect2(vp.x * 0.5 - bw * 0.5, y - 46.0, bw, 92.0)
+		draw_rect(band, Color(0.02, 0.05, 0.08, 0.72 * al))
+		draw_rect(Rect2(band.position, Vector2(band.size.x, 4.0)), Color(tera_col.r, tera_col.g, tera_col.b, al))
+		draw_rect(Rect2(band.position + Vector2(0.0, band.size.y - 4.0), Vector2(band.size.x, 4.0)), Color(tera_col.r, tera_col.g, tera_col.b, al))
+		_dso(font, Vector2(0.0, y + 12.0), tera_word, HORIZONTAL_ALIGNMENT_CENTER, vp.x, fs, 10, Color(tera_col.darkened(0.55), al))
+		_ds(font, Vector2(0.0, y + 12.0), tera_word, HORIZONTAL_ALIGNMENT_CENTER, vp.x, fs, Color(1, 1, 1, al))
+		var sh: float = (tf - 0.3) / 0.8   # a shine running across the word
+		if sh > 0.0 and sh < 1.0:
+			var sx: float = lerpf(band.position.x + 10.0, band.end.x - 10.0, sh)
+			draw_rect(Rect2(sx - 10.0, y - 40.0, 20.0, 80.0), Color(1, 1, 1, 0.35 * al))
+		_dso(font, Vector2(0.0, y + 40.0), tera_sub, HORIZONTAL_ALIGNMENT_CENTER, vp.x, 22, 6, Color(0.02, 0.04, 0.08, al))
+		_ds(font, Vector2(0.0, y + 40.0), tera_sub, HORIZONTAL_ALIGNMENT_CENTER, vp.x, 22, Color(tera_col.lightened(0.3), al))
+
+	# TERA button: the ring fills as the Tera Orb charges, in the Tera type's colour; a crystal glow when ready.
+	func draw_tera(font: Font) -> void:
+		if tera_btn <= 0:
+			return
+		var r0: Rect2 = tera_rect()
+		_pw_scale(r0)
+		var r: Rect2 = _pw_base(r0)
+		var c: Vector2 = r.position + r.size * 0.5
+		var beat: float = 0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.006)
+		var ready: bool = tera_btn == 2
+		if ready:
+			draw_circle(c, 52.0 + beat * 6.0, Color(tera_col.r, tera_col.g, tera_col.b, 0.22 + beat * 0.22))
+			for i in range(6):   # crystal facets turning around the button
+				var a: float = Time.get_ticks_msec() * 0.0012 + TAU * float(i) / 6.0
+				var p: Vector2 = c + Vector2.from_angle(a) * 54.0
+				draw_colored_polygon(PackedVector2Array([p + Vector2(0, -7), p + Vector2(5, 0), p + Vector2(0, 7), p + Vector2(-5, 0)]), Color(1, 1, 1, 0.85))
+		draw_circle(c, 46.0, Color(0.03, 0.09, 0.12, 0.9))
+		draw_arc(c, 46.0, 0.0, TAU, 40, tera_col if ready else Color(0.4, 0.46, 0.5), 4.0)
+		if tera_btn == 1:
+			draw_arc(c, 46.0, -PI * 0.5, -PI * 0.5 + TAU * tera_frac, 40, tera_col, 5.0)
+		var on: bool = tera_btn != 3 and tera_btn != 4
+		_ds(font, Vector2(c.x - 44.0, c.y + (2.0 if tera_btn != 2 else 10.0)), "TERA", HORIZONTAL_ALIGNMENT_CENTER, 88.0, 26, Color.WHITE if on else Color(0.6, 0.62, 0.68))
+		if tera_btn == 4:
+			_ds(font, Vector2(c.x - 44.0, c.y + 26.0), L.t("Max on"), HORIZONTAL_ALIGNMENT_CENTER, 88.0, 15, Color(1.0, 0.6, 0.75))
+		if tera_btn == 1:
+			_ds(font, Vector2(c.x - 44.0, c.y + 22.0), "%d%%" % int(tera_frac * 100.0), HORIZONTAL_ALIGNMENT_CENTER, 88.0, 16, Color(0.8, 0.9, 0.95))
+		elif tera_btn == 3:
+			_ds(font, Vector2(c.x - 44.0, c.y + 26.0), ("%d s" % ceili(tera_left)) if tera_left > 0.0 else L.t("Used"), HORIZONTAL_ALIGNMENT_CENTER, 88.0, 16, Color(0.8, 0.9, 0.95))
+		if tera_btn == 1 or tera_btn == 2:
+			draw_chord(font, r, "tera")
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 	# Dash: boton dorado bajo el del Movimiento Z; se rellena durante el enfriamiento y muestra los segundos que faltan.
 	func dash_rect() -> Rect2:
@@ -14431,7 +15148,9 @@ class Hud extends Node2D:
 				cx += cwid
 		draw_poi(font, vp)
 		if dyn_btn > 0:
-			var r: Rect2 = dyn_rect()
+			var r0: Rect2 = dyn_rect()
+			_pw_scale(r0)
+			var r: Rect2 = _pw_base(r0)
 			var c: Vector2 = r.position + r.size * 0.5
 			var ready: bool = dyn_btn == 2
 			if ready:
@@ -14445,8 +15164,13 @@ class Hud extends Node2D:
 				if dyn_cd_max > 0.0:   # the ring fills as the cooldown runs out
 					draw_arc(c, 46.0, -PI * 0.5, -PI * 0.5 + TAU * clampf(1.0 - dyn_cd / dyn_cd_max, 0.0, 1.0), 40, tcol, 4.0)
 				_ds(font, Vector2(c.x - 44.0, c.y + 26.0), "%d:%02d" % [int(dyn_cd) / 60, int(dyn_cd) % 60], HORIZONTAL_ALIGNMENT_CENTER, 88.0, 18, Color(0.85, 0.88, 0.95))
+			elif dyn_btn == 4:
+				_ds(font, Vector2(c.x - 44.0, c.y + 30.0), L.t("Tera on"), HORIZONTAL_ALIGNMENT_CENTER, 88.0, 15, Color(0.6, 0.9, 1.0))
 			elif not ready:
 				_ds(font, Vector2(c.x - 44.0, c.y + 28.0), L.t("Min 3"), HORIZONTAL_ALIGNMENT_CENTER, 88.0, 16, Color(0.75, 0.78, 0.85))
+			if dyn_btn == 2:
+				draw_chord(ThemeDB.fallback_font, r, "dynamax")
+			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 	func draw_z(font: Font, vp: Vector2) -> void:
 		var tcol: Color = Color.html(String(MD.TYPE_COLOR.get(z_type, "#ffffff")))
@@ -14524,7 +15248,9 @@ class Hud extends Node2D:
 			if fl > 0.0:
 				draw_rect(Rect2(Vector2.ZERO, vp), Color(1, 1, 1, 0.5 * fl * flash_k))
 		if z_btn > 0:
-			var r: Rect2 = z_rect()
+			var r0: Rect2 = z_rect()
+			_pw_scale(r0)
+			var r: Rect2 = _pw_base(r0)
 			var c: Vector2 = r.position + r.size * 0.5
 			var ready: bool = z_btn == 2
 			var beat: float = 0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.001 * 6.0)
@@ -14544,6 +15270,8 @@ class Hud extends Node2D:
 				_ds(font, Vector2(c.x - 44.0, c.y + 28.0), L.t("Min 3"), HORIZONTAL_ALIGNMENT_CENTER, 88.0, 16, Color(0.75, 0.78, 0.85))
 			else:
 				IC.draw_in(self, "zc:" + z_type, c + Vector2(0.0, -2.0 - beat * 2.0), 64.0, zc)
+				draw_chord(ThemeDB.fallback_font, r, "zmove")
+			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 	func pause_rects() -> Array:
 		var vp: Vector2 = get_viewport_rect().size
@@ -14615,8 +15343,11 @@ class Hud extends Node2D:
 		draw_vignette(vp)
 		draw_z(font, vp)
 		draw_dyn(font, vp)
+		draw_tera(font)
+		draw_tera_banner(font, vp)
 		if not dead:
 			draw_dash(font)
+			draw_chord(font, dash_rect(), "dash")
 		draw_toast(font, vp)
 		if show_fps:
 			_ds(font, Vector2(vp.x - 130.0 - ins.z, vp.y - 12.0 - ins.w), "%d FPS" % int(Engine.get_frames_per_second()), HORIZONTAL_ALIGNMENT_RIGHT, 118.0, 20, Color(1, 1, 1, 0.85))
@@ -14641,6 +15372,8 @@ class Hud extends Node2D:
 		draw_set_transform(Vector2(12.0 + ins.x, 16.0 + ins.y) + off_plate, 0.0, Vector2(sc_plate, sc_plate))
 		draw_rect(Rect2(o + UIS.SHADOW_OFF, Vector2(pw, 82.0)), UIS.SHADOW)
 		draw_style_box(UIS.frame(Color(UIS.BG, 0.92), UIS.EDGE), Rect2(o, Vector2(pw, 82.0)))
+		if frame_style != "classic" and frame_style != "":   # Wardrobe HUD frame (wardrobe.gd)
+			WR.draw_frame(self, frame_style, Rect2(o, Vector2(pw, 82.0)), Time.get_ticks_msec() * 0.001)
 		var bx0 := 10.0   # left edge of name / bar; moves right when the icon is shown
 		if icon_tex != null:
 			var ib := Rect2(o + Vector2(7.0, 7.0), Vector2(68.0, 68.0))
@@ -14730,6 +15463,10 @@ class Hud extends Node2D:
 		citems.append(["coin", str(coins), Color("#ffd65c")])
 		citems.append(["ticket", str(tickets), Color("#ffd65c")])
 		citems.append(["ticket10", str(tickets10), Color("#c47bff")])
+		if lshards > 0:
+			citems.append(["lshard", str(lshards), Color("#ff9ae0")])
+		if eggs > 0:
+			citems.append(["egg", str(eggs), Color("#fff1a8")])
 		var cgap: float = 22.0 * sc_cnt
 		var cwids: Array = []
 		var ctotal := 0.0
@@ -14748,6 +15485,8 @@ class Hud extends Node2D:
 				var bt2: Texture2D = ALP.ball_tex()
 				if bt2 != null:
 					draw_texture_rect(bt2, Rect2(Vector2(cx0, cy0 - cic * 0.5), Vector2(cic, cic)), false)
+			elif ckind == "egg":
+				EGA.draw(self, Vector2(cx0 + cic * 0.5, cy0), cic * 0.92, egg_look)
 			else:
 				IC.draw_in(self, ckind, Vector2(cx0 + cic * 0.5, cy0), cic)
 			_ds(font, Vector2(cx0 + cic + 6.0, cy0 + 10.0 * sc_cnt), String(ce[1]), HORIZONTAL_ALIGNMENT_LEFT, -1.0, cfs, ce[2])
@@ -14784,9 +15523,20 @@ class Hud extends Node2D:
 				_ds(font, Vector2(0.0, 58.0), L.t("Rifts won: %d") % rifts_n, HORIZONTAL_ALIGNMENT_CENTER, vp.x, 18, Color("#c9a6ff"))
 		else:
 			_ds(font, Vector2(0.0, 36.0), L.t(clock), HORIZONTAL_ALIGNMENT_CENTER, vp.x, 28, Color.WHITE)
+			var bx: float = vp.x * 0.5 + 54.0
 			if hyper:   # etiqueta HYPER junto al reloj
-				_dso(font, Vector2(vp.x * 0.5 + 54.0, 34.0), "HYPER", HORIZONTAL_ALIGNMENT_LEFT, -1.0, 16, 4, Color(0, 0, 0, 0.85))
-				_ds(font, Vector2(vp.x * 0.5 + 54.0, 34.0), "HYPER", HORIZONTAL_ALIGNMENT_LEFT, -1.0, 16, Color("#ff9a3d"))
+				_dso(font, Vector2(bx, 34.0), "HYPER", HORIZONTAL_ALIGNMENT_LEFT, -1.0, 16, 4, Color(0, 0, 0, 0.85))
+				_ds(font, Vector2(bx, 34.0), "HYPER", HORIZONTAL_ALIGNMENT_LEFT, -1.0, 16, Color("#ff9a3d"))
+				var hsz: int = roundi(16.0 * TXS.k())
+				bx += PXF.font_for(font, hsz).get_string_size("HYPER", HORIZONTAL_ALIGNMENT_LEFT, -1, PXF.px_size(hsz) if PXF.is_small(hsz) else hsz).x + 12.0
+			if diff != "normal":   # difficulty badge: a coloured pill beside the clock
+				var dtx: String = L.t(String(DIF.NAME[diff])).to_upper()
+				var dsz: int = roundi(15.0 * TXS.k())
+				var dw: float = PXF.font_for(font, dsz).get_string_size(dtx, HORIZONTAL_ALIGNMENT_LEFT, -1, PXF.px_size(dsz) if PXF.is_small(dsz) else dsz).x
+				var dc: Color = DIF.COLOR[diff]
+				draw_rect(Rect2(bx - 5.0, 19.0, dw + 10.0, 21.0), Color(0.08, 0.06, 0.16, 0.85))
+				draw_rect(Rect2(bx - 5.0, 19.0, dw + 10.0, 21.0), dc, false, 2.0)
+				_ds(font, Vector2(bx, 34.0), dtx, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 15, dc)
 			if doom > 0:   # nivel de Doom (veces que has derrotado a Eternatus) a la izquierda del reloj
 				var dtxt: String = "DOOM " + DM.roman(doom)
 				_dso(font, Vector2(0.0, 34.0), dtxt, HORIZONTAL_ALIGNMENT_RIGHT, vp.x * 0.5 - 54.0, 16, 4, Color(0, 0, 0, 0.85))

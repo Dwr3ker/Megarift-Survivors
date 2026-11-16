@@ -15,6 +15,7 @@ const Aud = preload("res://scripts/audio.gd")
 const L = preload("res://scripts/lang.gd")
 const SV = preload("res://scripts/save_data.gd")
 const IVS = preload("res://scripts/ivs.gd")
+const EVI = preload("res://scripts/evo_items.gd")
 
 # Total bonus for completing the whole line in a run.
 const SURGE_DMG := 0.12
@@ -25,6 +26,7 @@ const SEAS_SHARE := 0.8
 const SEAS_LEVEL := 50
 # Level at which the card for each step appears: [stages in the line][stage the Pokémon is at now]
 const LEVELS := {2: {1: 20}, 3: {1: 16, 2: 34}}
+const NARROW_AT := 4   # more choices than this: narrow cards (item only)
 const ANIM_S := 2.4
 const COLOR := Color("#ffd65c")
 
@@ -116,16 +118,36 @@ static func _available(main, cur: int) -> Array:
 	return out
 
 
+# The bonus an evolution gives now (the same for every branch).
+static func gain_text(main) -> String:
+	var share: float = step_share(int(main._cur_dex()))
+	return L.t("+%d%% damage, +%d%% HP, +%d%% speed for good, and a full heal.") % [roundi(SURGE_DMG * share * 100.0), roundi(SURGE_HP * share * 100.0), roundi(SURGE_SPD * share * 100.0)]
+
+
+# One card per branch, each with the stone or item it uses (evo_items.gd). With many branches (Eevee's 8) the cards
+# are narrow, so they show only the item and the shared bonus goes in the heading (see main: cat "evolve").
 static func picks(main) -> Array:
 	var out: Array = []
 	var cur: int = int(main._cur_dex())
-	var share: float = step_share(cur)
-	for c in _available(main, cur):
+	var gain: String = gain_text(main)
+	var av: Array = _available(main, cur)
+	var narrow: bool = av.size() > NARROW_AT
+	for c in av:
 		var p: Dictionary = main._dex_by[int(c)]
+		var with: String = EVI.label(int(c))   # the stone or item this branch uses (Fire Stone, King's Rock...)
+		var desc: String = gain
+		if with != "":
+			desc = with if narrow else (L.t("Evolves with: %s") % with) + "\n" + gain
 		out.append({"cat": "evolvepick", "id": str(int(c)), "key": "evolve:%d" % int(c), "w": 1.0, "title": L.t(String(p["name"])),
-			"desc": L.t("+%d%% damage, +%d%% HP, +%d%% speed for good, and a full heal.") % [roundi(SURGE_DMG * share * 100.0), roundi(SURGE_HP * share * 100.0), roundi(SURGE_SPD * share * 100.0)],
-			"icon": "star", "tag": L.t("Evolution"), "color": COLOR})
+			"desc": desc, "evo_item": with, "icon": EVI.icon(int(c)), "tag": "" if narrow else L.t("Evolution"), "color": COLOR})
 	return out
+
+
+# the heading for the choice: with narrow cards it carries the bonus
+static func pick_heading(main) -> String:
+	if _available(main, int(main._cur_dex())).size() > NARROW_AT:
+		return L.t("Choose an evolution") + ": " + gain_text(main)
+	return L.t("Choose an evolution")
 
 
 # ---------------------------------------------------------------- applying it

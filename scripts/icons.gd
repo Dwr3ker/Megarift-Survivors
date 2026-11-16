@@ -114,6 +114,11 @@ static func image(name: String) -> Image:
 		if not fr.is_empty():
 			return _fusion_emblem(fr)
 		return _emblem("normal", "")
+	if name.begins_with("evoitem:"):   # the stone or item an evolution uses (evo_items.gd)
+		var ed: Dictionary = load("res://scripts/evo_items.gd").image_def(name.substr(8))
+		if not ed.is_empty():
+			return _from_rows(ed)
+		name = "star"
 	if name.begins_with("type:"):
 		return _emblem(name.substr(5), "")
 	if name.begins_with("zc:"):
@@ -317,7 +322,7 @@ static func scale_for(name: String, size: float) -> int:
 	if name.begins_with("mstone:"):
 		return maxi(1, roundi(size / 14.0))
 	if not (name.begins_with("move:") or name.begins_with("type:") or name.begins_with("evo:") or name.begins_with("zc:")):
-		if EXTRA.has(name) or name.begins_with("ti_") or name.begins_with("kec:"):
+		if EXTRA.has(name) or name.begins_with("ti_") or name.begins_with("kec:") or name.begins_with("evoitem:"):
 			return maxi(1, roundi(size / 16.0))
 		var ui: Dictionary = data["ui"]
 		var rows: Array = ui.get(name, ui["star"])["rows"]

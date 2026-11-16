@@ -370,5 +370,11 @@
   "spriteCollab": "0017",
   "name": "Arceus (fairy)",
   "kind": "plate"
+ },
+ {
+  "dex": 800,
+  "spriteCollab": "0003",
+  "name": "Ultra Necrozma",
+  "kind": "forme"
  }
 ]

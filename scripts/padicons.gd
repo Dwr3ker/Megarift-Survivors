@@ -21,6 +21,9 @@ const FONT := {
 	"X": ["#...#", "#...#", ".#.#.", "..#..", ".#.#.", "#...#", "#...#"],
 	"Y": ["#...#", "#...#", ".#.#.", "..#..", "..#..", "..#..", "..#.."],
 	"L": ["#....", "#....", "#....", "#....", "#....", "#....", "#####"],
+	"T": ["#####", "..#..", "..#..", "..#..", "..#..", "..#..", "..#.."],
+	"Z": ["#####", "....#", "...#.", "..#..", ".#...", "#....", "#####"],
+	"2": [".###.", "#...#", "....#", "...#.", "..#..", ".#...", "#####"],
 	"R": ["####.", "#...#", "#...#", "####.", "#.#..", "#..#.", "#...#"],
 	"1": ["..#..", ".##..", "..#..", "..#..", "..#..", "..#..", ".###."],
 }
@@ -150,6 +153,9 @@ static func _draw(img: Image, b: int, lay: int, key: String) -> void:
 	if key == "dpad_lr" or key == "dpad_ud":
 		_dpad(img, [13, 14] if key == "dpad_lr" else [11, 12])
 		return
+	if key == "lt" or key == "rt":
+		_trigger(img, key == "lt", lay)
+		return
 	match b:
 		0, 1, 2, 3:
 			_face(img, b, lay)
@@ -230,6 +236,15 @@ static func _shoulder(img: Image, left: bool, lay: int) -> void:
 	elif lay == 1:
 		s += "1"
 	_text(img, s, 12, 11, Color.WHITE)
+
+
+# Triggers (LT / RT, L2 / R2, ZL / ZR): a taller rounded block than the shoulder buttons.
+static func _trigger(img: Image, left: bool, lay: int) -> void:
+	_rect(img, 3, 2, 20, 21, OUT, true)
+	_rect(img, 4, 3, 19, 20, Color("#aab2cc"), true)
+	_rect(img, 5, 4, 18, 19, MID, true)
+	var s: String = ["LT", "L2", "ZL"][lay] if left else ["RT", "R2", "ZR"][lay]
+	_text(img, s, 12, 12, Color.WHITE)
 
 
 static func _start(img: Image, lay: int) -> void:

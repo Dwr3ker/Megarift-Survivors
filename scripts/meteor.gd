@@ -230,8 +230,7 @@ func _impact() -> void:
 	bm.z_index = 15
 	m.world.add_child(bm)
 	if not m.player.dead and m.player.position.distance_to(pos) < R:
-		m.player.invuln = 0.0
-		m._hurt_player(maxf(8.0, m.player.max_hp * 0.10), "")
+		m._hurt_player(maxf(8.0, m.player.max_hp * 0.10), "", false, true)
 	for e in m.enemies.duplicate():
 		if is_instance_valid(e) and not e.dead and not e.boss and e.position.distance_to(pos) < R:
 			m._damage_enemy(e, 120.0 + m.run_time * 0.1, Color("#ff9a3d"), (e.position - pos).normalized(), 200.0)

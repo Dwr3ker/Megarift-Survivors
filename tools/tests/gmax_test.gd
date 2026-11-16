@@ -71,8 +71,10 @@ func _init() -> void:
 	var r = await _run(SV, 6)
 	r.run_time = 400.0
 	check("the button says G-MAX", r.hud.dyn_gmax)
+	var mine: Array = []   # only these 8 are measured: new arrivals would add their own HP to the total
 	for i in range(8):
 		var e = r._spawn_one()
+		mine.append(e)
 		e.position = r.player.position + Vector2.from_angle(float(i)) * 120.0
 		e.hp = 1.0e7
 		e.max_hp = 1.0e7
@@ -86,17 +88,17 @@ func _init() -> void:
 	r.dyn.n = 2
 	r.dyn.pulse = 0.0
 	var hp0: float = 0.0
-	for e in r.enemies:
+	for e in mine:
 		hp0 += e.hp
 	for i in range(30):
 		await process_frame
 	var hp1: float = 0.0
 	var burned := 0
-	for e in r.enemies:
+	for e in mine:
 		hp1 += e.hp
 		if e.burn > 0:
 			burned += 1
-	check("the big wave is G-Max Wildfire: it hurts and burns", hp1 < hp0 and burned > 0, "burned %d" % burned)
+	check("the big wave is G-Max Wildfire: it hurts and burns", hp1 < hp0 and burned > 0, "burned %d, HP %.0f -> %.0f" % [burned, hp0, hp1])
 	check("it leaves burning ground", r.dyn.gm.zones.size() > 0)
 	# every G-Max move runs
 	var bad: Array = []

@@ -162,6 +162,7 @@ func spawn() -> bool:
 func on_down(e) -> void:
 	if cur == null or cur["state"] != "hostile" or cur["enemy"] != e:
 		return
+	m._egg_try("alpha", e.position)
 	_begin_down(e)
 
 
@@ -253,7 +254,7 @@ func update(delta: float) -> void:
 	if cur == null:
 		if spawned >= MAX_PER_RUN:
 			return
-		t_next -= delta
+		t_next -= delta * m.DIF.k(m.diff, "alpha")   # Hard / Nightmare: Alphas come more often
 		if t_next <= 0.0:
 			if _spawn_ok() and spawn():
 				pass

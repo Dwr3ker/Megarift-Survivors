@@ -646,8 +646,7 @@ func touch() -> void:
 	if A.position.distance_squared_to(pl.position) > rr * rr:
 		return
 	touch_cd = 0.9
-	pl.invuln = 0.0
-	m._hurt_player(pl.max_hp * TOUCH, "", true)
+	m._hurt_player(pl.max_hp * TOUCH, "", true, true)
 	m.shake = 9.0
 	m._ring(pl.position, 6.0, 70.0, GOLD, 0.4)
 	A.play("Attack", 1.4)

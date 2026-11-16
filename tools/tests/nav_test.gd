@@ -67,8 +67,10 @@ func _init() -> void:
 	await press("ui_down")
 	var still: Control = root.gui_get_focus_owner()
 	check("Down at the bottom of the right panel stays there (no jump into Challenges)", still != null and not menu.mode_tiles.values().has(still))
-	for i in range(8):
+	for i in range(8):   # Up through the panel; leaving it lands on the selected mode card (one more Up would reach the tabs)
 		await press("ui_up")
+		if menu.mode_tiles.values().has(root.gui_get_focus_owner()):
+			break
 	var back: Control = root.gui_get_focus_owner()
 	check("Up past the top of the right panel returns to the selected mode", back != null and menu.mode_tiles.values().has(back) and back == menu.mode_tiles[menu.modes_sel], str(back))
 	# ---------- squarer screens ----------
@@ -132,14 +134,13 @@ func _init() -> void:
 		for i in range(3):
 			await process_frame
 	var found_code := false
-	for ti in range(tabs_n):
-		menu5.set_tab = ti
-		menu5._refresh_settings()
+	menu5._show("profile")   # the code box moved from Settings to the trainer profile
+	for i in range(3):
 		await process_frame
-		for n in menu5.screens["settings"].find_children("*", "LineEdit", true, false):
-			if (n as LineEdit).placeholder_text == "Enter code":
-				found_code = true
-	check("the settings have an 'Enter code' box", found_code)
+	for n in menu5.screens["profile"].find_children("*", "LineEdit", true, false):
+		if (n as LineEdit).placeholder_text == "Enter code":
+			found_code = true
+	check("the trainer profile has an 'Enter code' box", found_code)
 	menu5.queue_free()
 	await process_frame
 	# ---------- level-up: skip with the controller ----------

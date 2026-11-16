@@ -475,8 +475,7 @@ func _proj_tick(delta: float) -> void:
 		var live: bool = (p.kind == "cut" and p.warn <= 0.0) or (p.kind == "orb" and p.orbit_c == null)
 		if live and not p.hit and not m.player.dead and p.position.distance_to(pp) < p.r + m.player.radius * 0.6:
 			p.hit = true
-			m.player.invuln = 0.0
-			m._hurt_player(p.dmg, "psychic")
+			m._hurt_player(p.dmg, "psychic", false, true)
 			m.pfx.burst(p.position, Color("#ff6bd6"), 10, 120.0)
 			if p.kind == "orb":
 				p.queue_free()

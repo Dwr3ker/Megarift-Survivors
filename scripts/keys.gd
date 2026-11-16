@@ -4,7 +4,7 @@ extends RefCounted
 
 const SV = preload("res://scripts/save_data.gd")
 
-const ACTIONS := ["options", "summary", "prev", "next", "zmove", "dynamax", "dash", "swap", "slot1", "slot2", "slot3", "slot4", "slot5", "slot6"]
+const ACTIONS := ["options", "summary", "prev", "next", "zmove", "dynamax", "tera", "dash", "swap", "slot1", "slot2", "slot3", "slot4", "slot5", "slot6"]
 const LABELS := {
 	"options": "Options (pause)",
 	"summary": "Build summary",
@@ -12,6 +12,7 @@ const LABELS := {
 	"next": "Next move",
 	"zmove": "Z-Move",
 	"dynamax": "Dynamax",
+	"tera": "Terastallize",
 	"dash": "Dash",
 	"swap": "Switch Pokémon (Team Mode)",
 	"slot1": "Select move 1", "slot2": "Select move 2", "slot3": "Select move 3",
@@ -20,7 +21,7 @@ const LABELS := {
 
 
 static func defaults() -> Dictionary:
-	return {"options": KEY_ESCAPE, "summary": KEY_TAB, "prev": KEY_Q, "next": KEY_E, "zmove": KEY_Z, "dynamax": KEY_C, "dash": KEY_SHIFT, "swap": KEY_R,
+	return {"options": KEY_ESCAPE, "summary": KEY_TAB, "prev": KEY_Q, "next": KEY_E, "zmove": KEY_Z, "dynamax": KEY_C, "tera": KEY_T, "dash": KEY_SHIFT, "swap": KEY_R,
 		"slot1": KEY_1, "slot2": KEY_2, "slot3": KEY_3, "slot4": KEY_4, "slot5": KEY_5, "slot6": KEY_6}
 
 

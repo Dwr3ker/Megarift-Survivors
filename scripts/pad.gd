@@ -4,8 +4,9 @@ extends RefCounted
 const SV = preload("res://scripts/save_data.gd")
 const TL = preload("res://scripts/lang.gd")
 const NAMES := ["Xbox", "PlayStation", "Nintendo"]
+const NONE := -1   # an action with no button
 # accion -> [texto (clave de traduccion)]
-const ACTIONS := ["prev", "next", "pause", "summary", "confirm", "cancel", "reroll", "ban", "swap", "zmove", "dynamax", "dash", "slot1", "slot2", "slot3", "slot4", "slot5", "slot6"]
+const ACTIONS := ["prev", "next", "pause", "summary", "confirm", "cancel", "reroll", "ban", "swap", "zmove", "dynamax", "tera", "dash", "slot1", "slot2", "slot3", "slot4", "slot5", "slot6"]
 const LABELS := {
 	"prev": "Previous move",
 	"next": "Next move",
@@ -18,6 +19,7 @@ const LABELS := {
 	"swap": "Switch Pokémon (Team Mode)",
 	"zmove": "Z-Move",
 	"dynamax": "Dynamax",
+	"tera": "Terastallize",
 	"dash": "Dash",
 	"slot1": "Select move 1", "slot2": "Select move 2", "slot3": "Select move 3",
 	"slot4": "Select move 4", "slot5": "Select move 5", "slot6": "Select move 6",
@@ -43,9 +45,10 @@ static func defaults(lay: int = -1) -> Dictionary:
 	var ok := JOY_BUTTON_B if lay == 2 else JOY_BUTTON_A
 	var no := JOY_BUTTON_A if lay == 2 else JOY_BUTTON_B
 	return {"prev": JOY_BUTTON_LEFT_SHOULDER, "next": JOY_BUTTON_RIGHT_SHOULDER, "pause": JOY_BUTTON_START, "summary": JOY_BUTTON_BACK,
-		"confirm": ok, "cancel": no, "reroll": JOY_BUTTON_Y, "ban": JOY_BUTTON_X, "swap": JOY_BUTTON_RIGHT_STICK, "zmove": JOY_BUTTON_LEFT_STICK, "dynamax": JOY_BUTTON_X, "dash": no,
-		# v5.3: elegir movimiento directo con la cruceta (1-4); los huecos 5 y 6 tambien con los gatillos izquierdo / derecho
-		"slot1": JOY_BUTTON_DPAD_UP, "slot2": JOY_BUTTON_DPAD_RIGHT, "slot3": JOY_BUTTON_DPAD_DOWN, "slot4": JOY_BUTTON_DPAD_LEFT, "slot5": JOY_BUTTON_MISC1, "slot6": JOY_BUTTON_TOUCHPAD}
+		"confirm": ok, "cancel": no, "reroll": JOY_BUTTON_Y, "ban": JOY_BUTTON_X, "swap": JOY_BUTTON_RIGHT_STICK, "zmove": JOY_BUTTON_LEFT_STICK, "dynamax": NONE, "tera": NONE, "dash": no,
+		# The D-pad only moves your Pokémon: picking moves 1-4 directly has no button by default (LB / RB cycle the moves);
+		# it can be set in Settings > Controls. Slots 5 and 6 keep the extra buttons some pads have.
+		"slot1": NONE, "slot2": NONE, "slot3": NONE, "slot4": NONE, "slot5": JOY_BUTTON_MISC1, "slot6": JOY_BUTTON_TOUCHPAD}
 
 
 static func btn(action: String) -> int:
@@ -75,6 +78,39 @@ static func _migrate_summary() -> void:
 			m[a] = JOY_BUTTON_X
 	SV.d["settings"]["padmap"] = m
 	SV.save()
+
+
+# The D-pad used to also pick moves 1-4 while it moved your Pokémon. Saved maps that still have that get those
+# four actions cleared once (a D-pad binding set on purpose later is kept).
+static func _migrate_dpad() -> void:
+	SV.ensure()
+	if bool(SV.d["settings"].get("dpad_moves_only", false)):
+		return
+	SV.d["settings"]["dpad_moves_only"] = true
+	var m = SV.d["settings"].get("padmap", {})
+	if m is Dictionary and int(m.get("dynamax", -2)) == JOY_BUTTON_X:
+		m["dynamax"] = NONE   # X is half of the power chords now (X + LT Z-Move, X + RT Dynamax)
+	if m is Dictionary and not m.is_empty():
+		var dp := {"slot1": JOY_BUTTON_DPAD_UP, "slot2": JOY_BUTTON_DPAD_RIGHT, "slot3": JOY_BUTTON_DPAD_DOWN, "slot4": JOY_BUTTON_DPAD_LEFT}
+		for a in dp:
+			if m.has(a) and int(m[a]) == int(dp[a]):
+				m[a] = NONE
+		SV.d["settings"]["padmap"] = m
+	SV.save()
+
+
+# Power chords (fixed): hold a face button and pull a trigger. Z-Move = X + LT, Dynamax / Gigantamax = X + RT,
+# Tera = Y + RT. On their own, X, Y and the triggers do nothing in a run. The single-button actions above stay optional.
+const CHORDS := {"zmove": [JOY_BUTTON_X, JOY_AXIS_TRIGGER_LEFT], "dynamax": [JOY_BUTTON_X, JOY_AXIS_TRIGGER_RIGHT], "tera": [JOY_BUTTON_Y, JOY_AXIS_TRIGGER_RIGHT]}
+
+
+static func chord_name(action: String) -> String:
+	if not CHORDS.has(action):
+		return ""
+	var c: Array = CHORDS[action]
+	var l := layout()
+	var trig: String = ["LT", "L2", "ZL"][l] if int(c[1]) == JOY_AXIS_TRIGGER_LEFT else ["RT", "R2", "ZR"][l]
+	return btn_name(int(c[0])) + "+" + trig
 
 
 # Asigna un boton a una accion; si otra accion lo usaba, intercambian.
@@ -111,6 +147,8 @@ static func cancel_btn() -> int:
 
 
 static func btn_name(b: int) -> String:
+	if b < 0:
+		return TL.t("Not set")
 	var l := layout()
 	if BTN_NAMES.has(b):
 		return TL.t(String(BTN_NAMES[b][l]))
@@ -149,6 +187,7 @@ static func _set_joy(action: String, buttons: Array) -> void:
 # Aplica el mapa a las acciones de la interfaz (ui_accept / ui_cancel).
 static func apply() -> void:
 	_migrate_summary()
+	_migrate_dpad()
 	_set_joy("ui_accept", [confirm_btn()])
 	_set_joy("ui_cancel", [cancel_btn()])
 

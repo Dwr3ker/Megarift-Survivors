@@ -52,6 +52,10 @@ static func list() -> Array:
 	L2.append(_a("shiny5", "coleccion", 2, "An eye for shine", "Get 5 shinies.", "shinies", 5, {"t10": 1}))
 	L2.append(_a("shiny20", "coleccion", 3, "Shiny hunter", "Get 20 shinies.", "shinies", 20, {"t10": 2}, "Shiny hunter"))
 	L2.append(_a("pulls100", "coleccion", 2, "Slot machine", "Make 100 gacha pulls.", "pulls", 100, {"t10": 1}, "Lucky"))
+	# eggs (docs/eggs.md)
+	L2.append(_a("egg1", "coleccion", 1, "First hatch", "Hatch an egg.", "eggsHatched", 1, {"t1": 2}))
+	L2.append(_a("egg10", "coleccion", 2, "Egg collector", "Hatch 10 eggs.", "eggsHatched", 10, {"t10": 1}, "Breeder"))
+	L2.append(_a("eggShiny", "coleccion", 3, "Shiny surprise", "Hatch a shiny Pokémon from an egg.", "eggShinies", 1, {"t10": 2}))
 	# supervivencia
 	L2.append(_a("time5", "supervivencia", 1, "Warming up", "Survive 5 minutes.", "bestMin", 5, {"coins": 200}))
 	L2.append(_a("time10", "supervivencia", 2, "Hard to beat", "Survive 10 minutes.", "bestMin", 10, {"t1": 4}))
@@ -169,6 +173,12 @@ static func list() -> Array:
 	L2.append(_a("dailyGold1", "modos", 2, "Golden day", "Win a Gold medal in the Daily Challenge.", "dailyGolds", 1, {"coins": 1500, "t10": 1}))
 	L2.append(_a("dailyGold10", "modos", 3, "Gold standard", "Win 10 Gold medals in the Daily Challenge.", "dailyGolds", 10, {"coins": 6000, "t10": 3}, "Gold standard"))
 	L2.append(_a("dailyStreak7", "modos", 2, "Week of medals", "Earn a Daily Challenge medal 7 days in a row.", "dailyStreakBest", 7, {"coins": 3000, "t10": 2}))
+	# difficulties (docs/difficulty.md); minutes are run-clock minutes, so Hyper reaches them twice as fast
+	L2.append(_a("hard15", "modos", 1, "Hard as nails", "Reach minute 15 on Hard.", "hardBestMin", 15, {"coins": 1500}))
+	L2.append(_a("hard30", "modos", 2, "Unbreakable", "Reach minute 30 on Hard (unlocks Nightmare).", "hardBestMin", 30, {"t10": 2}))
+	L2.append(_a("night15", "modos", 2, "Sweet dreams", "Reach minute 15 on Nightmare.", "nightBestMin", 15, {"t10": 2}))
+	L2.append(_a("nightArceus", "modos", 3, "Nightmare slayer", "Defeat Arceus on Nightmare.", "nightArceus", 1, {"t10": 4}))
+	L2.append(_a("nightEter", "modos", 3, "Wide awake", "Defeat Eternatus on Nightmare.", "nightEternatus", 1, {"coins": 10000, "t10": 5}, "Nightmare"))
 	L2.append(_a("reserve1", "otros", 1, "Layaway", "Reserve an item at Kecleon's shop.", "reservations", 1, {"coins": 500}))
 	L2.append(_a("reserve10", "otros", 2, "Regular customer", "Reserve 10 items at Kecleon's shop.", "reservations", 10, {"t10": 1}))
 	# uno por legendario

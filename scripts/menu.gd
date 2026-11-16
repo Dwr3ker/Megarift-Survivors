@@ -33,8 +33,16 @@ const PADI = preload("res://scripts/padicons.gd")
 const UPD = preload("res://scripts/updater.gd")
 const PN = preload("res://scripts/patchnotes.gd")
 const UIS = preload("res://scripts/ui_style.gd")
+const INCU = preload("res://scripts/incubator_ui.gd")
+const DIF = preload("res://scripts/difficulty.gd")
+const WR = preload("res://scripts/wardrobe.gd")
+const WRUI = preload("res://scripts/wardrobe_ui.gd")
+const EG = preload("res://scripts/eggs.gd")
+const EGA = preload("res://scripts/egg_art.gd")
+const HATCH = preload("res://scripts/hatch_scene.gd")
 const HFX = preload("res://scripts/hover_fx.gd")
 const GMX = preload("res://scripts/gmax.gd")
+const INP = preload("res://scripts/input_mode.gd")
 
 var C_PANEL := Color("#2b2547")
 var C_PANEL_D := Color("#1c1833")
@@ -93,6 +101,13 @@ var news_rail: VBoxContainer
 var news_sel := 0
 var support_top: Button
 var support_focus: Button
+var inc_ui = null   # the Incubator screen (incubator_ui.gd)
+var egg_btn: Button = null   # main menu: opens the Incubator
+var wr_ui = null   # the Wardrobe screen (wardrobe_ui.gd)
+var wr_btn: Button = null   # main menu: opens the Wardrobe
+var pull_looks: Array = []   # Wardrobe items from a Max pull's batches
+var hatch_ui = null   # the hatch scene (hatch_scene.gd), on top of everything while it plays
+var hatch_res: Dictionary = {}
 var news_box: VBoxContainer
 var news_scroll: ScrollContainer
 
@@ -133,6 +148,7 @@ var up_head: VBoxContainer   # left column: portrait + Pokemon selector
 var up_dex := 25
 var ban_open := false
 var tm_open := false
+var tm_erase_ask := false   # the TM panel is asking "Erase ...?"
 var main_prev: Preview
 var main_card: PanelContainer
 var main_tiles: Array = []       # the six section tiles (heights follow the screen, see _main_fit)
@@ -1137,6 +1153,9 @@ func _ready() -> void:
 	_build_lexicon()
 	_build_settings()
 	_build_news()
+	_build_eggs()
+	_build_regions()
+	_build_wardrobe()
 	_build_support()
 	_build_layout()
 	# El gui elige el control por orden en el arbol (no por z_index): el panel de resultados/tarjetas
@@ -1419,6 +1438,11 @@ func _screen(name: String) -> Control:
 
 
 func _leave() -> void:
+	if cur == "eggs" and inc_ui != null and inc_ui.cancel_pick():
+		return
+	if cur == "regions":
+		_regions_back()
+		return
 	if cur == "chal":
 		_show("modes")
 		return
@@ -1612,6 +1636,24 @@ func _first_scroll(n: Node) -> ScrollContainer:
 	return null
 
 
+# You switched between keyboard / mouse, a controller and touch: hints that are built once (not drawn every frame)
+# are rebuilt for the new input. Focus stays where it was.
+func _input_mode_changed() -> void:
+	if not is_visible_in_tree():
+		return
+	if cur == "dex" and dex_detail != null and dex_sel > 0:
+		var fo: Control = get_viewport().gui_get_focus_owner()
+		var fname: String = String(fo.name) if fo != null and dex_detail.is_ancestor_of(fo) else ""
+		_dex_detail()
+		if fname != "":
+			var nb: Node = dex_detail.find_child(fname, true, false)
+			if nb is Control:
+				_gf(nb as Control)
+	if cur == "modes":
+		_modes_hint()
+	queue_redraw()
+
+
 func _process(delta: float) -> void:
 	PAD.stick_tick()
 	_stick_scroll(delta)
@@ -1784,6 +1826,8 @@ func _drag_scroll(event: InputEvent) -> bool:
 
 
 func _input(event: InputEvent) -> void:
+	if INP.feed(event):
+		_input_mode_changed.call_deferred()
 	if not is_visible_in_tree():
 		return
 	# v5.2.1: escribiendo en un campo de texto (nombre de entrenador, buscadores) el teclado es del campo:
@@ -1829,7 +1873,7 @@ func _input(event: InputEvent) -> void:
 			return
 	# En la lista de modos el stick solo mueve arriba/abajo: un empuje lateral sin querer ya no mete el cursor en los modificadores.
 	var sf: Control = get_viewport().gui_get_focus_owner()
-	PAD.vertical_only = cur == "modes" and sf != null and mode_tiles.values().has(sf)
+	PAD.vertical_only = false
 	if listening == "" and PAD.stick_event(event):
 		get_viewport().set_input_as_handled()   # el stick izquierdo navega como cruceta (un salto por empujon)
 		return
@@ -1858,6 +1902,16 @@ func _input(event: InputEvent) -> void:
 			_refresh_listen()
 			get_viewport().set_input_as_handled()
 			return
+	# Mode select (steps 45-46): tabs, cards and the panel are rows; LB / RB (Q / E) switch the group
+	if cur == "modes" and not (gacha_result != null and gacha_result.visible) and not _popup_open() and _modes_nav(event):
+		get_viewport().set_input_as_handled()
+		return
+	if cur == "regions" and not (gacha_result != null and gacha_result.visible) and _regions_nav(event):
+		get_viewport().set_input_as_handled()
+		return
+	if cur == "wardrobe" and wr_ui != null and not (gacha_result != null and gacha_result.visible) and wr_ui.nav(event):
+		get_viewport().set_input_as_handled()
+		return
 	# L1/R1 (o los botones prev/next): cambian de pestana en el Lexico y en Misiones y logros
 	if event is InputEventJoypadButton and event.pressed and (cur == "lexicon" or cur == "goals") and not (gacha_result != null and gacha_result.visible):
 		if event.button_index == PAD.btn("prev") or event.button_index == PAD.btn("next"):
@@ -1901,42 +1955,6 @@ func _input(event: InputEvent) -> void:
 			if nb == null or not screens[cur].is_ancestor_of(nb):
 				tab_sel.grab_focus()
 				get_viewport().set_input_as_handled()
-				return
-	if cur == "modes" and event.is_action_pressed("ui_left"):
-		var lf3: Control = get_viewport().gui_get_focus_owner()
-		if lf3 is CheckButton and lf3.get_parent() is GridContainer and mp_opts.is_ancestor_of(lf3):
-			var gi: int = lf3.get_parent().get_children().find(lf3)
-			if gi % (lf3.get_parent() as GridContainer).columns == 0 and mode_tiles.has(modes_sel):
-				(mode_tiles[modes_sel] as Control).grab_focus()
-				get_viewport().set_input_as_handled()
-				return
-	if cur == "modes" and (event.is_action_pressed("ui_down") or event.is_action_pressed("ui_up")):
-		var mf: Control = get_viewport().gui_get_focus_owner()
-		var mdn: bool = event.is_action_pressed("ui_down")
-		if mf != null and mode_tiles.values().has(mf):
-			# la lista de modos nunca salta al panel derecho: solo se entra con Derecha
-			var lastb: Control = mode_tiles[String(MODE_LIST[MODE_LIST.size() - 1][0])]
-			var firstb: Control = mode_tiles[String(MODE_LIST[0][0])]
-			if (mdn and mf == lastb) or (not mdn and mf == firstb):
-				(firstb if mdn else lastb).grab_focus()   # da la vuelta: arriba del primero va al último y viceversa
-				call_deferred("_follow_focus")
-				get_viewport().set_input_as_handled()
-				return
-		elif mf is CheckButton and mf.get_parent() is GridContainer and mp_opts.is_ancestor_of(mf):
-			# Modificadores: al pasar del primero hacia arriba (o del ultimo hacia abajo) da la vuelta
-			var cbs: Array = mf.get_parent().get_children()
-			var ix: int = cbs.find(mf)
-			var cols: int = (mf.get_parent() as GridContainer).columns
-			var tgt: Control = null
-			if not mdn and ix < cols:
-				var want: int = ix + int((cbs.size() - 1 - ix) / cols) * cols
-				tgt = cbs[want]
-			elif mdn and ix + cols >= cbs.size():
-				tgt = cbs[ix % cols]
-			if tgt != null:
-				tgt.grab_focus()
-				get_viewport().set_input_as_handled()
-				call_deferred("_follow_focus")
 				return
 	if cur == "lexicon" and _lex_nav(event):
 		get_viewport().set_input_as_handled()
@@ -2112,12 +2130,6 @@ func _column_nav(event: InputEvent) -> bool:
 		best.grab_focus()
 		Aud.sfx("hover")
 		return true
-	# Mode list: the right-hand panel is its own column. Up past its first control goes back to the selected mode, and Down at the
-	# bottom stays put instead of jumping into the list's Challenges section.
-	if cur == "modes" and dir.y != 0 and not mode_tiles.values().has(f) and mode_tiles.has(modes_sel):
-		if dir.y < 0:
-			(mode_tiles[modes_sel] as Control).grab_focus()
-		return true
 	return false
 
 
@@ -2228,8 +2240,6 @@ func _grid_nav(event: InputEvent) -> bool:
 	# v5.2.1: ciclando modos con arriba/abajo solo cuentan los modos. Antes los botones del panel derecho
 	# (elegir companero, cambiar tipo, Jugar...) formaban filas intermedias y el cursor saltaba a los modificadores.
 	var gf: Control = get_viewport().gui_get_focus_owner()
-	if cur == "modes" and gf != null and mode_tiles.values().has(gf) and (event.is_action_pressed("ui_down", true) or event.is_action_pressed("ui_up", true)):
-		return NAVG.move(get_viewport(), event, mode_tiles.values())
 	return NAVG.move(get_viewport(), event, _grid_items())
 
 
@@ -2359,6 +2369,63 @@ func _build_main() -> void:
 	tbtn.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	main_news_ov.add_child(tbtn)
 	main_btns["card"] = tbtn
+	# the Incubator (eggs): top-right corner of the stage card, with an egg drawn on it
+	egg_btn = _btn(L.t("Incubator"), func(): _show("eggs"), Vector2(150, 40))
+	egg_btn.add_theme_font_size_override("font_size", 16)
+	egg_btn.add_theme_constant_override("h_separation", 8)
+	egg_btn.alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_lift_btn(egg_btn, UIS.PANEL, UIS.EDGE)
+	egg_btn.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	egg_btn.offset_left = -190.0
+	egg_btn.offset_top = 14.0
+	egg_btn.offset_right = -14.0
+	egg_btn.offset_bottom = 56.0
+	egg_btn.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	var eface := INCU.EggFace.new()
+	eface.look = "green"
+	eface.position = Vector2(8, 4)
+	eface.size = Vector2(28, 34)
+	egg_btn.add_child(eface)
+	egg_btn.set_meta("face", eface)
+	var badge := Label.new()   # how many eggs are ready to hatch (step 28)
+	badge.name = "EggBadge"
+	badge.add_theme_font_size_override("font_size", 16)
+	badge.add_theme_color_override("font_color", UIS.INK)
+	var bsb := UIS.box(UIS.GOLD, UIS.INK, 2, false)
+	bsb.set_corner_radius_all(12)
+	bsb.content_margin_left = 7
+	bsb.content_margin_right = 7
+	badge.add_theme_stylebox_override("normal", bsb)
+	badge.position = Vector2(-10, -10)
+	badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	badge.visible = false
+	egg_btn.add_child(badge)
+	main_news_ov.add_child(egg_btn)
+	main_btns["eggs"] = egg_btn
+	# the Wardrobe: top-left corner of the stage card; a dot when something new is unlocked
+	wr_btn = _btn(L.t("Wardrobe"), func(): _show("wardrobe"), Vector2(150, 40))
+	wr_btn.add_theme_font_size_override("font_size", 16)
+	_lift_btn(wr_btn, UIS.PANEL, UIS.EDGE)
+	wr_btn.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	wr_btn.offset_left = 14.0
+	wr_btn.offset_top = 14.0
+	wr_btn.offset_right = 190.0
+	wr_btn.offset_bottom = 56.0
+	var wdot := Label.new()
+	wdot.name = "NewDot"
+	wdot.text = "!"
+	wdot.add_theme_font_size_override("font_size", 16)
+	wdot.add_theme_color_override("font_color", UIS.INK)
+	var wsb := UIS.box(UIS.GOLD, UIS.INK, 2, false)
+	wsb.content_margin_left = 7
+	wsb.content_margin_right = 7
+	wdot.add_theme_stylebox_override("normal", wsb)
+	wdot.position = Vector2(160, -10)
+	wdot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	wdot.visible = false
+	wr_btn.add_child(wdot)
+	main_news_ov.add_child(wr_btn)
+	main_btns["wardrobe"] = wr_btn
 	main_info = _label("", 24)
 	main_info.autowrap_mode = TextServer.AUTOWRAP_OFF
 	left.add_child(main_info)
@@ -2609,7 +2676,7 @@ func _menu_pick(key: String) -> void:
 	if key == "goals" and goals_tab == "p":
 		goals_tab = "m"
 	if key == "play":
-		modes_sel = String(MODE_LIST[0][0])   # v5.2.1: al darle a Jugar siempre se empieza arriba, en el primer modo (Partida normal)
+		modes_sel = String(SV.d.get("mode_sel", "normal"))   # the mode you looked at last (step 47); Normal run the first time
 		_show("modes")
 	else:
 		_show(key)
@@ -2629,7 +2696,21 @@ var mp_stat: Label
 var mp_opts: VBoxContainer
 var mp_play: Button
 var modes_sel := "normal"
-var mode_tiles: Dictionary = {}
+var mode_tiles: Dictionary = {}   # the current group's mode cards
+var modes_group := "Classic"
+var mode_group_last: Dictionary = {}   # the last mode picked in each group
+var mode_tabs: Dictionary = {}
+var mode_tab_lb: Label
+var mode_tab_rb: Label
+var mode_cards_row: HBoxContainer
+var mp_panel: PanelContainer
+var modes_hint: Label
+const MODE_GROUPS := ["Classic", "Variants", "Challenges", "Settings"]
+# one-line pitch on each mode card
+const MODE_TAG := {"normal": "Survive, level up, beat Arceus at 30", "daily": "A new format every day", "rush": "Bosses back to back",
+	"tower": "60 floors, a relic every 5", "rifts": "8 minutes of rifts", "type": "One type only, +50% coins",
+	"team": "Up to 3 Pokémon, swap mid-run", "coop": "A partner fights beside you", "party": "Any Pokémon, and you can't lose",
+	"chal_p": "100 ten-minute challenges", "chal_d": "3 new every day", "chal_w": "5 new every week", "mods": "Change the rules, earn more coins"}
 var dex_pick_party := false
 var dex_pick_team := false
 var dex_pick_coop := false
@@ -2667,6 +2748,22 @@ const MODE_LIST := [
 
 
 # Nombre (traducido) de un modo de juego por su id; si no existe, Partida normal.
+# Run summary: "New record! Classic · Hard: 12:34 (best was 10:02)" for the run's own mode and difficulty.
+func _record_line(r: Dictionary) -> String:
+	var mode: String = String(r.get("mode", ""))
+	if mode == "":
+		return L.t("New time record!")
+	var what: String = _mode_name(mode)
+	if mode == "type" and String(r.get("sub", "")) != "":
+		what = L.t("Survival: %s") % L.t(String(MD.TYPE_NAME.get(String(r["sub"]), String(r["sub"]))))
+	what += " · " + L.t(String(DIF.NAME[DIF.valid(String(r.get("diff", "normal")))]))
+	if bool(r.get("hyper", false)):
+		what += " · " + L.t("Hyper")
+	var t: int = int(r.get("time", 0))
+	var p: int = int(r.get("rec_prev", 0))
+	return "%s %s: %d:%02d %s" % [L.t("New record!"), what, t / 60, t % 60, L.t("(best was %s)") % ("%d:%02d" % [p / 60, p % 60])]
+
+
 func _mode_name(id: String) -> String:
 	for m in MODE_LIST:
 		if String(m[0]) == id:
@@ -2701,6 +2798,7 @@ func _resume_run() -> void:
 		return
 	SV.run_mode = String(snap["mode"])
 	SV.run_hyper = bool(snap["hyper"])
+	SV.run_diff = String(snap.get("diff", "normal"))   # runs saved before difficulties are Normal
 	SV.run_region = int(snap.get("region", 0))
 	SV.run_dex = int(snap["dex"])
 	SV.run_mods = Array(snap["mods"]).duplicate()
@@ -2869,6 +2967,7 @@ func _start_mode(mode: String, region_ok: bool = false) -> void:
 		SV.d["last_mode"] = mode
 	SV.run_mode = mode
 	SV.run_hyper = mode == "normal" and bool(SV.d.get("hyper", false))   # Hyper solo en la partida normal
+	SV.run_diff = DIF.chosen() if mode == "normal" else "normal"   # Hard / Nightmare: Normal runs only
 	SV.run_region = int(SV.d.get("region", 0)) if mode == "normal" else 0   # region map (Normal run only)
 	SV.run_dex = int(SV.d["selected"])
 	SV.run_type = String(SV.d.get("mode_type", "fire"))
@@ -2935,6 +3034,79 @@ func _iv_train_ui(dx: int) -> void:
 
 
 # Mint (Pokémon page): pick any nature for IVS.MINT_COST coins.
+# Tera type picker: the 18 types, the current one marked; choosing is free (docs/tera.md).
+func _tera_ui(dx: int) -> void:
+	_clear(gacha_result)
+	var c := CenterContainer.new()
+	c.set_anchors_preset(Control.PRESET_FULL_RECT)
+	gacha_result.add_child(c)
+	var pc := PanelContainer.new()
+	pc.add_theme_stylebox_override("panel", UIS.frame(UIS.PANEL, UIS.EDGE))
+	c.add_child(pc)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 10)
+	pc.add_child(v)
+	v.add_child(_label(L.t("Tera type of %s") % _name_of(dx), 28, C_GOLD))
+	var hint := _label(L.t("When it Terastallizes in a run, it becomes this type: moves of this type hit harder, and it takes hits as this type. Changing it is free."), 17, UIS.TEXT)
+	hint.custom_minimum_size = Vector2(620, 0)
+	v.add_child(hint)
+	var grid := GridContainer.new()
+	grid.columns = 6
+	grid.add_theme_constant_override("h_separation", 8)
+	grid.add_theme_constant_override("v_separation", 8)
+	v.add_child(grid)
+	var cur_t: String = SV.tera_type(dx)
+	var focus_b: Button = null
+	for t in SV.TERA_TYPES:
+		var tt: String = String(t)
+		var col := Color.html(String(MD.TYPE_COLOR.get(tt, "#b0a99f")))
+		var b := _btn(L.t(String(MD.TYPE_NAME[tt])), func():
+			if SV.set_tera_type(dx, tt):
+				SV.save()
+				Aud.sfx("confirm")
+			gacha_result.visible = false
+			_iv_refresh()
+			var tb2: Node = dex_detail.find_child("TeraBtn", true, false) if cur == "dex" else null
+			if tb2 is Control:
+				_gf.call_deferred(tb2 as Control), Vector2(118, 52))
+		b.name = "Tera_" + tt
+		b.icon = IC.btn_tex("type:" + tt, 32)
+		b.add_theme_font_size_override("font_size", 15)
+		var on: bool = tt == cur_t
+		for stn in ["normal", "hover", "pressed"]:
+			var sb := _sb(col.darkened(0.35 if stn == "normal" else 0.15), C_GOLD if on else col.lightened(0.35), 4 if on else 2, 10)
+			b.add_theme_stylebox_override(stn, sb)
+		b.add_theme_stylebox_override("focus", _sb_focus(col.darkened(0.1)))
+		b.add_theme_color_override("font_color", Color.WHITE)
+		if on:
+			focus_b = b
+		grid.add_child(b)
+	var close := _btn_close("Close", func():
+		gacha_result.visible = false
+		var tb3: Node = dex_detail.find_child("TeraBtn", true, false) if cur == "dex" else null
+		if tb3 is Control:
+			_gf(tb3 as Control), Vector2(220, 50))
+	v.add_child(close)
+	# a controller stays inside the picker: arrows move around the grid (wrapping), down from the last row is Close
+	var bs: Array = grid.get_children()
+	var nc: int = grid.columns
+	for i in range(bs.size()):
+		var bb: Button = bs[i]
+		var row: int = i / nc
+		var col: int = i % nc
+		var rows: int = ceili(float(bs.size()) / float(nc))
+		bb.focus_neighbor_left = bb.get_path_to(bs[row * nc + posmod(col - 1, nc)])
+		bb.focus_neighbor_right = bb.get_path_to(bs[row * nc + posmod(col + 1, nc)])
+		bb.focus_neighbor_top = bb.get_path_to(bs[(row - 1) * nc + col]) if row > 0 else bb.get_path_to(close)
+		bb.focus_neighbor_bottom = bb.get_path_to(bs[(row + 1) * nc + col]) if row < rows - 1 else bb.get_path_to(close)
+	close.focus_neighbor_top = close.get_path_to(bs[bs.size() - nc])
+	close.focus_neighbor_bottom = close.get_path_to(bs[0])
+	close.focus_neighbor_left = close.get_path_to(close)
+	close.focus_neighbor_right = close.get_path_to(close)
+	gacha_result.visible = true
+	_gf(focus_b if focus_b != null else close)
+
+
 func _mint_ui(dx: int) -> void:
 	_clear(gacha_result)
 	var c := CenterContainer.new()
@@ -2989,86 +3161,347 @@ const REGION_BIOMES := {1: ["Eternal Meadow", "Crystal Cave"], 2: ["Hive Forest"
 
 
 func _region_picker() -> void:
-	_clear(gacha_result)
-	var c := CenterContainer.new()
-	c.set_anchors_preset(Control.PRESET_FULL_RECT)
-	gacha_result.add_child(c)
-	var pc := PanelContainer.new()
-	pc.add_theme_stylebox_override("panel", UIS.frame(UIS.PANEL, UIS.EDGE))
-	c.add_child(pc)
+	_show("regions")   # a full screen since steps 47c-47d (it used to be a small pop-up)
+
+
+# ---------------------------------------------------------------
+# Region select (steps 47b-47d): a full screen of 10 region cards, a strip with the selected region and Start run.
+# ---------------------------------------------------------------
+var reg_grid: GridContainer
+var reg_cards: Array = []
+var reg_sel := 0
+var reg_name: Label
+var reg_line: Label
+var reg_chips: HBoxContainer
+var reg_start: Button
+var reg_back: Button
+var reg_hint: Label
+var reg_card_h := 200.0   # the card height _regions_fit chose (the cards may not have their new size yet)
+
+
+func _build_regions() -> void:
+	var s: Control = _screen("regions")
+	s.resized.connect(_regions_fit)
 	var v := VBoxContainer.new()
-	v.add_theme_constant_override("separation", 10)
-	pc.add_child(v)
-	v.add_child(_label("Choose a region", 30, C_GOLD))
-	var grid := GridContainer.new()
-	grid.columns = 5
-	grid.add_theme_constant_override("h_separation", 10)
-	grid.add_theme_constant_override("v_separation", 10)
-	v.add_child(grid)
-	var cur: int = int(SV.d.get("region", 0))
-	var focus_b: Button = null
+	v.add_theme_constant_override("separation", 12)
+	s.add_child(v)
+	var head := HBoxContainer.new()
+	head.add_theme_constant_override("separation", 10)
+	v.add_child(head)
+	var tl := _lnw("Choose a region", 34, C_GOLD)
+	tl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	head.add_child(tl)
+	reg_chips = HBoxContainer.new()
+	reg_chips.add_theme_constant_override("separation", 8)
+	head.add_child(reg_chips)
+	reg_grid = GridContainer.new()
+	reg_grid.columns = 5
+	reg_grid.add_theme_constant_override("h_separation", 12)
+	reg_grid.add_theme_constant_override("v_separation", 12)
+	reg_grid.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	v.add_child(reg_grid)
+	var strip := PanelContainer.new()
+	var ssb := _sb(Color(0.110, 0.094, 0.200, 0.94), UIS.EDGE, 3, 10)
+	ssb.set_content_margin_all(12)
+	strip.add_theme_stylebox_override("panel", ssb)
+	v.add_child(strip)
+	var sh := HBoxContainer.new()
+	sh.add_theme_constant_override("separation", 14)
+	strip.add_child(sh)
+	var info := VBoxContainer.new()
+	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	info.add_theme_constant_override("separation", 2)
+	sh.add_child(info)
+	reg_name = _lnw("", 26, C_GOLD)
+	reg_name.clip_text = true
+	info.add_child(reg_name)
+	reg_line = _label("", 16, Color("#d9cdb5"))
+	info.add_child(reg_line)
+	reg_back = _btn(L.t("Back"), func(): _regions_back(), Vector2(150, 58))
+	reg_back.name = "RegBack"
+	reg_back.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_lift_btn(reg_back, UIS.PANEL, UIS.EDGE)
+	sh.add_child(reg_back)
+	reg_start = _btn(L.t("Start run"), func(): _regions_start(reg_sel), Vector2(300, 62))
+	reg_start.name = "RegStart"
+	reg_start.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	reg_start.add_theme_font_size_override("font_size", 23)
+	reg_start.clip_text = true
+	_gold_btn(reg_start, true)
+	sh.add_child(reg_start)
+	reg_hint = _lnw("", 14, UIS.MUTED)
+	reg_hint.clip_text = true
+	v.add_child(reg_hint)
+
+
+func _regions_fit() -> void:
+	if reg_grid == null or not screens.has("regions"):
+		return
+	# from the screen height (not the screen box, which grows with its content): two rows fill what the top bar, the
+	# header, the strip and the hint line leave
+	var ins: Vector4 = DSP.insets(get_tree())
+	var h: float = get_viewport_rect().size.y - ins.y - ins.w
+	var ch: float = clampf((h - 300.0) / 2.0, 150.0, 330.0)
+	for c in reg_cards:
+		(c as Control).custom_minimum_size.y = ch
+		var pic: Control = (c as Control).get_node("V/Pic")
+		pic.custom_minimum_size.y = roundf(ch * 0.5)   # _fit_region_cards picks the final size
+	reg_card_h = ch
+	_fit_region_cards.call_deferred()
+
+
+# The map picture gets most of the card; the text stays modest (about the size of the strip's text). The biggest picture
+# whose card still fits the text wins, then the text grows a little if there is room (one scale for all ten cards).
+func _fit_region_cards() -> void:
+	if reg_cards.is_empty() or (reg_cards[0] as Control).size.x < 10.0:
+		return
+	for ratio in [0.62, 0.58, 0.54, 0.5, 0.46, 0.42]:
+		var ph: float = roundf(reg_card_h * float(ratio))
+		var k := 1.1
+		while k >= 0.9:
+			for c in reg_cards:
+				_region_card_fonts(c, k)
+				((c as Control).get_node("V/Pic") as Control).custom_minimum_size.y = ph
+			var fits := true
+			for c in reg_cards:
+				var body: Control = (c as Control).get_node("V/M/Body")
+				var nm: Label = body.get_node("Name")
+				var nw: float = nm.get_theme_font("font").get_string_size(nm.text, HORIZONTAL_ALIGNMENT_LEFT, -1, nm.get_theme_font_size("font_size")).x
+				if body.get_combined_minimum_size().y + 6.0 > reg_card_h - ph - 10.0 or nw > (c as Control).size.x - 22.0:
+					fits = false
+					break
+			if fits:
+				return
+			k -= 0.05
+
+
+func _region_card_fonts(c: Control, k: float) -> void:
+	var body: Control = c.get_node("V/M/Body")
+	for ch in body.get_children():
+		if ch is Label:
+			var base: float = 21.0 if ch.name == "Name" else 16.0
+			var fs: int = roundi(base * k)
+			if k > 0.85:
+				fs = maxi(fs, 16)   # 15 px and under would switch to the thin 12 px font
+			(ch as Label).add_theme_font_size_override("font_size", PXF.style_small(ch, fs))
+		elif ch is ProgressBar:
+			(ch as Control).custom_minimum_size.y = roundf(8.0 * k)
+
+
+func _refresh_regions() -> void:
+	_clear(reg_grid)
+	reg_cards.clear()
+	reg_sel = int(SV.d.get("region", 0))
+	if not SV.region_unlocked(reg_sel):
+		reg_sel = 0
 	for k in range(0, SV.REGIONS.size() + 1):
-		var kk: int = k
-		var open: bool = SV.region_unlocked(k)
-		var b := _btn("", func():
-			SV.d["region"] = kk
-			SV.save()
-			gacha_result.visible = false
-			_start_mode("normal", true), Vector2(220, 196))
-		b.disabled = not open
-		_gold_btn(b, k == cur and open)
-		var bv := VBoxContainer.new()
-		bv.set_anchors_preset(Control.PRESET_FULL_RECT)
-		bv.offset_left = 6
-		bv.offset_right = -6
-		bv.offset_top = 6
-		bv.offset_bottom = -6
-		bv.add_theme_constant_override("separation", 2)
-		bv.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		b.add_child(bv)
-		# the snapshot: a real in-game screenshot of the region (tools/capture_regions.gd)
-		var shot := TextureRect.new()
-		shot.custom_minimum_size = Vector2(0, 112)
-		shot.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		shot.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
-		shot.clip_contents = true
-		shot.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		var path := "res://assets/regions/region_%d.jpg" % k
-		if ResourceLoader.exists(path):
-			shot.texture = load(path)
-		if not open:
-			shot.modulate = Color(0.25, 0.25, 0.3)
-		bv.add_child(shot)
-		var name_s: String = L.t("Every region") if k == 0 else L.t(SV.REGIONS[k - 1])
-		var nl := _label(name_s, 19, UIS.TITLE if open else UIS.MUTED)
-		nl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		nl.autowrap_mode = TextServer.AUTOWRAP_OFF
-		nl.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		bv.add_child(nl)
-		var sub := ""
-		if k == 0:
-			sub = L.t("Classic: every region's Pokémon")
-		elif not open:
-			sub = L.t("Locked: defeat Arceus on %s") % L.t(SV.REGIONS[k - 2])
+		reg_cards.append(_region_card(k))
+	# the run's settings, so you see the difficulty before starting
+	_clear(reg_chips)
+	var d: String = DIF.chosen()
+	reg_chips.add_child(_hint_chip(L.t("Normal run").to_upper()))
+	var dc := _hint_chip(L.t(String(DIF.NAME[d])).to_upper() + ((" · " + L.t("Hyper").to_upper()) if bool(SV.d.get("hyper", false)) else ""))
+	dc.add_theme_color_override("font_color", DIF.COLOR[d])
+	reg_chips.add_child(dc)
+	reg_hint.text = L.t("Arrows: region · A: start · B: back to modes") if INP.is_pad() else L.t("Arrows: region · Enter: start · Esc: back to modes")
+	_regions_fit()
+	_regions_select(reg_sel)
+	focus_first = reg_cards[reg_sel]
+
+
+func _region_card(k: int) -> Button:
+	var open: bool = SV.region_unlocked(k)
+	var b := Button.new()
+	b.name = "Region_%d" % k
+	b.text = ""
+	b.tooltip_text = L.t("Every region") if k == 0 else L.t(SV.REGIONS[k - 1])
+	b.focus_mode = Control.FOCUS_ALL   # locked regions can be focused too, to read why they are locked
+	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	b.clip_contents = true
+	var v := VBoxContainer.new()
+	v.name = "V"
+	v.set_anchors_preset(Control.PRESET_FULL_RECT)
+	v.add_theme_constant_override("separation", 3)
+	v.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	b.add_child(v)
+	var pic := TextureRect.new()
+	pic.name = "Pic"
+	pic.custom_minimum_size = Vector2(0, 108)
+	pic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	pic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	pic.clip_contents = true
+	pic.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var path := "res://assets/regions/region_%d.jpg" % k
+	if ResourceLoader.exists(path):
+		pic.texture = load(path)
+	if not open:
+		pic.modulate = Color(0.32, 0.3, 0.38)
+		var lk := Control.new()   # a padlock drawn in code over the darkened picture
+		lk.set_anchors_preset(Control.PRESET_FULL_RECT)
+		lk.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		lk.draw.connect(func():
+			var c: Vector2 = lk.size * 0.5
+			lk.draw_arc(c + Vector2(0, -8), 11.0, PI, TAU, 16, UIS.MUTED, 5.0)
+			lk.draw_rect(Rect2(c + Vector2(-17, -8), Vector2(34, 26)), UIS.MUTED)
+			lk.draw_rect(Rect2(c + Vector2(-17, -8), Vector2(34, 26)), UIS.INK, false, 2.0)
+			lk.draw_circle(c + Vector2(0, 3), 4.0, UIS.INK))
+		pic.add_child(lk)
+	v.add_child(pic)
+	var body := VBoxContainer.new()
+	body.add_theme_constant_override("separation", 2)
+	body.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var mg := MarginContainer.new()
+	for side in ["margin_left", "margin_right"]:
+		mg.add_theme_constant_override(side, 10)
+	mg.add_theme_constant_override("margin_bottom", 6)
+	mg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	mg.add_child(body)
+	v.add_child(mg)
+	body.name = "Body"
+	mg.name = "M"
+	var nm := _lnw(b.tooltip_text, 21, UIS.TITLE if open else UIS.MUTED)
+	nm.name = "Name"
+	nm.clip_text = true
+	nm.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	body.add_child(nm)
+	var add_small := func(t: String, col: Color, sz: int = 14) -> Label:
+		var l := _label(t, sz, col)
+		l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		l.set_meta("base_fs", sz)
+		body.add_child(l)
+		return l
+	if k == 0:
+		add_small.call(L.t("Classic: every region's Pokémon"), UIS.MUTED)
+	elif not open:
+		add_small.call(L.t("Locked: defeat Arceus on %s") % L.t(SV.REGIONS[k - 2]), Color("#ff9c8a"))
+	else:
+		var rc: Vector2i = _region_counts(k)
+		var bar := ProgressBar.new()
+		bar.min_value = 0.0
+		bar.max_value = float(maxi(1, rc.y))
+		bar.value = float(rc.x)
+		bar.show_percentage = false
+		bar.custom_minimum_size = Vector2(0, 8)
+		bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		bar.add_theme_stylebox_override("background", UIS.box(UIS.INK, UIS.EDGE, 1, false))
+		bar.add_theme_stylebox_override("fill", UIS.box(UIS.GREEN, UIS.GREEN, 0, false))
+		body.add_child(bar)
+		var best: int = SV.region_best(k)
+		add_small.call(L.t("Pokédex %d/%d") % [rc.x, rc.y], UIS.MUTED, 16)
+		if best > 0:
+			add_small.call(L.t("Best %s") % ("%d:%02d" % [best / 60, best % 60]), UIS.GOLD, 16)
+		if SV.region_cleared(k):   # a badge on the picture, so the card body stays three lines
+			var ab := _lnw(L.t("Arceus defeated"), 16, UIS.GREEN)
+			var absb := UIS.box(Color(UIS.INK, 0.88), UIS.GREEN, 2, false)
+			absb.content_margin_left = 6
+			absb.content_margin_right = 6
+			ab.add_theme_stylebox_override("normal", absb)
+			ab.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+			ab.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+			ab.offset_right = -6
+			ab.offset_top = 6
+			ab.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			pic.add_child(ab)
+	var kk: int = k
+	b.pressed.connect(func(): _regions_start(kk))
+	b.focus_entered.connect(func():
+		Aud.sfx("hover")
+		_regions_select(kk))
+	b.mouse_entered.connect(func(): _regions_select(kk))
+	reg_grid.add_child(b)
+	return b
+
+
+func _regions_select(k: int) -> void:
+	k = clampi(k, 0, reg_cards.size() - 1)
+	if SV.region_unlocked(k):
+		reg_sel = k
+	for i in range(reg_cards.size()):
+		var on: bool = i == reg_sel
+		var c: Button = reg_cards[i]
+		_lift_btn(c, Color("#3b3466") if on else UIS.PANEL, UIS.GOLD if on else UIS.EDGE)
+		if on:
+			c.add_theme_stylebox_override("normal", _shad(_sb(Color("#3b3466"), UIS.GOLD, 3), 6, Vector2(0, 5), 0.6))
+	var show: int = k   # the strip describes the card under the cursor, even a locked one
+	if show == 0:
+		reg_name.text = L.t("Every region")
+		reg_line.text = L.t("Classic: every region's Pokémon")
+	elif not SV.region_unlocked(show):
+		reg_name.text = L.t(SV.REGIONS[show - 1])
+		reg_line.text = L.t("Locked: defeat Arceus on %s") % L.t(SV.REGIONS[show - 2])
+	else:
+		var rc: Vector2i = _region_counts(show)
+		var best: int = SV.region_best(show)
+		reg_name.text = L.t(SV.REGIONS[show - 1])
+		reg_line.text = "%s → %s · %s" % [L.t(String(REGION_BIOMES[show][0])), L.t(String(REGION_BIOMES[show][1])), L.t("Pokédex %d/%d") % [rc.x, rc.y]]
+		if best > 0:
+			reg_line.text += " · " + L.t("Best %s") % ("%d:%02d" % [best / 60, best % 60])
+		if SV.region_cleared(show):
+			reg_line.text += " · " + L.t("Arceus defeated")
+	# Start run always starts the selected (open) region, named on the button; a locked card under the cursor only shows
+	# its reason in the strip
+	var sel_name: String = L.t("Every region") if reg_sel == 0 else L.t(SV.REGIONS[reg_sel - 1])
+	reg_start.text = L.t("Start: %s") % sel_name
+
+
+func _regions_start(k: int) -> void:
+	if not SV.region_unlocked(k):
+		Aud.sfx("error")
+		toast(L.t("Locked: defeat Arceus on %s") % L.t(SV.REGIONS[k - 2]))
+		return
+	SV.d["region"] = k
+	SV.save()
+	_start_mode("normal", true)
+
+
+func _regions_back() -> void:
+	modes_sel = "normal"
+	_show("modes")
+	_gf(mode_tiles.get("normal", null))
+
+
+# Controller / keyboard: the 5 x 2 grid, then the strip (Back, Start run); focus never leaves the screen.
+func _regions_nav(event: InputEvent) -> bool:
+	var side := -1
+	if event.is_action_pressed("ui_left", true):
+		side = SIDE_LEFT
+	elif event.is_action_pressed("ui_right", true):
+		side = SIDE_RIGHT
+	elif event.is_action_pressed("ui_up", true):
+		side = SIDE_TOP
+	elif event.is_action_pressed("ui_down", true):
+		side = SIDE_BOTTOM
+	if side < 0:
+		return false
+	var f: Control = get_viewport().gui_get_focus_owner()
+	var n: int = reg_cards.size()
+	var to: Control = null
+	var i: int = reg_cards.find(f)
+	if i >= 0:
+		var col: int = i % 5
+		var row: int = i / 5
+		if side == SIDE_LEFT:
+			to = reg_cards[i - 1] if col > 0 else f
+		elif side == SIDE_RIGHT:
+			to = reg_cards[i + 1] if col < 4 and i + 1 < n else f
+		elif side == SIDE_TOP:
+			to = reg_cards[i - 5] if row > 0 else f
 		else:
-			sub = "%s → %s" % [L.t(String(REGION_BIOMES[k][0])), L.t(String(REGION_BIOMES[k][1]))]
-			var best: int = SV.region_best(k)
-			if best > 0:
-				sub += "\n" + L.t("Best: %s") % ("%d:%02d" % [best / 60, best % 60])
-				if SV.region_cleared(k):
-					sub += " · " + L.t("Arceus defeated")
-		var sl := _label(sub, 13, UIS.MUTED if open else Color("#ff9c8a"))
-		sl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		sl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		sl.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		bv.add_child(sl)
-		grid.add_child(b)
-		if open and (focus_b == null or k == cur):
-			focus_b = b
-	var close := _btn_close("Cancel", func(): gacha_result.visible = false, Vector2(220, 50))
-	v.add_child(close)
-	gacha_result.visible = true
-	_gf(focus_b if focus_b != null else close)
+			to = reg_cards[i + 5] if i + 5 < n else reg_start
+	elif f == reg_start or f == reg_back:
+		if side == SIDE_TOP:
+			to = reg_cards[clampi(reg_sel, 0, n - 1)]
+		elif side == SIDE_LEFT:
+			to = reg_back
+		elif side == SIDE_RIGHT:
+			to = reg_start
+		else:
+			to = f
+	else:
+		to = reg_cards[clampi(reg_sel, 0, n - 1)]
+	if to != null and to != f:
+		to.grab_focus()
+	return true
 
 
 # Ilustracion animada del modo (sprites + decoracion). No simula la partida.
@@ -3395,102 +3828,267 @@ class ModePrev extends Control:
 
 func _build_modes() -> void:
 	var s: Control = _screen("modes")
-	var pc := PanelContainer.new()
-	s.add_child(pc)
+	s.resized.connect(_modes_fit)
 	var v := VBoxContainer.new()
-	v.add_theme_constant_override("separation", 8)
-	pc.add_child(v)
-	v.add_child(_label("Choose a mode", 34, C_GOLD))
-	var hb := HBoxContainer.new()
-	hb.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	hb.add_theme_constant_override("separation", 14)
-	v.add_child(hb)
-	var sc := ScrollContainer.new()
-	sc.custom_minimum_size = Vector2(400, 0)
-	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	sc.follow_focus = true
-	hb.add_child(sc)
-	var mgap := MarginContainer.new()   # keeps the mode buttons off the scroll bar
-	mgap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	mgap.add_theme_constant_override("margin_right", 12)
-	sc.add_child(mgap)
-	modes_box = VBoxContainer.new()
-	modes_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	modes_box.add_theme_constant_override("separation", 8)
-	mgap.add_child(modes_box)
-	# panel derecho: reglas arriba, vista previa, datos, opciones y Jugar
-	var rp := PanelContainer.new()
-	rp.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	rp.add_theme_stylebox_override("panel", _sb(Color(0.078, 0.063, 0.157, 0.6), Color("#5a5099"), 2, 14))
-	hb.add_child(rp)
-	# Todo el panel derecho se desplaza de arriba abajo (con rueda, dedo o mando) para que nada quede tapado ni fuera de pantalla.
-	var rpv := VBoxContainer.new()   # details scroll; the Play button below never does
-	rpv.add_theme_constant_override("separation", 8)
-	rp.add_child(rpv)
-	var rsc := ScrollContainer.new()
-	rsc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	rsc.follow_focus = true
-	rsc.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	rpv.add_child(rsc)
-	var rv := VBoxContainer.new()
-	rv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	rv.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	rv.add_theme_constant_override("separation", 8)
-	rsc.add_child(rv)
-	mp_title = _label("", 30, C_GOLD)
-	rv.add_child(mp_title)
-	var rbox := PanelContainer.new()
-	rbox.add_theme_stylebox_override("panel", _sb(Color(0, 0, 0, 0.28), Color(1, 1, 1, 0.12), 1, 10))
-	rv.add_child(rbox)
-	var rbv := VBoxContainer.new()
-	rbv.add_theme_constant_override("separation", 3)
-	rbox.add_child(rbv)
-	rbv.add_child(_label("Rules", 17, Color("#b4aed6")))
-	mp_rules = VBoxContainer.new()
-	mp_rules.add_theme_constant_override("separation", 2)
-	rbv.add_child(mp_rules)
+	v.add_theme_constant_override("separation", 12)
+	s.add_child(v)
+	# header: title on the left, the group tabs (LB / RB) on the right
+	var head := HBoxContainer.new()
+	head.add_theme_constant_override("separation", 10)
+	v.add_child(head)
+	var tl := _lnw("Choose a mode", 34, C_GOLD)
+	tl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	head.add_child(tl)
+	mode_tab_lb = _hint_chip("LB")
+	head.add_child(mode_tab_lb)
+	mode_tabs.clear()
+	for g in MODE_GROUPS:
+		var gname: String = String(g)
+		var tb := _btn(L.t(gname), func(): _modes_group_set(gname), Vector2(0, 44))
+		tb.name = "Tab_" + gname
+		tb.add_theme_font_size_override("font_size", 19)
+		head.add_child(tb)
+		mode_tabs[gname] = tb
+	mode_tab_rb = _hint_chip("RB")
+	head.add_child(mode_tab_rb)
+	# the group's modes as big cards in one row
+	mode_cards_row = HBoxContainer.new()
+	mode_cards_row.add_theme_constant_override("separation", 12)
+	v.add_child(mode_cards_row)
+	# below: the preview on the left, the rules / options / Play panel on the right
+	var low := HBoxContainer.new()
+	low.add_theme_constant_override("separation", 16)
+	low.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	v.add_child(low)
 	mp_prev = load("res://scripts/menu.gd").ModePrev.new()
-	mp_prev.custom_minimum_size = Vector2(0, 190)
+	mp_prev.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	mp_prev.size_flags_stretch_ratio = 1.15
 	mp_prev.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	mp_prev.clip_contents = true
-	rv.add_child(mp_prev)
-	mp_stat = _label("", 18, Color("#f2e9d8"))
-	rv.add_child(mp_stat)
-	mp_opts_sc = ScrollContainer.new()
+	var pframe := PanelContainer.new()   # a frame around the preview, like the cards
+	pframe.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	pframe.size_flags_stretch_ratio = 1.15
+	pframe.add_theme_stylebox_override("panel", _sb(Color(0, 0, 0, 0.35), UIS.EDGE, 3, 10))
+	pframe.add_child(mp_prev)
+	low.add_child(pframe)
+	mp_panel = PanelContainer.new()
+	mp_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var psb := _sb(Color(0.110, 0.094, 0.200, 0.94), UIS.EDGE, 3, 10)
+	psb.set_content_margin_all(14)
+	mp_panel.add_theme_stylebox_override("panel", psb)
+	low.add_child(mp_panel)
+	var rpv := VBoxContainer.new()
+	rpv.add_theme_constant_override("separation", 8)
+	mp_panel.add_child(rpv)
+	# everything above Play scrolls together when it doesn't fit (long rules, the modifier grid, the Daily picks);
+	# Play itself is pinned at the bottom, so it is always on screen
+	var rsc := ScrollContainer.new()
+	rsc.name = "ModeScroll"
+	rsc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	rsc.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	rsc.follow_focus = true
+	rpv.add_child(rsc)
+	var inner := VBoxContainer.new()
+	inner.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	inner.add_theme_constant_override("separation", 6)
+	rsc.add_child(inner)
+	mp_title = _lnw("", 28, C_GOLD)
+	mp_title.clip_text = true
+	inner.add_child(mp_title)
+	# the mode's options first (difficulty, team, type...), so they are on screen without scrolling; then its record and rules
+	mp_opts_sc = ScrollContainer.new()   # kept for the old option code; it never scrolls on its own now
 	mp_opts_sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	mp_opts_sc.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
-	rpv.add_child(mp_opts_sc)   # toggles (Hyper, co-op partner, party...) stay pinned above Play: no scrolling to reach them
+	mp_opts_sc.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	inner.add_child(mp_opts_sc)
+	mp_stat = _label("", 16, Color("#d9cdb5"))
+	inner.add_child(mp_stat)
+	mp_rules = VBoxContainer.new()
+	mp_rules.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	mp_rules.add_theme_constant_override("separation", 2)
+	inner.add_child(mp_rules)
 	mp_opts = VBoxContainer.new()
 	mp_opts.add_theme_constant_override("separation", 6)
 	mp_opts.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	mp_opts_sc.add_child(mp_opts)
-	mp_play = _btn("Play", func(): _modes_play(), Vector2(0, 52))
-	mp_play.add_theme_font_size_override("font_size", 26)
+	mp_play = _btn("Play", func(): _modes_play(), Vector2(0, 60))
+	mp_play.name = "ModePlay"
+	mp_play.add_theme_font_size_override("font_size", 28)
+	_gold_btn(mp_play, true)
 	rpv.add_child(mp_play)
+	modes_hint = _lnw("", 14, UIS.MUTED)
+	modes_hint.clip_text = true
+	v.add_child(modes_hint)
 
 
-func _mode_tile(m: Array) -> Button:
+# A small key / button chip (LB, RB) beside the tabs.
+func _hint_chip(t: String) -> Label:
+	var l := _lnw(t, 14, UIS.TITLE)
+	var sb := UIS.box(UIS.INK, UIS.EDGE, 2, false)
+	sb.content_margin_left = 7
+	sb.content_margin_right = 7
+	l.add_theme_stylebox_override("normal", sb)
+	l.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return l
+
+
+# Sizes follow the screen height: cards and text are bigger on 4:3 and tall screens.
+func _modes_fit() -> void:
+	if mode_cards_row == null or not screens.has("modes"):
+		return
+	var ins: Vector4 = DSP.insets(get_tree())
+	var h: float = get_viewport_rect().size.y - ins.y - ins.w
+	var ch: float = clampf(h * 0.25, 140.0, 210.0)   # a quarter of the screen: room for readable card text
+	for c in mode_cards_row.get_children():
+		if c is Button:
+			(c as Control).custom_minimum_size.y = ch
+	# the panel's text grows with the screen too (rules, record lines)
+	var tk: float = clampf(h / 630.0, 1.0, 1.3)
+	for r in mp_rules.get_children():
+		if r is Label:
+			(r as Label).add_theme_font_size_override("font_size", PXF.style_small(r, roundi(17.0 * tk)))
+	mp_stat.add_theme_font_size_override("font_size", PXF.style_small(mp_stat, roundi(16.0 * tk)))
+	_fit_mode_cards.call_deferred()
+
+
+# Card text as big as the cards allow: one scale for every card in the row (so they match), the largest at which every
+# card's icon, name, pitch and record still fit inside it. Small screens use the room instead of leaving it empty.
+func _fit_mode_cards() -> void:
+	if mode_cards_row == null:
+		return
+	var cards: Array = mode_cards_row.get_children().filter(func(c): return c is Button)
+	if cards.is_empty() or (cards[0] as Control).size.x < 10.0:
+		return
+	var k := 1.8
+	while k > 0.8:
+		var fits := true
+		for c in cards:
+			_mode_card_fonts(c, k)
+		for c in cards:
+			var v: Control = (c as Control).get_node("V")
+			var need: float = 0.0
+			var vis := 0
+			for part in v.get_children():
+				need += (part as Control).get_combined_minimum_size().y
+				vis += 1
+			need += 3.0 * float(vis - 1)
+			var nm: Label = v.get_node("Name")
+			var longest: float = 0.0
+			for w in nm.text.split(" "):
+				longest = maxf(longest, nm.get_theme_font("font").get_string_size(w, HORIZONTAL_ALIGNMENT_LEFT, -1, nm.get_theme_font_size("font_size")).x)
+			if need > (c as Control).size.y - 16.0 or longest > (c as Control).size.x - 24.0:
+				fits = false
+				break
+		if fits:
+			return
+		k -= 0.05
+	for c in cards:
+		_mode_card_fonts(c, 0.9)
+
+
+func _mode_card_fonts(c: Control, k: float) -> void:
+	var v: Control = c.get_node("V")
+	var ic: Control = v.get_node("Icon")
+	ic.custom_minimum_size = Vector2(32.0, 32.0) * k
+	for pair in [["Name", 22.0], ["Tag", 16.0], ["Rec", 16.0]]:
+		var lb: Label = v.get_node(String(pair[0]))
+		var fs: int = roundi(float(pair[1]) * k)
+		if k > 0.85:
+			fs = maxi(fs, 16)   # 15 px and under would switch to the thin 12 px font
+		lb.add_theme_font_size_override("font_size", PXF.style_small(lb, fs))
+
+
+func _mode_group_of(id: String) -> String:
+	return String(_mode_def(id)[3])
+
+
+func _group_modes(g: String) -> Array:
+	return MODE_LIST.filter(func(m): return String(m[3]) == g)
+
+
+# The record shown on a mode's card ("" when there is none yet).
+func _mode_rec(id: String) -> String:
+	var st: Dictionary = SV.d["stats"]
+	match id:
+		"normal":
+			var bt: int = DIF.best(DIF.chosen(), bool(SV.d.get("hyper", false)))
+			return (L.t("Best %s") % ("%d:%02d" % [bt / 60, bt % 60])) if bt > 0 else ""
+		"daily":
+			var dm: int = int(DLY.state(SV.daily_seed())["medal"])
+			return (L.t("%s medal") % L.t(String(DLY.MEDAL_NAMES[dm]))) if dm > 0 else L.t("Not played today")
+		"rush":
+			return L.t("Record: %d bosses") % int(SV.d.get("rush_best", 0)) if int(SV.d.get("rush_best", 0)) > 0 else ""
+		"tower":
+			var tb: int = int(SV.d.get("tower", {}).get("best", 0))
+			return L.t("Best floor: %d") % tb if tb > 0 else ""
+		"rifts":
+			return L.t("Record: %d rifts") % int(SV.d.get("rifts_best", 0)) if int(SV.d.get("rifts_best", 0)) > 0 else ""
+		"type":
+			return L.t(String(MD.TYPE_NAME.get(String(SV.d.get("mode_type", "fire")), "Fire")))
+		"team":
+			return L.t("Best %d min") % int(st.get("teamBestMin", 0)) if int(st.get("teamBestMin", 0)) > 0 else ""
+		"coop":
+			return L.t("Partner: %s") % _name_of(int(SV.d.get("coop_dex", 133))) if SV.dex_by.has(int(SV.d.get("coop_dex", 133))) else ""
+		"mods":
+			return L.t("%d active") % SV.d.get("mods", []).size()
+	return ""
+
+
+func _mode_card(m: Array) -> Button:
 	var id: String = String(m[0])
 	var b := Button.new()
-	b.icon = IC.btn_tex(String(m[2]), 40)
-	b.icon_alignment = HORIZONTAL_ALIGNMENT_LEFT
-	b.add_theme_constant_override("h_separation", 14)
-	b.add_theme_constant_override("icon_max_width", 40)
-	b.text = L.t(String(m[1]))
-	b.custom_minimum_size = Vector2(0, 58)
+	b.name = "Mode_" + id
 	b.focus_mode = Control.FOCUS_ALL
-	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
-	b.add_theme_font_size_override("font_size", 22)
+	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	b.size_flags_stretch_ratio = 1.0
+	b.custom_minimum_size = Vector2(0, 158)
+	b.clip_contents = true
+	var v := VBoxContainer.new()
+	v.set_anchors_preset(Control.PRESET_FULL_RECT)
+	v.offset_left = 12
+	v.offset_right = -12
+	v.offset_top = 8
+	v.offset_bottom = -8
+	v.add_theme_constant_override("separation", 3)
+	v.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	b.add_child(v)
+	v.name = "V"
+	var ic := IC.rect(String(m[2]), 36)
+	ic.name = "Icon"
+	ic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	ic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT
+	ic.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	v.add_child(ic)
+	var nm := _label(L.t(String(m[1])), 22, UIS.TITLE)
+	nm.name = "Name"
+	nm.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	v.add_child(nm)
+	var tg := _label(L.t(String(MODE_TAG.get(id, ""))), 15, UIS.MUTED)
+	tg.name = "Tag"
+	tg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	v.add_child(tg)
+	var rc := _lnw(_mode_rec(id), 13, UIS.GOLD)
+	rc.name = "Rec"
+	rc.clip_text = true
+	rc.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	v.add_child(rc)
 	b.pressed.connect(func():
 		Aud.sfx("click")
 		_modes_select(id)
-		_gf(mp_play if mp_play.visible else mp_opts.get_child(0) if mp_opts.get_child_count() > 0 else b))
+		_gf(_modes_panel_first()))
 	b.focus_entered.connect(func():
 		Aud.sfx("hover")
-		_modes_select(id))
-	modes_box.add_child(b)
+		if modes_sel != id:
+			_modes_select(id))
+	mode_cards_row.add_child(b)
 	mode_tiles[id] = b
 	return b
+
+
+func _mode_card_style(b: Button, on: bool) -> void:
+	_lift_btn(b, Color("#3b3466") if on else UIS.PANEL, UIS.GOLD if on else UIS.EDGE)
+	if on:
+		b.add_theme_stylebox_override("normal", _shad(_sb(Color("#3b3466"), UIS.GOLD, 3), 6, Vector2(0, 5), 0.6))
 
 
 var _warmed: Dictionary = {}
@@ -3515,34 +4113,125 @@ func _warm_previews() -> void:
 
 func _refresh_modes() -> void:
 	_warm_previews()
-	_clear(modes_box)
-	mode_tiles.clear()
 	SV.run_mods = Array(SV.d.get("mods", []))
-	var group := ""
-	var first: Button = null
-	for m in MODE_LIST:
-		if String(m[3]) != group:
-			group = String(m[3])
-			var gl := _label(group, 18, Color("#b4aed6"))
-			modes_box.add_child(gl)
-		var tb: Button = _mode_tile(m)
-		if first == null or String(m[0]) == modes_sel:
-			if first == null or String(m[0]) == modes_sel:
-				first = tb
-	var tail := Control.new()
-	tail.custom_minimum_size = Vector2(0, 60)   # margen final: la ultima opcion nunca queda pegada al borde
-	tail.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	modes_box.add_child(tail)
-	# v5.2.1: arriba/abajo entre modos solo recorre la lista de modos (antes, a veces, el cursor saltaba al panel de modificadores)
-	var tl: Array = []
-	for mm in MODE_LIST:
-		tl.append(mode_tiles[String(mm[0])])
-	for ti in range(tl.size()):
-		var tt: Control = tl[ti]
-		tt.focus_neighbor_top = tt.get_path_to(tl[maxi(ti - 1, 0)])
-		tt.focus_neighbor_bottom = tt.get_path_to(tl[mini(ti + 1, tl.size() - 1)])
+	if not mode_tiles.has(modes_sel) and _mode_def(modes_sel)[0] != modes_sel:
+		modes_sel = "normal"
+	modes_group = _mode_group_of(modes_sel)
+	_clear(mode_cards_row)
+	mode_tiles.clear()
+	var gm: Array = _group_modes(modes_group)
+	for m in gm:
+		_mode_card(m)
+	for k in range(5 - gm.size()):
+		var gap := Control.new()   # keeps every card the same width as in the 5-card group
+		gap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		gap.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		mode_cards_row.add_child(gap)
+	for g in mode_tabs:
+		var tb: Button = mode_tabs[g]
+		_gold_btn(tb, String(g) == modes_group)
+	_modes_fit()
+	_modes_hint()
 	_modes_select(modes_sel)
-	focus_first = mode_tiles.get(modes_sel, first)
+	focus_first = mode_tiles.get(modes_sel, null)
+
+
+# Switch the group tab (LB / RB, Q / E, or a tab press); the group's remembered (or first) mode is selected.
+func _modes_group_set(g: String) -> void:
+	if not MODE_GROUPS.has(g):
+		return
+	mode_group_last[modes_group] = modes_sel
+	var list: Array = _group_modes(g)
+	var want: String = String(mode_group_last.get(g, list[0][0]))
+	modes_sel = want
+	_refresh_modes()
+	Aud.sfx("click")
+	_gf(mode_tiles.get(modes_sel, mode_tabs[g]))
+
+
+func _modes_hint() -> void:
+	if modes_hint == null:
+		return
+	if INP.is_pad():
+		modes_hint.text = L.t("LB / RB: group · Left / Right: mode · Down: options · A: select · B: back")
+	else:
+		modes_hint.text = L.t("Q / E: group · Arrows: move · Enter: select · Esc: back")
+	if mode_tab_lb != null:
+		mode_tab_lb.text = "LB" if INP.is_pad() else "Q"
+		mode_tab_rb.text = "RB" if INP.is_pad() else "E"
+
+
+# The first control in the right-hand panel (an option, else Play).
+func _modes_panel_first() -> Control:
+	for n in NAVG.focusables(mp_panel):
+		var c := n as Control
+		if c.is_visible_in_tree() and not (c is Button and (c as Button).disabled and c != mp_play):
+			return c
+	return mp_play
+
+
+# Controller / keyboard on the mode select: three rows (tabs, cards, the panel) with no way out but Back.
+func _modes_nav(event: InputEvent) -> bool:
+	var prev: bool = (event is InputEventJoypadButton and event.pressed and event.button_index == PAD.btn("prev")) or (event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_Q)
+	var next: bool = (event is InputEventJoypadButton and event.pressed and event.button_index == PAD.btn("next")) or (event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_E)
+	if prev or next:
+		var gi: int = MODE_GROUPS.find(modes_group)
+		_modes_group_set(String(MODE_GROUPS[posmod(gi + (-1 if prev else 1), MODE_GROUPS.size())]))
+		return true
+	var side := -1
+	if event.is_action_pressed("ui_left", true):
+		side = SIDE_LEFT
+	elif event.is_action_pressed("ui_right", true):
+		side = SIDE_RIGHT
+	elif event.is_action_pressed("ui_up", true):
+		side = SIDE_TOP
+	elif event.is_action_pressed("ui_down", true):
+		side = SIDE_BOTTOM
+	if side < 0:
+		return false
+	var f: Control = get_viewport().gui_get_focus_owner()
+	var cards: Array = mode_cards_row.get_children().filter(func(c): return c is Button)
+	var tabs: Array = []
+	for g in MODE_GROUPS:
+		tabs.append(mode_tabs[g])
+	var sel_card: Control = mode_tiles.get(modes_sel, cards[0] if not cards.is_empty() else null)
+	var to: Control = null
+	if f == null or not screens["modes"].is_ancestor_of(f):
+		to = sel_card
+	elif tabs.has(f):
+		var ti: int = tabs.find(f)
+		if side == SIDE_LEFT:
+			to = tabs[maxi(0, ti - 1)]
+		elif side == SIDE_RIGHT:
+			to = tabs[mini(tabs.size() - 1, ti + 1)]
+		elif side == SIDE_BOTTOM:
+			to = sel_card
+		else:
+			to = f
+	elif cards.has(f):
+		var ci: int = cards.find(f)
+		if side == SIDE_LEFT:
+			to = cards[maxi(0, ci - 1)]
+		elif side == SIDE_RIGHT:
+			to = cards[mini(cards.size() - 1, ci + 1)]
+		elif side == SIDE_TOP:
+			to = mode_tabs[modes_group]
+		else:
+			to = _modes_panel_first()
+	elif mp_panel.is_ancestor_of(f):
+		var nb: Control = f.find_valid_focus_neighbor(side)
+		if nb != null and mp_panel.is_ancestor_of(nb) and nb.is_visible_in_tree():
+			to = nb
+		elif side == SIDE_TOP or side == SIDE_LEFT:
+			to = sel_card   # out of the panel: back to the selected mode (never another one)
+		else:
+			to = f
+	else:
+		to = sel_card
+	if to != null and to != f:
+		to.grab_focus()
+		Aud.sfx("hover")
+	return true
 
 
 func _mode_def(id: String) -> Array:
@@ -3555,14 +4244,19 @@ func _mode_def(id: String) -> Array:
 func _modes_select(id: String) -> void:
 	modes_sel = id
 	var m: Array = _mode_def(id)
+	SV.d["mode_sel"] = id   # remembered for next time (step 47)
 	for k in mode_tiles:
 		var tb: Button = mode_tiles[k]
 		if is_instance_valid(tb):
-			_gold_btn(tb, k == id)
+			_mode_card_style(tb, k == id)
+	var keep_focus: String = ""
+	var fo0: Control = get_viewport().gui_get_focus_owner() if is_inside_tree() else null
+	if fo0 != null and mp_opts != null and mp_opts.is_ancestor_of(fo0):
+		keep_focus = String(fo0.name)
 	mp_title.text = L.t(String(m[1]))
 	_clear(mp_rules)
 	for r in m[4]:
-		mp_rules.add_child(_label("• " + L.t(String(r)), 19))
+		mp_rules.add_child(_label("• " + L.t(String(r)), 17))
 	_clear(mp_opts)
 	mp_stat.text = ""
 	mp_play.visible = true
@@ -3572,15 +4266,7 @@ func _modes_select(id: String) -> void:
 	var pm := "normal"
 	match id:
 		"normal":
-			var hy: bool = bool(SV.d.get("hyper", false))
-			var hbest: int = int(SV.d["stats"].get("hyper_best", 0))
-			mp_stat.text = L.t("Hyper: everything runs twice as fast (waves, bosses, rifts and Eternatus at 30 min), with +30% experience and ×1.5 coins.")
-			if hbest > 0:
-				mp_stat.text += "  " + L.t("Best Hyper time: %s") % ("%d:%02d" % [hbest / 60, hbest % 60])
-			mp_opts.add_child(_btn(L.t("Hyper mode: ON") if hy else L.t("Hyper mode: OFF"), func():
-				SV.d["hyper"] = not hy
-				SV.save()
-				_modes_select("normal"), Vector2(0, 46)))
+			_diff_row()
 		"daily":
 			var ds: int = SV.daily_seed()
 			var dst: Dictionary = DLY.state(ds)
@@ -3784,12 +4470,113 @@ func _modes_select(id: String) -> void:
 		mp_play.disabled = false
 	if id == "team" and SV.owned_count() < 2:
 		mp_play.disabled = true
-	(mp_prev as Control).visible = not id.begins_with("chal_")
 	mp_opts_sc.custom_minimum_size = Vector2.ZERO
 	mp_opts_sc.visible = mp_opts.get_child_count() > 0
 	call_deferred("_fit_mode_opts")
-	mp_prev.custom_minimum_size = Vector2(0, 110 if id == "mods" else 140)
 	(mp_prev as Control).call("setup", pm, info)
+	mp_stat.visible = mp_stat.text != ""   # an empty line would leave a gap above the rules
+	_modes_fit()
+	if keep_focus != "":   # an option rebuilt the panel (a difficulty, Hyper...): keep the cursor on it
+		var kf: Node = mp_opts.find_child(keep_focus, true, false)
+		if kf is Control:
+			_gf(kf as Control)
+
+
+# Difficulty row for Normal runs (docs/difficulty.md): Normal / Hard / Nightmare and the Hyper switch, with a summary.
+func _diff_row() -> void:
+	var cur_d: String = DIF.chosen()
+	var hy: bool = bool(SV.d.get("hyper", false))
+	var lb := _lnw("Difficulty", 16, UIS.MUTED)
+	mp_opts.add_child(lb)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	mp_opts.add_child(row)
+	for did in DIF.IDS:
+		var d_id: String = String(did)
+		var open: bool = DIF.unlocked(d_id)
+		var bt: int = DIF.best(d_id, hy)
+		var sub: String = (L.t("Best %s") % ("%d:%02d" % [bt / 60, bt % 60])) if bt > 0 else ("—" if open else L.t("Locked"))
+		var b := _btn("%s\n%s" % [L.t(String(DIF.NAME[d_id])), sub], func():
+			if not DIF.unlocked(d_id):
+				Aud.sfx("error")
+				toast(L.t("Nightmare unlocks when you reach minute 30 on Hard."))
+				return
+			DIF.choose(d_id)
+			SV.save()
+			_modes_select("normal")
+			_mode_card_rec("normal"), Vector2(0, 56))
+		b.name = "Diff_" + d_id
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		b.add_theme_font_size_override("font_size", 17)
+		b.clip_text = true
+		var col: Color = DIF.COLOR[d_id]
+		if d_id == cur_d:
+			for st in ["normal", "hover", "pressed"]:
+				b.add_theme_stylebox_override(st, _sb(col.darkened(0.62), col, 3, 0))
+			b.add_theme_stylebox_override("focus", _sb_focus(col.darkened(0.45)))
+		else:
+			_lift_btn(b, UIS.PANEL, UIS.EDGE)
+		if not open:
+			b.add_theme_color_override("font_color", UIS.MUTED)
+		row.add_child(b)
+	var hb := _btn("%s\n%s" % [L.t("Hyper"), L.t("ON") if hy else L.t("OFF")], func():
+		SV.d["hyper"] = not bool(SV.d.get("hyper", false))
+		SV.save()
+		_modes_select("normal")
+		_mode_card_rec("normal"), Vector2(118, 56))
+	hb.name = "Diff_hyper"
+	hb.add_theme_font_size_override("font_size", 17)
+	if hy:
+		for st in ["normal", "hover", "pressed"]:
+			hb.add_theme_stylebox_override(st, _sb(Color("#173e4c"), UIS.WAVE, 3, 0))
+		hb.add_theme_stylebox_override("focus", _sb_focus(Color("#1f5266")))
+	else:
+		_lift_btn(hb, UIS.PANEL, UIS.EDGE)
+	row.add_child(hb)
+	var sm: String = _diff_summary(cur_d) + ((" · " + L.t("Hyper: everything twice as fast, +30% XP, ×1.5 coins")) if hy else "")
+	if not DIF.unlocked("nightmare"):
+		sm += "\n" + L.t("Nightmare unlocks when you reach minute 30 on Hard.")
+	var sl := _label(sm, 16, Color("#d9cdb5"))   # under the row, as in the mockup
+	sl.name = "DiffSummary"
+	mp_opts.add_child(sl)
+
+
+func _diff_summary(d: String) -> String:
+	if d == "normal":
+		return L.t("Normal: enemies and rewards as usual.")
+	var t: String = L.t("Enemies ×%s HP, ×%s damage; elites from minute %d") % [_fx(DIF.k(d, "hp")), _fx(DIF.k(d, "dmg")), int(DIF.k(d, "elite_from"))]
+	t += " · " + L.t("×%s coins, +1 ticket every %d min, ×%s XP") % [_fx(DIF.k(d, "coins")), int(DIF.K[d]["ticket_every"]), _fx(DIF.k(d, "xp"))]
+	return t
+
+
+func _fx(v: float) -> String:
+	return String.num(v, 2).trim_suffix("0").trim_suffix(".") if v != roundf(v) else str(int(v))
+
+
+# Updates the record line of one mode card after a change (difficulty, Hyper).
+func _mode_card_rec(id: String) -> void:
+	if not mode_tiles.has(id):
+		return
+	var v: Node = (mode_tiles[id] as Control).get_child(0)
+	(v.get_child(v.get_child_count() - 1) as Label).text = _mode_rec(id)
+
+
+# A pull result line for a Wardrobe item, with its own effect playing beside it.
+func _look_row(id: String) -> HBoxContainer:
+	var h := HBoxContainer.new()
+	h.name = "LookRow"
+	h.alignment = BoxContainer.ALIGNMENT_CENTER
+	h.add_theme_constant_override("separation", 10)
+	var fv := WRUI.FxView.new()
+	fv.item = id
+	fv.kind = WR.kind_of(id)
+	fv.custom_minimum_size = Vector2(90, 46)
+	h.add_child(fv)
+	var lb := _lnw(L.t("New look for your Wardrobe: %s") % L.t(String(WR.ITEMS[id][1])), 20, UIS.ORCHID)
+	lb.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	h.add_child(lb)
+	Aud.sfx("shinyGet")
+	return h
 
 
 # Pinned options take their natural height, capped so Play always stays on screen (taller sets scroll inside).
@@ -3797,7 +4584,7 @@ func _fit_mode_opts() -> void:
 	if not is_instance_valid(mp_opts_sc):
 		return
 	var h: float = mp_opts.get_combined_minimum_size().y
-	mp_opts_sc.custom_minimum_size = Vector2(0, minf(h, 170.0))
+	mp_opts_sc.custom_minimum_size = Vector2.ZERO   # it never scrolls on its own: it is as tall as its content
 
 
 func _modes_play() -> void:
@@ -3986,7 +4773,34 @@ func _main_preview() -> void:
 		main_card.move_child(main_news_ov, main_card.get_child_count() - 1)
 
 
+# The Incubator button: a badge with the number of eggs ready to hatch, the egg wobbling; a one-time notice when an egg
+# becomes ready (step 28).
+func _egg_badge() -> void:
+	if egg_btn == null:
+		return
+	var rdy: Array = EG.ready_eggs()
+	var bd: Label = egg_btn.get_node("EggBadge")
+	bd.visible = not rdy.is_empty()
+	bd.text = str(rdy.size())
+	var face = egg_btn.get_meta("face")
+	face.rdy = not rdy.is_empty()
+	face.look = String(rdy[0]["look"]) if not rdy.is_empty() else (String(EG.eggs()[0]["look"]) if EG.count() > 0 else "green")
+	face.queue_redraw()
+	var told: Array = SV.d.get("egg_told", [])
+	var fresh := false
+	for e in rdy:
+		if not told.has(int(e["id"])):
+			told.append(int(e["id"]))
+			fresh = true
+	SV.d["egg_told"] = told.filter(func(i): return not EG.by_id(int(i)).is_empty())
+	if fresh:
+		toast(L.t("Oh? The egg is moving! Hatch it in the Incubator."))
+
+
 func _refresh_main() -> void:
+	_egg_badge()
+	_wardrobe_badge()
+	_wslot_notice()
 	var dex: int = int(SV.d["selected"])
 	if not SV.owns(dex) and SV.owned_count() > 0:
 		dex = int(SV.d["owned"].keys()[0])
@@ -4065,6 +4879,26 @@ func _show_run_summary() -> void:
 	var title := _label("You fell…" if bool(r.get("dead", true)) else "Run over", 38, Color.WHITE)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	v.add_child(title)
+	# difficulty and Hyper badges (docs/difficulty.md)
+	var rd: String = DIF.valid(String(r.get("diff", "normal")))
+	if rd != "normal" or bool(r.get("hyper", false)):
+		var brow := HBoxContainer.new()
+		brow.name = "RunBadges"
+		brow.alignment = BoxContainer.ALIGNMENT_CENTER
+		brow.add_theme_constant_override("separation", 8)
+		v.add_child(brow)
+		var badges: Array = []
+		if rd != "normal":
+			badges.append([L.t(String(DIF.NAME[rd])), DIF.COLOR[rd]])
+		if bool(r.get("hyper", false)):
+			badges.append([L.t("Hyper"), Color("#ff9a3d")])
+		for bdg in badges:
+			var bl := _lnw(String(bdg[0]).to_upper(), 17, bdg[1])
+			var bsb := UIS.box(Color(UIS.INK, 0.9), bdg[1], 2, false)
+			bsb.content_margin_left = 10
+			bsb.content_margin_right = 10
+			bl.add_theme_stylebox_override("normal", bsb)
+			brow.add_child(bl)
 	var t: int = int(r["time"])
 	var g := GridContainer.new()
 	g.columns = 2
@@ -4251,8 +5085,10 @@ func _show_run_summary() -> void:
 				iv.add_child(mrow)
 		v.add_child(ic2)
 	if bool(r.get("record", false)):
-		var rl := _label("New time record!", 22, C_GOLD)
+		var rl := _label(_record_line(r), 22, C_GOLD)
+		rl.name = "RecordLine"
 		rl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		rl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		outer.add_child(rl)
 	var ok := _btn("Back to menu", func(): ov.queue_free(); _update_top(); focus_first = main_play_btn; main_play_btn.grab_focus(), Vector2(260, 56))
 	var again := _btn("Play again", func(): _replay_last(), Vector2(260, 56))
@@ -4282,7 +5118,7 @@ func _fmt_n(n: int) -> String:
 
 func _bd_nums(bd: String) -> Array:
 	var out: Array = []
-	for part in bd.split(" · "):
+	for part in bd.split(" · ").slice(0, 3):   # the run's extra notes (Hyper, eggs, shards...) follow the three numbers
 		out.append(int(part.get_slice(" ", part.get_slice_count(" ") - 1).replace("+", "")))
 	while out.size() < 3:
 		out.append(0)
@@ -5294,6 +6130,22 @@ func _dex_detail() -> void:
 			tb.add_theme_font_size_override("font_size", 16)
 			trow.add_child(tb)
 		sv.add_child(trow)
+		# Tera type (docs/tera.md): the type it Terastallizes into in runs; free to change
+		var trw := HBoxContainer.new()
+		trw.add_theme_constant_override("separation", 8)
+		var ttl := _label(L.t("Tera type:"), 17, Color("#9ff0ff"))
+		ttl.autowrap_mode = TextServer.AUTOWRAP_OFF
+		ttl.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		trw.add_child(ttl)
+		var tch := _type_chip(SV.tera_type(dx), 16, 22)
+		tch.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		trw.add_child(tch)
+		var tbt := _btn(L.t("Change Tera type"), func(): _tera_ui(dx), Vector2(0, 40))
+		tbt.name = "TeraBtn"
+		tbt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		tbt.add_theme_font_size_override("font_size", 16)
+		trw.add_child(tbt)
+		sv.add_child(trw)
 	var mfm: Dictionary = MG.form_for(dx)
 	if not mfm.is_empty():   # megaevolucion en partida: aviso con el objeto que la activa
 		var mk: String = String(mfm["kind"])
@@ -5415,7 +6267,7 @@ func _dex_detail() -> void:
 			sel_b.disabled = true
 		else:
 			sel_b = _btn("Choose", func(): _choose_partner(dx), Vector2(0, 54))
-			if not Input.get_connected_joypads().is_empty():   # hint: the left face button (X / Square / Y) does the same from anywhere in the list
+			if INP.is_pad():   # hint: the left face button (X / Square / Y) does the same from anywhere in the list
 				sel_b.icon = PADI.tex(JOY_BUTTON_X)
 				sel_b.expand_icon = true
 				sel_b.add_theme_constant_override("icon_max_width", 32)
@@ -5508,7 +6360,7 @@ func _build_up() -> void:
 	sc.add_child(up_box)
 
 
-const UP_ICON := {"hp": "heart", "atk": "fist", "spd": "boot", "cd": "clock", "def": "shield", "regen": "sprout", "magnet": "magnet", "xp": "book", "coins": "coin", "moves": "cards", "crit": "star", "size": "size", "reroll": "bond", "ban": "ban", "revive": "revive", "bag": "bag", "bag3": "bag", "tm": "tm", "wslot": "cards"}
+const UP_ICON := {"hp": "heart", "atk": "fist", "spd": "boot", "cd": "clock", "def": "shield", "regen": "sprout", "magnet": "magnet", "xp": "book", "coins": "coin", "moves": "cards", "crit": "star", "size": "size", "reroll": "bond", "ban": "ban", "revive": "revive", "bag": "bag", "bag3": "bag", "tm": "tm"}
 
 
 # Reconstruye la pantalla de mejoras sin perder la seleccion del mando ni el scroll.
@@ -5691,7 +6543,7 @@ func _refresh_up() -> void:
 			var tmcol := VBoxContainer.new()
 			tmcol.add_theme_constant_override("separation", 6)
 			tmcol.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-			var et := _btn(L.t("Choose"), func(): tm_open = not tm_open; _refresh_up_keep("tmelegir"), Vector2(120, 44))
+			var et := _btn(L.t("Choose"), func(): tm_open = not tm_open; tm_erase_ask = false; _refresh_up_keep("tmelegir"), Vector2(120, 44))
 			et.set_meta("fk", "tmelegir")
 			up_extra[up_extra.size() - 1] = et
 			tmcol.add_child(et)
@@ -5753,12 +6605,44 @@ func _tm_panel() -> Control:
 	fl.add_theme_constant_override("h_separation", 8)
 	fl.add_theme_constant_override("v_separation", 8)
 	v.add_child(fl)
+	# Erase the taught TM, with a confirmation step
+	var taught: String = SV.tm_taught(up_dex)
+	if taught != "":
+		var er := HBoxContainer.new()
+		er.add_theme_constant_override("separation", 10)
+		v.add_child(er)
+		var own_mv: String = L.t(String(MD.MOVES[SV.natural_start_of(up_dex)]["name"]))
+		if tm_erase_ask:
+			var q := _label(L.t("Erase %s? It goes back to starting with %s.") % [L.t(String(MD.MOVES[taught]["name"])), own_mv], 18, Color("#ffd2d8"))
+			q.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			q.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			er.add_child(q)
+			var yes := _btn(L.t("Erase"), func():
+				SV.tm_erase(up_dex)
+				tm_erase_ask = false
+				Aud.sfx("select")
+				toast(L.t("TM erased: back to %s") % own_mv)
+				_refresh_up_keep("tmelegir"), Vector2(130, 44))
+			yes.set_meta("fk", "tmerase_yes")
+			yes.add_theme_stylebox_override("normal", _sb(Color("#7a2438"), Color("#ff6b7a"), 3, 10))
+			er.add_child(yes)
+			var no := _btn(L.t("Cancel"), func(): tm_erase_ask = false; _refresh_up_keep("tmerase"), Vector2(130, 44))
+			no.set_meta("fk", "tmerase_no")
+			er.add_child(no)
+		else:
+			var tl := _label(L.t("Taught: %s") % L.t(String(MD.MOVES[taught]["name"])), 18, Color("#ffd65c"))
+			tl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			er.add_child(tl)
+			var eb := _btn(L.t("Erase TM"), func(): tm_erase_ask = true; _refresh_up_keep("tmerase_no"), Vector2(150, 44))
+			eb.set_meta("fk", "tmerase")
+			er.add_child(eb)
 	var ids: Array = SV.tm_pool(up_dex)
 	ids.sort_custom(func(a, b): return L.t(String(MD.MOVES[a]["name"])) < L.t(String(MD.MOVES[b]["name"])))
 	for id in ids:
 		var on: bool = String(id) == cur
 		var b := _btn(("✔ " if on else "") + L.t(String(MD.MOVES[id]["name"])), func():
 			SV.tm_set(up_dex, String(id))
+			tm_erase_ask = false
 			Aud.sfx("select")
 			_refresh_up_keep("tm:" + String(id)), Vector2(0, 40))
 		b.set_meta("fk", "tm:" + String(id))
@@ -5864,6 +6748,7 @@ func _up_step(d: int) -> void:
 		return
 	var i: int = posmod(maxi(owned.find(up_dex), 0) + d, owned.size())
 	up_dex = int(owned[i])
+	tm_erase_ask = false
 	Aud.sfx("select")
 	_refresh_up_keep("uppick")
 
@@ -6686,6 +7571,7 @@ func _do_max_pull(use: String) -> void:
 	SV.d["stats"]["maxPulls"] = int(SV.d["stats"].get("maxPulls", 0)) + 1
 	var results: Array = []
 	var crystals: Array = []
+	pull_looks.clear()
 	for i in range(batches):
 		var got: Array = SV.pull(gacha_region, 10, use)
 		if got.is_empty():
@@ -6693,6 +7579,8 @@ func _do_max_pull(use: String) -> void:
 		results.append_array(got)
 		if SV.last_crystal != "":
 			crystals.append(SV.last_crystal)
+		if SV.last_look != "":
+			pull_looks.append(SV.last_look)
 	SV.save()
 	PG.check()
 	_update_top()
@@ -6857,6 +7745,8 @@ func _show_batch(results: Array, crystals: Array) -> void:
 		v.add_child(zrow)
 	if not crystals.is_empty():
 		Aud.sfx("legend")
+	for lk in pull_looks:
+		v.add_child(_look_row(String(lk)))
 	var ok := _btn_close("Accept", func(): gacha_result.visible = false; _refresh_gacha(), Vector2(0, 54))
 	v.add_child(ok)
 	gacha_result.visible = true
@@ -6947,6 +7837,8 @@ func _show_pulls(results: Array) -> void:
 		zrow.alignment = BoxContainer.ALIGNMENT_CENTER
 		v.add_child(zrow)
 		Aud.sfx("legend")
+	if SV.last_look != "" and results.size() >= 10:
+		v.add_child(_look_row(SV.last_look))
 	var ok := _btn_close("Accept", func(): gacha_result.visible = false; _refresh_gacha(), Vector2(0, 54))
 	v.add_child(ok)
 	gacha_result.visible = true
@@ -7041,7 +7933,7 @@ const LEX_NEW := [
 	["Manual aim", "Optional (Settings). Aim yourself with the gamepad right stick, the mouse or a second finger dragging on the right half of the screen. An arrow shows where you fire. If you don't aim, the game aims for you.", "tex:aim"],
 	["Bigger traps", "Map traps are bigger and show the real area they affect. Each type (poison, sticky, ice, shock, sleep, confusion and fire) has its own animation while armed and when it goes off.", "tex:trap"],
 	["Moves with unique patterns", "Every new move has its own attack pattern, not just another animation: zones, waves, traps, trails, dashes, bursts and more. Read each one's description in the Moves tab.", "tex:pat"],
-	["Weapon slots", "New shop upgrade: you start with 4 move slots and can buy up to 2 more (max 6).", "cards"],
+	["Move slots", "You have 4 move slots. Bond 2 moves to fire them together from one slot. A fusion holds up to 4 moves; once full, it can't be bonded.", "cards"],
 	["Items with cooldown", "Items with a cooldown (Sitrus Berry, Focus Sash, Weakness Policy...) appear in an on-screen box with their remaining time, or \"Ready\" when usable.", "clock"],
 	["Progressive difficulty", "From minute 20 enemies gain more HP, damage and speed, and more elites appear. At 60 min the challenge is at its peak.", "r_berserk"],
 	["Terrain bonus", "If you step on a liquid matching your type (water, lava, swamp, ice, poison or sparks), you gain +12% speed while on it.", "boot"],
@@ -8241,7 +9133,7 @@ func _goals_profile() -> Button:
 	stage_card.add_theme_stylebox_override("panel", UIS.frame(UIS.INK, tcol.darkened(0.2)))
 	hv.add_child(stage_card)
 	var stage := Control.new()
-	stage.custom_minimum_size = Vector2(0, 148)
+	stage.custom_minimum_size = Vector2(0, 210)   # taller stage: the partner is drawn much bigger
 	stage_card.add_child(stage)
 	var sbg := StageBG.new()
 	sbg.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -8251,6 +9143,7 @@ func _goals_profile() -> Button:
 	pv2.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	pv2.set_anchors_preset(Control.PRESET_FULL_RECT)
 	stage.add_child(pv2)
+	pv2.fit = 0.8   # every Pokémon fills 4/5 of the stage height, whatever the size of its sprite frame
 	pv2.setup(sd, SV.shiny_wanted(sd), 2.8)
 	_stage_arrow(stage, -1, func(): _cycle_sel(-1))
 	_stage_arrow(stage, 1, func(): _cycle_sel(1))
@@ -8286,6 +9179,21 @@ func _goals_profile() -> Button:
 	]
 	for r in rows:
 		sg.add_child(_prof_stat(L.t(String(r[0])), String(r[1])))
+	# best time per difficulty, with and without Hyper (docs/difficulty.md)
+	var dv := _pcard(mid, "Best times by difficulty", UIS.EMBER)   # moved under Favorite Type at the end
+	var dg := GridContainer.new()
+	dg.columns = 2
+	dg.add_theme_constant_override("h_separation", 8)
+	dg.add_theme_constant_override("v_separation", 8)
+	dv.add_child(dg)
+	for did in DIF.IDS:
+		for hy in [false, true]:
+			var bt: int = DIF.best(String(did), hy)
+			var nm_d: String = L.t(String(DIF.NAME[did])) + ((" · " + L.t("Hyper")) if hy else "")
+			var val: String = ("%d:%02d" % [bt / 60, bt % 60]) if bt > 0 else ("—" if DIF.unlocked(String(did)) else L.t("Locked"))
+			var ps: PanelContainer = _prof_stat(nm_d, val)
+			ps.name = "Rec_%s%s" % [did, "_hyper" if hy else ""]
+			dg.add_child(ps)
 	# ---- middle: favourites + favourite type ----
 	var fv := _pcard(mid, "Your 3 Favorite Pokémon", UIS.GOLD)
 	var favs: Array = SV.d.get("favs", [0, 0, 0])
@@ -8422,7 +9330,44 @@ func _goals_profile() -> Button:
 		mic.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		mg.add_child(mic)
 	mv.add_child(_btn("See all medals", func(): goals_tab = "h"; _show("goals"), Vector2(0, 40)))
+	_redeem_card(right)
+	mid.move_child(dv.get_parent(), mid.get_child_count() - 1)   # the records card goes last in the middle column
 	return first
+
+
+# Trainer profile: type a code for a special unlock (codes.gd). Each code works once.
+func _redeem_card(parent: Node) -> void:
+	var cv := _pcard(parent, "Redeem code", UIS.GOLD)
+	var info := _label("Have a code for a special unlock? Type it here. Each code works once.", 16, Color("#f2e9d8"))
+	info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	cv.add_child(info)
+	var code_in := LineEdit.new()
+	code_in.name = "CodeInput"
+	code_in.placeholder_text = L.t("Enter code")
+	code_in.max_length = 40
+	code_in.custom_minimum_size = Vector2(0, 46)
+	cv.add_child(code_in)
+	var redeem_fn := func():
+		var res: Dictionary = CODES.redeem(code_in.text, SV.d)
+		if bool(res["ok"]):
+			SV.save()
+			code_in.text = ""
+			var shown: String = L.t(String(res["msg"]))
+			var margs: Array = res.get("args", [])
+			if not margs.is_empty():
+				for ai in range(margs.size()):
+					if margs[ai] is String:
+						margs[ai] = L.t(String(margs[ai]))
+				shown = shown % margs
+			toast(shown)
+			Aud.sfx("legend")
+			_update_top()
+		else:
+			toast(L.t(String(res["msg"])))
+	var rd := _btn("Redeem", redeem_fn, Vector2(0, 46))
+	rd.name = "RedeemBtn"
+	code_in.text_submitted.connect(func(_t: String): redeem_fn.call())
+	cv.add_child(rd)
 
 
 func _set_fav_type(t: String) -> void:
@@ -8886,6 +9831,142 @@ func _build_news() -> void:
 	news_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	news_box.add_theme_constant_override("separation", 12)
 	news_scroll.add_child(news_box)
+
+# The Incubator (docs/eggs.md): eggs found in runs hatch here after enough distance.
+func _build_eggs() -> void:
+	var s: Control = _screen("eggs")
+	inc_ui = INCU.new()
+	inc_ui.setup(self)
+	inc_ui.hatch.connect(_egg_hatch)
+	s.add_child(inc_ui)
+
+
+func _refresh_eggs() -> void:
+	inc_ui.sel_id = -1
+	inc_ui.refresh()
+	focus_first = inc_ui.first
+
+
+# The Wardrobe (docs/wardrobe.md): trails, auras and HUD frames.
+func _build_wardrobe() -> void:
+	var s: Control = _screen("wardrobe")
+	wr_ui = WRUI.new()
+	wr_ui.setup(self)
+	s.add_child(wr_ui)
+
+
+func _refresh_wardrobe() -> void:
+	WR.sync()
+	wr_ui.refresh()
+	WR.seen_all()   # the dots stay on the cards until you leave; the main menu dot goes
+	SV.save()
+	focus_first = wr_ui.first
+
+
+# Unlocks from achievements and medals you already have, with a notice, and the dot on the Wardrobe button.
+# Weapon slots was removed (0.1.3-alpha.13): one notice for the coins paid back (save_data.gd _migrate_wslot).
+func _wslot_notice() -> void:
+	var n: int = int(SV.d.get("wslot_refund", 0))
+	if n <= 0:
+		return
+	SV.d.erase("wslot_refund")
+	SV.save()
+	toast(L.t("Weapon slots are gone (4 move slots): +%d coins refunded") % n)
+
+
+func _wardrobe_badge() -> void:
+	var got: Array = WR.sync()
+	if not got.is_empty():
+		SV.save()
+		toast(L.t("New look unlocked: %s") % ", ".join(got.map(func(i): return L.t(String(WR.ITEMS[i][1])))))
+	if wr_btn != null:
+		wr_btn.get_node("NewDot").visible = not (WR.data()["new"] as Array).is_empty()
+
+
+# Hatching (steps 26-27): the egg hatches now (saved at once), then the scene plays and shows who came out.
+func _egg_hatch(id: int) -> void:
+	if hatch_ui != null and hatch_ui.visible:
+		return
+	var r: Dictionary = EG.hatch(id)
+	if r.is_empty():
+		return
+	PG.check()   # First hatch, Egg collector, Shiny surprise (their toasts show after the scene)
+	SV.save()
+	hatch_res = r
+	if hatch_ui == null:
+		hatch_ui = HATCH.new()
+		hatch_ui.z_index = 45
+		hatch_ui.revealed.connect(_hatch_reveal)
+		add_child(hatch_ui)
+	move_child(hatch_ui, get_child_count() - 1)
+	for ch in hatch_ui.get_children():
+		ch.queue_free()
+	hatch_ui.play(String(r["look"]))
+	hatch_ui.grab_focus()
+
+
+func _hatch_reveal() -> void:
+	var r: Dictionary = hatch_res
+	var vp: Vector2 = get_viewport_rect().size
+	var box := VBoxContainer.new()
+	box.set_anchors_preset(Control.PRESET_FULL_RECT)
+	box.alignment = BoxContainer.ALIGNMENT_CENTER
+	box.add_theme_constant_override("separation", 8)
+	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hatch_ui.add_child(box)
+	var pv := Preview.new()
+	pv.custom_minimum_size = Vector2(vp.x * 0.5, vp.y * 0.42)
+	pv.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	pv.fit = 0.8
+	pv.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.add_child(pv)
+	pv.setup(int(r["dex"]), bool(r["shiny"]), 3.0)
+	var nm := _label(L.t("%s hatched!") % L.t(String(r["name"])) + (" ✨" if bool(r["shiny"]) else ""), 34, UIS.GOLD)
+	nm.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	box.add_child(nm)
+	var line := HBoxContainer.new()
+	line.alignment = BoxContainer.ALIGNMENT_CENTER
+	line.add_theme_constant_override("separation", 10)
+	var rar: int = clampi(int(r["rarity"]), 1, 5)
+	line.add_child(IC.rect(String(["ball", "ball2", "ball3", "ball4", "ballLux"][rar - 1]), 28))
+	if bool(r["shiny"]):
+		Aud.sfx("shiny")
+		var sl := _label(L.t("Shiny!"), 22, UIS.GOLD)
+		sl.autowrap_mode = TextServer.AUTOWRAP_OFF
+		line.add_child(sl)
+	if bool(r["new"]):
+		var nl := _label(L.t("NEW!") + "  " + L.t("Great IVs"), 22, UIS.GREEN)
+		nl.autowrap_mode = TextServer.AUTOWRAP_OFF
+		line.add_child(nl)
+	elif int(r["refund"]) > 0:
+		line.add_child(_icon_label("coin", "+%d" % int(r["refund"]), 22, UIS.GOLD, 26.0))
+	box.add_child(line)
+	if not bool(r["new"]):
+		var dl := _label(L.t("Already in your collection: its IVs may have risen."), 18, UIS.MUTED)
+		dl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		box.add_child(dl)
+	var okb := _btn(L.t("OK"), func(): _hatch_close(), Vector2(200, 52))
+	okb.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	box.add_child(okb)
+	for c in [pv, nm, line, okb]:
+		c.modulate.a = 0.0
+		var tw := create_tween()
+		tw.tween_interval(0.15 if c == pv else 0.5)
+		tw.tween_property(c, "modulate:a", 1.0, 0.35)
+	_update_top()
+	_gf(okb)
+
+
+func _hatch_close() -> void:
+	if hatch_ui == null:
+		return
+	hatch_ui.visible = false
+	for ch in hatch_ui.get_children():
+		ch.queue_free()
+	if cur == "eggs":
+		inc_ui.refresh()
+	_update_top()
+
 
 # Pantalla "Apoyar el proyecto": donacion voluntaria, sin ventajas en el juego.
 func _build_support() -> void:
@@ -9413,33 +10494,6 @@ func _set_account() -> void:
 				why = why % int(res["n"])
 			toast(L.t("Invalid code") + ": " + why))
 	_sadd(ib)
-	_sec("Redeem code")
-	_sadd(_label("Have a code for a special unlock? Type it here. Each code works once.", 18, Color("#f2e9d8")))
-	var code_in := LineEdit.new()
-	code_in.placeholder_text = L.t("Enter code")
-	code_in.max_length = 40
-	code_in.custom_minimum_size = Vector2(0, 50)
-	_sadd(code_in)
-	var redeem_fn := func():
-		var res: Dictionary = CODES.redeem(code_in.text, SV.d)
-		if bool(res["ok"]):
-			SV.save()
-			code_in.text = ""
-			var shown: String = L.t(String(res["msg"]))
-			var margs: Array = res.get("args", [])
-			if not margs.is_empty():
-				for ai in range(margs.size()):
-					if margs[ai] is String:
-						margs[ai] = L.t(String(margs[ai]))
-				shown = shown % margs
-			toast(shown)
-			Aud.sfx("legend")
-			_update_top()
-		else:
-			toast(L.t(String(res["msg"])))
-	var rd := _btn("Redeem", redeem_fn, Vector2(0, 50))
-	code_in.text_submitted.connect(func(_t: String): redeem_fn.call())
-	_sadd(rd)
 	_sec("Updates")
 	_srow("Get test builds", "Also offer test versions in the update notice. They have the newest features first but may have bugs. Off: only full releases. If you already play a test version, newer test versions are always offered.", _toggle_set("test_builds"))
 	_sec("Danger zone")

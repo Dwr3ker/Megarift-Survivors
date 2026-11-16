@@ -36,7 +36,7 @@ func _init() -> void:
 	m._offer_bond(true)
 	check("with one move the bond is saved for later", m.bonds == 1 and m.pending_levels == 0 and not m.choosing)
 	# five moves: make two pairs through the cards, as a player would
-	for id in ["swords-dance", "hyper-voice", "agility", "hex"]:
+	for id in ["psybeam", "hyper-voice", "ember", "hex"]:   # attacks: buffs are always active and never bonded
 		m.player.moves.append(m._new_move(id, 1))
 	var ids: Array = _ids(m.player.moves)
 	m.bonds = 2

@@ -81,6 +81,8 @@ const MOVE := {
 	"hex": {"beam": "shadow", "proj": "shadow"},
 	"glaciate": {"proj": "wind", "pal": "ice"},
 	"freeze-shock": {"beam": "lightning", "pal": "electric"}, "ice-burn-white": {"beam": "whiteflame", "pal": "ice"},
+	"photon-geyser": {"beam": "sun", "pal": "psychic", "bstyle": "flare"}, "sunsteel-strike": {"proj": "sun", "trail": "spark", "pal": "steel"},
+	"moongeist-beam": {"beam": "shadow", "bstyle": "wave", "pal": "ghost"}, "light-that-burns-the-sky": {"beam": "psyblast", "bstyle": "flare", "pal": "dragon"},
 }
 const TYPE_SHAPE := {
 	"fire": "fire", "water": "drop", "grass": "leaf", "electric": "bolt", "psychic": "ring", "ice": "shard",

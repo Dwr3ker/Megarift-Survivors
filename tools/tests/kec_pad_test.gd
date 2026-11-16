@@ -14,6 +14,14 @@ func _pad(b: int) -> void:
 		e.device = 0
 		Input.parse_input_event(e)
 
+func _key(k: int) -> void:
+	for pr in [true, false]:
+		var e := InputEventKey.new()
+		e.keycode = k
+		e.physical_keycode = k
+		e.pressed = pr
+		Input.parse_input_event(e)
+
 func _init() -> void:
 	Engine.set_meta("no_save", true)   # nothing here may write the real save
 	var SV = load("res://scripts/save_data.gd")
@@ -44,6 +52,16 @@ func _init() -> void:
 			await process_frame
 		var fo = m.get_viewport().gui_get_focus_owner()
 		check("%s: the first item you can afford is highlighted" % name_l, fo is Button and not (fo as Button).disabled and m.kec.ui_btns.has(fo))
+		if layout == 0:   # keyboard: D / A move between the items like the arrow keys
+			_key(KEY_D)
+			for i in range(3):
+				await process_frame
+			var fd = m.get_viewport().gui_get_focus_owner()
+			check("D moves to the next item", fd is Button and fd != fo and m.kec.ui.is_ancestor_of(fd), str(fd.name if fd != null else "none"))
+			_key(KEY_A)
+			for i in range(3):
+				await process_frame
+			check("A moves back", m.get_viewport().gui_get_focus_owner() == fo)
 		_pad(PAD.btn("confirm"))
 		for i in range(5):
 			await process_frame

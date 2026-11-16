@@ -983,6 +983,18 @@ func close_ui() -> void:
 	m.shop_open = false
 
 
+# Moves the focus to the next button on that side (WASD); with nothing focused yet, the first item.
+func _focus_step(side: int) -> void:
+	var f: Control = ui.get_viewport().gui_get_focus_owner()
+	if f == null or not ui.is_ancestor_of(f):
+		if not ui_btns.is_empty() and is_instance_valid(ui_btns[0]):
+			(ui_btns[0] as Control).grab_focus()
+		return
+	var nx: Control = f.find_valid_focus_neighbor(side)
+	if nx != null and ui.is_ancestor_of(nx):
+		nx.grab_focus()
+
+
 # Atajos de teclado / mando mientras la tienda esta abierta (los llama main._input)
 func ui_input(event: InputEvent) -> bool:
 	if ui == null:
@@ -997,6 +1009,10 @@ func ui_input(event: InputEvent) -> bool:
 				return true
 			KEY_ESCAPE, KEY_BACKSPACE:
 				close_ui()
+				return true
+			KEY_A, KEY_D, KEY_W, KEY_S:   # WASD moves between the shop's buttons like the arrow keys
+				var side: int = {KEY_A: SIDE_LEFT, KEY_D: SIDE_RIGHT, KEY_W: SIDE_TOP, KEY_S: SIDE_BOTTOM}[event.keycode]
+				_focus_step(side)
 				return true
 	elif event is InputEventJoypadButton and event.pressed:
 		var bi: int = event.button_index

@@ -12,6 +12,7 @@ const LIST := [
 	["secret1", "explore", "Hawk eye", "Discover a secret.", 1],
 	["secret_hunter", "explore", "Secret hunter", "Discover 25 secrets.", 25],
 	["night", "events", "Night survivor", "Survive a whole night.", 1],
+	["aurora", "events", "Northern lights", "See an Aurora light up the night.", 1],
 	["inv1", "events", "United front", "Survive an invasion.", 1],
 	["inv_night", "events", "Nightmare overcome", "Survive a night invasion.", 1],
 	["deoxys", "events", "Space visitor", "Defeat Deoxys.", 1],
@@ -82,6 +83,8 @@ static func event(name: String, data: Dictionary) -> void:
 			_add("secret_hunter")
 		"night":
 			_add("night")
+		"aurora":
+			_add("aurora")
 		"invasion":
 			_add("inv1")
 			if bool(data.get("night", false)) and String(data.get("kind", "")) == "nightmare":

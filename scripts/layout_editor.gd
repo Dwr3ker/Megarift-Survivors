@@ -8,7 +8,7 @@ const DSP = preload("res://scripts/display.gd")
 const PAD = preload("res://scripts/pad.gd")
 const SV = preload("res://scripts/save_data.gd")
 
-const COLORS := {"plate": Color("#5fd08a"), "radar": Color("#5fb4ff"), "stats": Color("#ffd65c"), "items": Color("#ff8ad8"), "counters": Color("#ffb347"), "skills": Color("#b48aff"), "dash": Color("#ffcb3d")}
+const COLORS := {"plate": Color("#5fd08a"), "radar": Color("#5fb4ff"), "stats": Color("#ffd65c"), "items": Color("#ff8ad8"), "counters": Color("#ffb347"), "skills": Color("#b48aff"), "dash": Color("#ffcb3d"), "zmove": Color("#9fd8ff"), "dynamax": Color("#ff5a8a"), "tera": Color("#5fe8e0")}
 const KEY_STEP := 4.0
 const STICK_SPEED := 320.0
 
@@ -229,7 +229,8 @@ func _draw_stage() -> void:
 		var hid: bool = _hidden(String(id))
 		stage.draw_rect(r, Color(col, 0.10 if hid else 0.30))
 		stage.draw_rect(r, Color(col, 0.35 if hid else 1.0), false, 3.0 if id == sel else 1.5)
-		var label: String = L.t(String(HL.NAMES[id])) + (" (" + L.t("off") + ")" if hid else "")
+		var nm: String = String(HL.SHORT[id]) if HL.SHORT.has(id) and r.size.x < 140.0 else String(HL.NAMES[id])   # small boxes: short name
+		var label: String = L.t(nm) + (" (" + L.t("off") + ")" if hid else "")
 		stage.draw_string(font, r.position + Vector2(6.0, 18.0), label, HORIZONTAL_ALIGNMENT_LEFT, r.size.x - 8.0, 14, Color(1, 1, 1, 0.45 if hid else 0.95))
 	if stage.has_focus():
 		stage.draw_rect(Rect2(Vector2.ZERO, stage.size), Color("#ffd65c"), false, 2.0)

@@ -65,8 +65,7 @@ func update(delta: float) -> void:
 		dot_tick -= delta
 		if dot_tick <= 0.0 and not m.player.dead:
 			dot_tick = 0.8
-			m.player.invuln = 0.0
-			m._hurt_player(maxf(2.0, m.player.max_hp * 0.015), "")
+			m._hurt_player(maxf(2.0, m.player.max_hp * 0.015), "", false, true)
 	if zone != null:
 		if not is_instance_valid(zone):
 			zone = null
@@ -109,12 +108,11 @@ func _impact(z) -> void:
 	m.Aud.sfx("judge")
 	var hit_p := false
 	if not m.player.dead and m.player.position.distance_to(pos) < R:
-		if immune(m.player.types, kind):
+		if immune(m._def_types(), kind):
 			m.add_text(m.player.position + Vector2(0, -m.player.body_h - 8.0), m.L.t("Immune!"), Color("#c8d0dc"), 16)
 		else:
 			hit_p = true
-			m.player.invuln = 0.0
-			m._hurt_player(maxf(5.0, m.player.max_hp * 0.07 + m.run_time * 0.02), "")
+			m._hurt_player(maxf(5.0, m.player.max_hp * 0.07 + m.run_time * 0.02), "", false, true)
 			match kind:
 				"fire", "poison":
 					dot_t = 3.0       # se refresca, nunca se apila

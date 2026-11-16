@@ -28,6 +28,11 @@ const SIG := {
 	"glaciate": ["tornado", {"n": 3, "r": 90, "k": 0.8}],
 	"freeze-shock": ["crossbeam", {"k": 1.3}],
 	"ice-burn-white": ["rift", {"n": 5, "k": 1.2}],
+	# ---- Necrozma
+	"photon-geyser": ["pillars", {"n": 5, "r": 50, "k": 1.1}],
+	"sunsteel-strike": ["comet", {"k": 2.4}],
+	"moongeist-beam": ["rift", {"n": 4, "k": 1.1}],
+	"light-that-burns-the-sky": ["crossbeam", {"k": 1.5}],
 	# ---- Hada
 	"fleur-cannon": ["pillars", {"n": 6, "r": 44, "k": 1.2}],
 	"play-rough": ["yank", {"n": 4, "k": 1.4}],
