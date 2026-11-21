@@ -41,6 +41,7 @@ const EG = preload("res://scripts/eggs.gd")
 const EGA = preload("res://scripts/egg_art.gd")
 const HATCH = preload("res://scripts/hatch_scene.gd")
 const HFX = preload("res://scripts/hover_fx.gd")
+const SSC = preload("res://scripts/stick_scroll.gd")
 const GMX = preload("res://scripts/gmax.gd")
 const INP = preload("res://scripts/input_mode.gd")
 
@@ -818,31 +819,25 @@ class Banner extends Control:
 
 # Retrato del Pokemon (pantalla de mejoras)
 class Portrait extends Control:
+	# Upgrades screen: the Pokémon on its stage, sized to fill the frame (every Pokémon the same size, whatever its
+	# sprite frame), like the trainer profile.
 	var edge := Color("#ff7b3d")
-	var mon: Mon = null
+	var pv: Preview = null
 
 	func _init() -> void:
 		clip_contents = true
 
 	func setup(d: int, col: Color) -> void:
 		edge = col
-		if mon != null:
-			mon.queue_free()
-		mon = Mon.new()
-		add_child(mon)
-		mon.setup(d, 3.0, false, Rect2(60.0, 120.0, 80.0, 24.0), false)
-		mon.dir = 0
-		mon.ysort = true   # sin z_index propio: nunca queda por encima de menus y resultados
-		_layout()
-
-	func _notification(what: int) -> void:
-		if what == NOTIFICATION_RESIZED:
-			_layout()
-
-	func _layout() -> void:
-		if mon != null:
-			# Quieto, centrado y mirando al frente; solo se anima en el sitio.
-			mon.position = Vector2(size.x * 0.5, size.y * 0.82)
+		if pv != null:
+			pv.queue_free()
+		pv = Preview.new()
+		pv.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		pv.set_anchors_preset(Control.PRESET_FULL_RECT)
+		pv.fit = 0.8
+		add_child(pv)
+		pv.setup(d, SV.shiny_wanted(d), 3.0)
+		queue_redraw()
 
 	func _draw() -> void:
 		var w: float = size.x
@@ -1312,6 +1307,37 @@ func _cost_btn(title: String, cost: String, icon: String, cost_icon: String, cb:
 
 
 # Boton dorado (se puede pagar) o marron apagado (no alcanza).
+# Upgrades screen: the row you point at (mouse) or are on (controller / keyboard) lights up, and its price button gets
+# a clearly brighter look than the others (they all have a gold border, so the hover style alone did not show).
+func _up_hover(card: PanelContainer, base: StyleBox, btn: Button) -> void:
+	var hl := UIS.box(UIS.PANEL_HI, UIS.GOLD, 3, false)
+	hl.content_margin_left = base.content_margin_left
+	hl.content_margin_right = base.content_margin_right
+	hl.content_margin_top = base.content_margin_top
+	hl.content_margin_bottom = base.content_margin_bottom
+	hl.shadow_color = Color(UIS.GOLD, 0.35)
+	hl.shadow_size = 8
+	if not btn.disabled:
+		var hb := _sb(C_BTN_H.lightened(0.28), Color.WHITE, 4, 0)
+		hb.shadow_color = Color(UIS.GOLD, 0.6)
+		hb.shadow_size = 6
+		btn.add_theme_stylebox_override("hover", hb)
+	var lit := {"mouse": false, "focus": false}
+	var paint := func():
+		if is_instance_valid(card):
+			card.add_theme_stylebox_override("panel", hl if (bool(lit["mouse"]) or bool(lit["focus"])) else base)
+	var lit_mouse := func(on: bool):
+		var r: Rect2 = card.get_global_rect() if is_instance_valid(card) else Rect2()
+		lit["mouse"] = on or r.has_point(card.get_global_mouse_position())
+		paint.call()
+	card.mouse_entered.connect(func(): lit_mouse.call(true))
+	card.mouse_exited.connect(func(): lit_mouse.call(false))
+	btn.mouse_entered.connect(func(): lit_mouse.call(true))   # the row's own signal does not fire over its button
+	btn.mouse_exited.connect(func(): lit_mouse.call(false))
+	btn.focus_entered.connect(func(): lit["focus"] = true; paint.call())
+	btn.focus_exited.connect(func(): lit["focus"] = false; paint.call())
+
+
 func _gold_btn(b: Button, on: bool) -> void:
 	var c: Color = C_BTN_H if on else UIS.BG
 	var edge: Color = UIS.GOLD if on else UIS.EDGE
@@ -1588,18 +1614,25 @@ func _results_scroll(gy: float, delta: float) -> void:
 
 
 func _stick_scroll(delta: float) -> void:
+	var rs_done := false
 	if gacha_result != null and gacha_result.visible:   # right stick: scroll the pull results (a Max pull's list scrolls)
 		for pd in Input.get_connected_joypads():
 			var gy: float = Input.get_joy_axis(int(pd), JOY_AXIS_RIGHT_Y)
 			if absf(gy) > 0.25:
 				_results_scroll(gy, delta)
 				break
-	if cur == "dex" and dex_dsc != null and is_visible_in_tree() and not _popup_open():
+		rs_done = true
+	elif cur == "dex" and dex_dsc != null and is_visible_in_tree() and not _popup_open():
 		for pd in Input.get_connected_joypads():
 			var ry: float = Input.get_joy_axis(int(pd), JOY_AXIS_RIGHT_Y)
 			if absf(ry) > 0.25:   # right stick: scroll the Pokémon details (faster the further it is pushed)
 				dex_dsc.scroll_vertical += int(signf(ry) * (absf(ry) - 0.25) / 0.75 * 1100.0 * delta + signf(ry))
 				break
+		rs_done = true
+	if not rs_done and is_visible_in_tree() and cur != "layout":   # everywhere else: the list you are in (stick_scroll.gd); the HUD layout editor uses the right stick to move boxes
+		var f: Control = get_viewport().gui_get_focus_owner()
+		var scope: Node = self if (f != null and is_ancestor_of(f)) else (screens.get(cur) if screens.has(cur) else self)
+		SSC.tick(scope, get_viewport(), delta)
 	if not (cur == "lexicon" or cur == "goals") or not screens.has(cur):
 		return
 	if gacha_result != null and gacha_result.visible:
@@ -1877,6 +1910,10 @@ func _input(event: InputEvent) -> void:
 	if listening == "" and PAD.stick_event(event):
 		get_viewport().set_input_as_handled()   # el stick izquierdo navega como cruceta (un salto por empujon)
 		return
+	if listening.begins_with("chord:"):
+		if _chord_capture(event):
+			get_viewport().set_input_as_handled()
+			return
 	if listening.begins_with("key:"):
 		# keyboard rebinding: the next key pressed is assigned (Esc cancels)
 		if event is InputEventKey and event.pressed and not event.echo:
@@ -6418,7 +6455,7 @@ func _refresh_up() -> void:
 	# --- left column: title, animated portrait, Pokemon selector, partner / upgrade-all buttons
 	up_head.add_child(_label("Permanent upgrades", 28, UIS.GOLD))
 	var por := Portrait.new()
-	por.custom_minimum_size = Vector2(0, 190)
+	por.custom_minimum_size = Vector2(0, 230)
 	por.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	up_head.add_child(por)
 	var tcol := Color("#ff7b3d")
@@ -6537,6 +6574,8 @@ func _refresh_up() -> void:
 			if first == null and not btn.disabled:
 				first = btn
 		btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		card.name = "UpRow_" + id
+		_up_hover(card, cbx, btn)
 		up_anchors.append(btn if not btn.disabled else null)
 		up_extra.append(null)
 		if id == "tm" and lv > 0:
@@ -10443,8 +10482,69 @@ func _set_controls() -> void:
 		_srow(PAD.LABELS[act], "", cb)
 		if act == last_act:
 			focus_first = cb
+	# power combinations: hold two buttons together (any buttons or triggers your controller has)
+	_sec("Power combinations")
+	_sadd(_label("Hold two buttons together to use a power in a run. To change one, press its button here, then hold the two buttons you want on your controller (triggers count too, whether your controller sends them as triggers or as buttons).", 20, Color("#f2e9d8")))
+	for a in PAD.CHORDS:
+		var act: String = a
+		var lid: String = "chord:" + act
+		var txt: String = PAD.chord_name(act)
+		if listening == lid:
+			txt = L.t("Hold two buttons…")
+			if not chord_cap.is_empty():
+				txt = PAD.code_name(int(chord_cap[0])) + " + …"
+		var chb := _btn(txt, func():
+			listening = "" if listening == lid else lid
+			chord_cap = []
+			last_act = lid
+			_refresh_listen(), Vector2(260, 46))
+		chb.name = "Chord_" + act
+		if listening == lid:
+			_gold_btn(chb, true)
+		_srow(PAD.CHORD_LABELS[act], "", chb)
+		if lid == last_act:
+			focus_first = chb
 	var rb := _btn("Reset mapping", func(): PAD.reset(); last_act = ""; _refresh_settings(), Vector2(280, 46))
 	_sadd(rb)
+
+
+# Settings > Controls, power combinations: while listening, every button / trigger held is collected; as soon as two are
+# held together they become the combination. Esc (keyboard) or pressing the row again cancels.
+var chord_cap: Array = []
+
+
+func _chord_capture(event: InputEvent) -> bool:
+	var act: String = listening.substr(6)
+	var code := -1
+	var down := false
+	if event is InputEventJoypadButton:
+		code = event.button_index
+		down = event.pressed
+	elif event is InputEventJoypadMotion and (event.axis == JOY_AXIS_TRIGGER_LEFT or event.axis == JOY_AXIS_TRIGGER_RIGHT):
+		code = PAD.TRIG + event.axis
+		down = event.axis_value > 0.6
+		if not down and event.axis_value > 0.3:
+			return true   # still half pulled: no change
+	elif event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
+		listening = ""
+		chord_cap = []
+		_refresh_listen()
+		return true
+	else:
+		return event is InputEventJoypadMotion   # sticks don't navigate away while you set it
+	if down and not chord_cap.has(code):
+		chord_cap.append(code)
+		if chord_cap.size() >= 2:
+			PAD.set_chord(act, int(chord_cap[0]), int(chord_cap[1]))
+			Aud.sfx("confirm")
+			toast(L.t("%s: %s") % [L.t(String(PAD.CHORD_LABELS[act])), PAD.chord_name(act)])
+			listening = ""
+			chord_cap = []
+		_refresh_listen()
+	elif not down and chord_cap.has(code):
+		chord_cap.erase(code)
+		_refresh_listen()
+	return true
 
 
 # Redibuja la pestana de controles manteniendo el modo "escuchando".

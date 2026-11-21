@@ -48,6 +48,9 @@ func _init() -> void:
 		g += 1
 		await process_frame
 	check("the fight remembers where you stood", (m.ainfo["back"] as Vector2).distance_to(before) < 40.0, str(m.ainfo["back"]))
+	for i in range(5):
+		await process_frame
+	check("the boss bar shows Arceus with his HP", m._bar_boss() == m.jd.A and m.hud.boss_name == m.jd.A.enemy_name and m.hud.boss_max > 1000.0 and absf(m.hud.boss_hp - m.jd.A.hp) < 1.0, "%s %.0f / %.0f" % [m.hud.boss_name, m.hud.boss_hp, m.hud.boss_max])
 	for i in range(30):
 		await process_frame
 	m.jd.A.hp = 1.0

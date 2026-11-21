@@ -99,18 +99,66 @@ static func _migrate_dpad() -> void:
 	SV.save()
 
 
-# Power chords (fixed): hold a face button and pull a trigger. Z-Move = X + LT, Dynamax / Gigantamax = X + RT,
-# Tera = Y + RT. On their own, X, Y and the triggers do nothing in a run. The single-button actions above stay optional.
-const CHORDS := {"zmove": [JOY_BUTTON_X, JOY_AXIS_TRIGGER_LEFT], "dynamax": [JOY_BUTTON_X, JOY_AXIS_TRIGGER_RIGHT], "tera": [JOY_BUTTON_Y, JOY_AXIS_TRIGGER_RIGHT]}
+# Power chords: hold two inputs together. Defaults: Z-Move = X + LT, Dynamax / Gigantamax = X + RT, Tera = Y + RT.
+# Each can be changed in Settings > Controls by holding the two inputs you want (stored in settings "padchords").
+# An input is a button index (0..127) or a trigger: TRIG + its axis (LT = TRIG + JOY_AXIS_TRIGGER_LEFT). Triggers count as
+# held when pulled past 0.6; controllers that send L2 / R2 as plain buttons simply record those buttons instead.
+const TRIG := 200
+const CHORDS := {"zmove": [JOY_BUTTON_X, TRIG + JOY_AXIS_TRIGGER_LEFT], "dynamax": [JOY_BUTTON_X, TRIG + JOY_AXIS_TRIGGER_RIGHT], "tera": [JOY_BUTTON_Y, TRIG + JOY_AXIS_TRIGGER_RIGHT]}
+const CHORD_LABELS := {"zmove": "Z-Move", "dynamax": "Dynamax / Gigantamax", "tera": "Terastallize"}
+
+
+static func chord(action: String) -> Array:
+	SV.ensure()
+	var m = SV.d["settings"].get("padchords", {})
+	if m is Dictionary and m.has(action) and (m[action] as Array).size() == 2:
+		return [int(m[action][0]), int(m[action][1])]
+	return (CHORDS[action] as Array).duplicate()
+
+
+static func set_chord(action: String, a: int, b: int) -> void:
+	SV.ensure()
+	var m = SV.d["settings"].get("padchords", {})
+	if not (m is Dictionary):
+		m = {}
+	m[action] = [a, b]
+	SV.d["settings"]["padchords"] = m
+	SV.save()
+
+
+static func is_trig(code: int) -> bool:
+	return code >= TRIG
+
+
+# Is this input held on controller `pd` right now?
+static func held(pd: int, code: int) -> bool:
+	if code < 0:
+		return false
+	if code >= TRIG:
+		return Input.get_joy_axis(pd, code - TRIG) > 0.6
+	return Input.is_joy_button_pressed(pd, code)
+
+
+# A button that is part of some power chord.
+static func in_chord(b: int) -> bool:
+	for a in CHORDS:
+		if chord(a).has(b):
+			return true
+	return false
+
+
+static func code_name(code: int) -> String:
+	if code >= TRIG:
+		var l := layout()
+		return ["LT", "L2", "ZL"][l] if code - TRIG == JOY_AXIS_TRIGGER_LEFT else ["RT", "R2", "ZR"][l]
+	return btn_name(code)
 
 
 static func chord_name(action: String) -> String:
 	if not CHORDS.has(action):
 		return ""
-	var c: Array = CHORDS[action]
-	var l := layout()
-	var trig: String = ["LT", "L2", "ZL"][l] if int(c[1]) == JOY_AXIS_TRIGGER_LEFT else ["RT", "R2", "ZR"][l]
-	return btn_name(int(c[0])) + "+" + trig
+	var c: Array = chord(action)
+	return code_name(int(c[0])) + "+" + code_name(int(c[1]))
 
 
 # Asigna un boton a una accion; si otra accion lo usaba, intercambian.
@@ -134,6 +182,7 @@ static func reset(lay: int = -1) -> void:
 	if lay >= 0:
 		SV.d["settings"]["pad"] = lay
 	SV.d["settings"]["padmap"] = defaults()
+	SV.d["settings"].erase("padchords")   # back to X + LT, X + RT, Y + RT
 	SV.save()
 	apply()
 

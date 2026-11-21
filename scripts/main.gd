@@ -1111,8 +1111,26 @@ func _unhandled_input(event: InputEvent) -> void:
 			cancel = true
 		else:
 			go = true
+	elif event is InputEventJoypadButton and not event.pressed and pad_defer.has(event.button_index):
+		var dbi: int = event.button_index
+		var t0: int = int(pad_defer[dbi])
+		pad_defer.erase(dbi)
+		if chord_ms < t0 and Time.get_ticks_msec() - t0 < CHORD_TAP_MS:   # a short tap with no chord: its own action now
+			var ev := InputEventJoypadButton.new()
+			ev.button_index = dbi
+			ev.pressed = true
+			ev.device = event.device
+			pad_replay = true
+			_unhandled_input(ev)
+			pad_replay = false
+		return
 	elif event is InputEventJoypadButton and event.pressed:
 		var bi: int = event.button_index
+		# a button that is half of a power chord (as set in Settings > Controls) and also has its own action (e.g. Select
+		# for the Build summary): wait for the release, so holding it for the chord doesn't also open the summary
+		if not pad_replay and PAD.in_chord(bi) and _pad_has_action(bi) and not paused and not player.dead:
+			pad_defer[bi] = Time.get_ticks_msec()
+			return
 		if bi == PAD.btn("dash"):   # por defecto comparte boton con "Atras": en partida es dash, en menus sigue siendo atras
 			dash_req = true
 		if bi == PAD.btn("confirm"):
@@ -1958,10 +1976,12 @@ func _refresh_slots() -> void:
 		var cdm: float = maxf(0.05, _f(m, "cd") * _cd_mul())
 		var gicons: Array = []
 		var gnames: Array = []
+		var plv: Array = []   # every move in the slot (each part of a fusion, both of a bonded pair): [level, max, evolved]
 		for gm in g:
 			for pm in _parts_of(gm):
 				gicons.append(("evo:" if bool(pm["evolved"]) else "move:") + String(pm["id"]))
 				gnames.append(String(pm["name"]))
+				plv.append([int(pm["lvl"]), _max_lvl(pm), bool(pm["evolved"])])
 		info.append({
 			"name": String(m["name"]),
 			"color": _col(m),
@@ -1976,6 +1996,7 @@ func _refresh_slots() -> void:
 			"names": gnames,
 			"bonded": g.size() > 1,
 			"fused": g.any(func(q): return bool(q.get("fused", false))),
+			"plv": plv,
 		})
 	slots.info = info
 	if hud != null:
@@ -2182,6 +2203,19 @@ func _z_can() -> bool:
 	return mode != "tower" and z_type != "" and not z_used and z_state == "" and run_time >= ZM.MIN_TIME and not player.dead and not down and not paused and not choosing and arena == null and not jd.active() and not timeup
 
 
+var chord_ms := -1          # when a power chord last fired (Time msec)
+var pad_defer := {}         # button -> press time: its own action waits for the release (it is half of a chord)
+var pad_replay := false
+const CHORD_TAP_MS := 450   # a button held longer than this without a chord does nothing on release
+
+
+func _pad_has_action(b: int) -> bool:
+	for a in PAD.ACTIONS:
+		if PAD.btn(String(a)) == b:
+			return true
+	return false
+
+
 # Gatillo derecho del mando (ademas del boton configurable).
 # Power chords on the controller (pad.gd CHORDS): X + LT = Z-Move, X + RT = Dynamax / Gigantamax, Y + RT = Tera.
 # Each fires once when the chord is completed (in either order) and again only after it is let go.
@@ -2189,11 +2223,13 @@ func _z_poll() -> void:
 	var pads: Array = Input.get_connected_joypads()
 	if pads.is_empty():
 		return
-	var pd: int = int(pads[0])
 	var held := {}
 	for act in PAD.CHORDS:
-		var c: Array = PAD.CHORDS[act]
-		held[act] = Input.is_joy_button_pressed(pd, int(c[0])) and Input.get_joy_axis(pd, int(c[1])) > 0.6
+		var c: Array = PAD.chord(act)   # as set in Settings > Controls (any two buttons or triggers)
+		held[act] = false
+		for pd in pads:
+			if PAD.held(int(pd), int(c[0])) and PAD.held(int(pd), int(c[1])):
+				held[act] = true
 	_chords_tick(held)
 
 
@@ -2202,6 +2238,7 @@ func _chords_tick(held: Dictionary) -> void:
 	for act in PAD.CHORDS:
 		var on: bool = bool(held.get(act, false))
 		if on and not bool(pad_chord.get(act, false)):
+			chord_ms = Time.get_ticks_msec()   # a button of this chord that also has its own action won't fire it now
 			if act == "zmove" and _z_can():
 				_z_start()
 			elif act == "dynamax" and _dyn_can():
@@ -5757,6 +5794,9 @@ func _spawn_boss(b: Dictionary, t_v: float = -1.0):
 
 # The boss shown in the top-centre HP bar: the closest living boss (wild legendaries have their own fight and do not count).
 func _bar_boss():
+	# the Judgment: Arceus is the fight (he isn't flagged as a boss, so he had no HP bar); his summoned legendaries come second
+	if jd != null and jd.A != null and is_instance_valid(jd.A) and not jd.A.dead and jd.A.has_meta("jd_arceus") and enemies.has(jd.A):
+		return jd.A
 	var best = null
 	var bd := 1.0e12
 	for e in enemies:
@@ -12376,8 +12416,15 @@ class Field extends Node2D:
 # Barra de movimientos (abajo a la derecha): tocalos para cambiar
 # ---------------------------------------------------------------
 class Slots extends Node2D:
+	# The move bar: a clean hotbar of square tiles, one per slot. One big icon each (a fusion shows its emblem with an
+	# "x4" badge, a bonded pair its second move small in the corner), a cooldown sweep over the icon only for slow moves,
+	# the key in the corner and each move's level pips under the tile. Only the selected slot's full name shows, in a
+	# label above the bar. The HUD layout editor scales and moves the whole bar (main sets scale / position).
 	signal picked(idx: int)
-	const SZ := 80.0
+	const SZ := 76.0        # tile size
+	const GAP := 10.0
+	const PIPS_H := 12.0    # room under the tiles for the level pips
+	const LIFT := 6.0       # the selected tile sits a little higher
 	var info: Array = []
 	var active := 0
 	var enabled := true
@@ -12387,12 +12434,12 @@ class Slots extends Node2D:
 	func _rects() -> Array:
 		var vp: Vector2 = get_viewport_rect().size
 		var n: int = info.size()
-		var total: float = SZ * float(n) + 10.0 * float(maxi(0, n - 1))
+		var total: float = SZ * float(n) + GAP * float(maxi(0, n - 1))
 		var x0: float = (vp.x - total) * 0.5
-		var y0: float = vp.y - SZ - 14.0 - DSP.insets(get_tree()).w
+		var y0: float = vp.y - SZ - PIPS_H - 12.0 - DSP.insets(get_tree()).w
 		var out: Array = []
 		for i in range(n):
-			out.append(Rect2(x0 + float(i) * (SZ + 10.0), y0, SZ, SZ))
+			out.append(Rect2(x0 + float(i) * (SZ + GAP), y0, SZ, SZ))
 		return out
 
 	func _process(delta: float) -> void:
@@ -12414,13 +12461,26 @@ class Slots extends Node2D:
 			var rs: Array = _rects()
 			var lp: Vector2 = to_local(event.position)
 			for i in range(rs.size()):
-				if rs[i].has_point(lp):
+				if (rs[i] as Rect2).grow(4.0).has_point(lp):
 					get_viewport().set_input_as_handled()
 					picked.emit(i)
 					return
 
-	# Casilla de movimiento: marco achaflanado con sombra dura, losa de icono teñida con el tipo,
-	# tecla, nombre, pips de nivel y barra de recarga. La activa sube un poco, con marco dorado y marcador.
+	# A pie of the cooldown still to go, darkening the icon (clockwise from the top).
+	func _sweep(box: Rect2, left: float) -> void:
+		if left <= 0.0:
+			return
+		var c: Vector2 = box.get_center()
+		var r: float = box.size.length()   # past the corners, then clipped to the tile
+		var pts := PackedVector2Array([c])
+		var n: int = maxi(3, int(24.0 * left))
+		for k in range(n + 1):
+			var a: float = -PI * 0.5 + TAU * (1.0 - left) + TAU * left * float(k) / float(n)
+			pts.append(c + Vector2(cos(a), sin(a)) * r)
+		var sq := PackedVector2Array([box.position, Vector2(box.end.x, box.position.y), box.end, Vector2(box.position.x, box.end.y)])
+		for poly in Geometry2D.intersect_polygons(pts, sq):
+			draw_colored_polygon(poly, Color(UIS.INK, 0.62))
+
 	func _draw() -> void:
 		var font := ThemeDB.fallback_font
 		var rs: Array = _rects()
@@ -12430,81 +12490,77 @@ class Slots extends Node2D:
 			var col: Color = it["color"]
 			var is_act: bool = i == active
 			if is_act:
-				r.position.y -= 5.0
+				r.position.y -= LIFT
 			var p: Vector2 = r.position
+			# frame: the selected tile is lifted, framed in gold and glows; the others take their type colour softly
 			draw_rect(Rect2(p + UIS.SHADOW_OFF, r.size), UIS.SHADOW)
-			draw_style_box(UIS.frame(UIS.PANEL_HI if is_act else UIS.PANEL, UIS.GOLD if is_act else col.darkened(0.2)), r)
-			# losa del icono
-			var tile := Rect2(p + Vector2(SZ * 0.5 - 21.0, 7.0), Vector2(42.0, 36.0))
-			draw_rect(tile, UIS.INK.lerp(col, 0.22))
-			draw_rect(Rect2(tile.position, Vector2(tile.size.x, 2.0)), Color(col.r, col.g, col.b, 0.9))
+			if is_act:
+				draw_rect(r.grow(3.0), Color(UIS.GOLD, 0.28))
+			draw_style_box(UIS.frame(UIS.PANEL_HI if is_act else UIS.PANEL, UIS.GOLD if is_act else col.darkened(0.25)), r)
+			var tile := r.grow(-5.0)
+			draw_rect(tile, UIS.INK.lerp(col, 0.26 if is_act else 0.16))
+			# one big icon
 			var ics: Array = it.get("icons", [])
-			if ics.size() <= 1:
-				IC.draw_in(self, String(it.get("icon", "star")), tile.get_center() + Vector2(0.0, 1.0), 32.0)
-			else:
-				# movimientos combinados: se ven todos, uno junto a otro (antes una sola icono con un "x2")
-				var kc: int = mini(ics.size(), 4)
-				if kc == 4:
-					for ci in range(4):
-						var gp := Vector2(tile.position.x + tile.size.x * (0.27 + 0.46 * float(ci % 2)), tile.position.y + tile.size.y * (0.27 + 0.46 * float(ci / 2)))
-						IC.draw_in(self, String(ics[ci]), gp, 14.0)
-				else:
-					var isz: float = 21.0 if kc == 2 else 14.0
-					for ci in range(kc):
-						var cxp: float = tile.position.x + tile.size.x * (float(ci) + 0.5) / float(kc)
-						IC.draw_in(self, String(ics[ci]), Vector2(cxp, tile.get_center().y + 1.0), isz)
-			# barrido de recarga (solo en movimientos de recarga >= 1,5 s) y destello al estar listo
-			var fr0: float = clampf(float(it["frac"]), 0.0, 1.0)
-			if fr0 < 1.0 and float(it.get("cd", 0.0)) >= 1.5:
-				draw_rect(Rect2(tile.position, Vector2(tile.size.x, tile.size.y * (1.0 - fr0))), Color(UIS.INK, 0.6))
+			var fused: bool = bool(it.get("fused", false))
+			var bonded: bool = bool(it.get("bonded", false))
+			var big: String = String(it.get("icon", "star")) if fused or ics.is_empty() else String(ics[0])
+			IC.draw_in(self, big, tile.get_center(), 48.0, Color.WHITE if is_act else Color(0.85, 0.85, 0.9))
+			# cooldown sweep, only for slow moves (fast ones are always ready: a bar for them was just noise)
+			var fr: float = clampf(float(it["frac"]), 0.0, 1.0)
+			if fr < 1.0 and float(it.get("cd", 0.0)) >= 1.5:
+				_sweep(tile, 1.0 - fr)
 			if i < _flash.size() and float(_flash[i]) > 0.0:
 				draw_rect(tile, Color(1, 1, 1, 0.6 * float(_flash[i]) / 0.35 * Actor.flash_k))
-			if bool(it.get("fused", false)):   # the run's Fusion Move: a pink diamond with a white core
-				var fq: Vector2 = tile.position + Vector2(tile.size.x - 1.0, 4.0)
-				draw_colored_polygon(PackedVector2Array([fq + Vector2(0, -7), fq + Vector2(7, 0), fq + Vector2(0, 7), fq + Vector2(-7, 0)]), UIS.INK)
-				draw_colored_polygon(PackedVector2Array([fq + Vector2(0, -5), fq + Vector2(5, 0), fq + Vector2(0, 5), fq + Vector2(-5, 0)]), Color("#ff8ad8"))
-				draw_rect(Rect2(fq - Vector2(1, 1), Vector2(2, 2)), Color.WHITE)
-			elif bool(it["evo"]):
-				IC.draw_in(self, "star", tile.position + Vector2(tile.size.x - 2.0, 4.0), 12.0)
-			if bool(it.get("bonded", false)):   # a bonded pair: two linked rings at the top-left of the icon
-				var lq: Vector2 = tile.position + Vector2(5.0, 6.0)
-				draw_arc(lq, 3.5, 0.0, TAU, 12, UIS.INK, 3.5)
-				draw_arc(lq + Vector2(5.0, 0.0), 3.5, 0.0, TAU, 12, UIS.INK, 3.5)
-				draw_arc(lq, 3.5, 0.0, TAU, 12, UIS.ORCHID, 1.6)
-				draw_arc(lq + Vector2(5.0, 0.0), 3.5, 0.0, TAU, 12, UIS.ORCHID, 1.6)
-			# tecla
-			draw_rect(Rect2(p + Vector2(5.0, 5.0), Vector2(15.0, 15.0)), UIS.INK)
-			PXF.dstr(self, font, p + Vector2(5.0, 17.0), str(i + 1), HORIZONTAL_ALIGNMENT_CENTER, 15.0, roundi(13.0 * TXS.k()), UIS.TITLE if is_act else UIS.MUTED)
-			# varios movimientos en un vinculo: raya de orquidea bajo el icono (los iconos ya se muestran juntos)
-			if int(it.get("n", 1)) > 1:
-				draw_rect(Rect2(tile.position.x, tile.position.y + tile.size.y - 2.0, tile.size.x, 2.0), UIS.ORCHID)
-			# nombre
-			var nm_t: String = L.t(String(it["name"]))
-			var nms: Array = it.get("names", [])
+			# fused: "x4" badge; bonded: the second move small in the corner with the link rings
+			if fused and ics.size() > 1:
+				var bt: String = "x%d" % ics.size()
+				var bw: float = font.get_string_size(bt, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 12).x + 8.0
+				var br := Rect2(r.end.x - bw - 3.0, p.y + 3.0, bw, 14.0)   # top right: clear of the icon's own corner mark
+				draw_rect(br, UIS.INK)
+				draw_rect(br, Color("#ff8ad8"), false, 1.0)
+				PXF.dstr(self, font, Vector2(br.position.x, br.end.y - 3.0), bt, HORIZONTAL_ALIGNMENT_CENTER, bw, 12, Color("#ffd0ee"))
+			elif bonded and ics.size() > 1:
+				var sc := Vector2(r.end.x - 15.0, p.y + 15.0)   # top right: clear of the icon's own corner mark
+				draw_circle(sc, 13.0, UIS.INK)
+				draw_arc(sc, 13.0, 0.0, TAU, 20, UIS.ORCHID, 1.5)
+				IC.draw_in(self, String(ics[1]), sc, 22.0)
+			if bool(it["evo"]) and not fused:
+				IC.draw_in(self, "star", Vector2(r.end.x - 9.0, p.y + 9.0), 11.0)
+			# key
+			var kr := Rect2(p + Vector2(3.0, 3.0), Vector2(14.0, 14.0))
+			draw_rect(kr, UIS.INK)
+			PXF.dstr(self, font, kr.position + Vector2(0.0, 11.5), str(i + 1), HORIZONTAL_ALIGNMENT_CENTER, 14.0, roundi(12.0 * TXS.k()), UIS.TITLE if is_act else UIS.MUTED)
+			# level pips under the tile: one group per move (a fusion's parts, a bonded pair), cyan when maxed
+			var plv: Array = it.get("plv", [])
+			if plv.is_empty():
+				plv = [[int(it["lvl"]), int(it["max"]), bool(it["evo"])]]
+			var py: float = rs[i].end.y + 5.0
+			var gap := 3.0
+			var sw: float = (SZ - gap * float(plv.size() - 1)) / float(plv.size())
+			for pi in range(plv.size()):
+				var pmx: int = maxi(1, int(plv[pi][1]))
+				var plvl: int = int(plv[pi][0])
+				var x0: float = r.position.x + float(pi) * (sw + gap)
+				var ppw: float = sw / float(pmx)
+				var on_c: Color = UIS.WAVE if plvl >= pmx else UIS.GOLD
+				for q in range(pmx):
+					draw_rect(Rect2(x0 + float(q) * ppw, py, maxf(1.0, ppw - 1.0), 5.0), on_c if q < plvl else Color(UIS.INK, 0.85))
+		# the selected slot's full name, above the bar
+		if active >= 0 and active < info.size() and not rs.is_empty():
+			var ia: Dictionary = info[active]
+			var nm_t: String = L.t(String(ia["name"]))
+			var nms: Array = ia.get("names", [])
 			if nms.size() > 1:
-				var joined: String = " + ".join(nms.map(func(q): return L.t(String(q))))
-				if font.get_string_size(joined, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 9).x <= SZ - 6.0:
-					nm_t = joined
-			var nm_fs: int = roundi(12.0 * TXS.k())
-			while nm_fs > 8 and font.get_string_size(nm_t, HORIZONTAL_ALIGNMENT_LEFT, -1.0, nm_fs).x > SZ - 8.0:
-				nm_fs -= 1
-			PXF.dstr(self, font, p + Vector2(4.0, 56.0), nm_t, HORIZONTAL_ALIGNMENT_CENTER, SZ - 8.0, nm_fs, UIS.TEXT if is_act else UIS.MUTED)
-			# pips de nivel (cian al llegar al maximo)
-			var mx: int = int(it["max"])
-			var lv: int = int(it["lvl"])
-			var pw: float = (SZ - 14.0) / float(maxi(1, mx))
-			var pip_on: Color = UIS.WAVE if lv >= mx else UIS.GOLD
-			for q in range(mx):
-				var pr := Rect2(p.x + 7.0 + float(q) * pw, p.y + 60.0, pw - 2.0, 4.0)
-				draw_rect(pr, pip_on if q < lv else UIS.INK)
-			# recarga
-			var fr: float = clampf(float(it["frac"]), 0.0, 1.0)
-			draw_rect(Rect2(p.x + 7.0, p.y + 68.0, SZ - 14.0, 5.0), UIS.INK)
-			draw_rect(Rect2(p.x + 7.0, p.y + 68.0, (SZ - 14.0) * fr, 5.0), col if fr < 1.0 else col.lightened(0.25))
-			if is_act:
-				var cx: float = p.x + SZ * 0.5
-				var by: float = p.y + SZ + 6.0
-				draw_colored_polygon(PackedVector2Array([Vector2(cx - 6.0, by), Vector2(cx + 6.0, by), Vector2(cx, by + 6.0)]), UIS.GOLD)
+				nm_t = " + ".join(nms.map(func(q): return L.t(String(q))))
+			var maxw: float = maxf(320.0, (rs[rs.size() - 1] as Rect2).end.x - (rs[0] as Rect2).position.x + 160.0)
+			var fs: int = roundi(19.0 * TXS.k())
+			while fs > 12 and font.get_string_size(nm_t, HORIZONTAL_ALIGNMENT_LEFT, -1.0, fs).x > maxw:
+				fs -= 1
+			var cx: float = ((rs[0] as Rect2).position.x + (rs[rs.size() - 1] as Rect2).end.x) * 0.5
+			var ly: float = (rs[0] as Rect2).position.y - LIFT - 8.0
+			var tw: float = minf(maxw, font.get_string_size(nm_t, HORIZONTAL_ALIGNMENT_LEFT, -1.0, fs).x)
+			draw_rect(Rect2(cx - tw * 0.5 - 8.0, ly - float(fs) - 2.0, tw + 16.0, float(fs) + 8.0), Color(UIS.INK, 0.72))
+			PXF.dstr(self, font, Vector2(cx - maxw * 0.5, ly + 1.0), nm_t, HORIZONTAL_ALIGNMENT_CENTER, maxw, fs, UIS.TITLE)
 
 
 # ---------------------------------------------------------------
@@ -14404,7 +14460,7 @@ class Hud extends Node2D:
 			_chip(font, vp, by, L.t(buff_text), Color("#ffd65c"), WTex.get_t("altar_" + power_id) if power_id != "" else null, "", bx)
 		# held items: stacked to the left of the skill bar, bottom-aligned with it
 		var n: int = maxi(1, slot_n)
-		var total: float = (80.0 * float(n) + 10.0 * float(n - 1)) * sc_skill
+		var total: float = (Slots.SZ * float(n) + Slots.GAP * float(n - 1)) * sc_skill
 		var lx: float = vp.x * 0.5 - total * 0.5 - 14.0 + off_skill.x
 		var y: float = vp.y - 14.0 - ins.w - 30.0 * sc_skill + off_skill.y
 		var held: Array = []
@@ -14971,8 +15027,14 @@ class Hud extends Node2D:
 		if im == "pad":
 			var texs: Array = []
 			if PAD.CHORDS.has(action):
-				var ch: Array = PAD.CHORDS[action]
-				texs = [PADI.tex(int(ch[0])), PADI.named("lt" if int(ch[1]) == JOY_AXIS_TRIGGER_LEFT else "rt")]
+				var ch: Array = PAD.chord(action)
+				texs = []
+				for cc in ch:
+					var code: int = int(cc)
+					if PAD.is_trig(code):
+						texs.append(PADI.named("lt" if code - PAD.TRIG == JOY_AXIS_TRIGGER_LEFT else "rt"))
+					else:
+						texs.append(PADI.tex(code))
 			elif PAD.btn(action) >= 0:
 				texs = [PADI.tex(PAD.btn(action))]
 			if texs.is_empty():

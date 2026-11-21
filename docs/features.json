@@ -238,5 +238,8 @@
  ],
  "Redeem codes": [
   "screens/profile_redeem.jpg"
+ ],
+ "Move bar": [
+  "screens/move_bar.jpg"
  ]
 }

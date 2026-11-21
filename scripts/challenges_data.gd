@@ -75,8 +75,8 @@ const ALL := [
 	{"id": 70, "d": "x", "n": "Deadly Glass", "req": {"survive": 180}, "need": [], "gold": true, "rs": {"one_hp": 1}},
 	{"id": 71, "d": "e", "n": "Team Ready", "req": {"equipped": 2, "kills": 150}, "need": [], "gold": false, "rs": {}},
 	{"id": 72, "d": "n", "n": "Expanded Arsenal", "req": {"equipped": 4, "kills": 375}, "need": [], "gold": false, "rs": {}},
-	{"id": 73, "d": "h", "n": "Arsenal Expansion", "req": {"slot_buys": 1, "kills": 600}, "need": ["slots"], "gold": false, "rs": {}},
-	{"id": 74, "d": "x", "n": "Six-Slot Specialist", "req": {"slots6": 1, "kills": 1200}, "need": ["slots"], "gold": true, "rs": {}},
+	{"id": 73, "d": "h", "n": "Arsenal Expansion", "req": {"equipped": 4, "kills": 600}, "need": [], "gold": false, "rs": {}},   # was "buy a weapon slot" (the upgrade is gone)
+	{"id": 74, "d": "x", "n": "Evolved Arsenal", "req": {"evolves": 4, "kills": 1200}, "need": [], "gold": true, "rs": {}},   # was "reach 6 move slots"
 	{"id": 75, "d": "n", "n": "Gachapon Initiate", "req": {"gacha_unlock": 1, "kills": 150}, "need": ["gachapon"], "gold": false, "rs": {}},
 	{"id": 76, "d": "n", "n": "Collection Progress", "req": {"new_move": 1}, "need": ["gachapon"], "gold": false, "rs": {}},
 	{"id": 77, "d": "n", "n": "Move Compatibility", "req": {"compat_kills": 250}, "need": ["compat"], "gold": false, "rs": {}},

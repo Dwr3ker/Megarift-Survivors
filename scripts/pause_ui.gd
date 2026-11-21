@@ -2,6 +2,7 @@ extends CanvasLayer
 # Menu de pausa como el del juego original: titulo, ayuda de controles, volumen de
 # musica y efectos, silenciar y tres botones. Los controles son los del mando elegido.
 
+const SSC = preload("res://scripts/stick_scroll.gd")
 const NAVG = preload("res://scripts/navgrid.gd")
 const SV = preload("res://scripts/save_data.gd")
 const PAD = preload("res://scripts/pad.gd")
@@ -876,6 +877,7 @@ func _refresh_hints() -> void:
 func _process(_d: float) -> void:
 	if visible:
 		PAD.stick_tick()
+		SSC.tick(self, get_viewport(), _d)   # right stick: scroll the list you are in (stick_scroll.gd)
 	else:
 		PAD.stick_reset()
 
